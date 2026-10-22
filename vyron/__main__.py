@@ -41,6 +41,17 @@ COMMANDS = [
     ("queue", "show the queue"),
     ("lyrics", "find lyrics"),
     ("settings", "per-chat settings"),
+    ("app", "open the player web app"),
+    ("effects", "audio effects panel"),
+    ("locks", "content locks & anti-flood"),
+    ("warn", "warn a member"),
+    ("warns", "member warnings"),
+    ("ban", "ban a member"),
+    ("mute", "mute a member"),
+    ("purge", "bulk delete messages"),
+    ("setwelcome", "set the welcome message"),
+    ("cplay", "play in the linked channel"),
+    ("stats", "bot statistics"),
     ("help", "all commands"),
 ]
 
@@ -50,6 +61,25 @@ async def _set_commands(bot) -> None:
         await bot.set_bot_commands([BotCommand(command=name, description=desc) for name, desc in COMMANDS])
     except Exception as exc:  # pragma: no cover
         logger.debug("could not set bot commands: %s", exc)
+
+
+async def _setup_menu_button(bot) -> None:
+    """Point the bot's menu button at the Mini App when WEBAPP_URL is set."""
+    url = settings.webapp_url
+    if not (settings.webapp and url):
+        return
+    try:
+        from pyrogram.types import MenuButtonWebApp, WebAppInfo
+
+        await bot.set_chat_menu_button(
+            menu_button=MenuButtonWebApp(
+                text=settings.webapp_title[:14] or "Player",
+                web_app=WebAppInfo(url=f"{url}/app/"),
+            )
+        )
+        logger.info("menu button → %s/app/", url)
+    except Exception as exc:
+        logger.debug("could not set the menu button: %s", exc)
 
 
 async def _notify_owner(bot) -> None:
@@ -114,6 +144,7 @@ async def _async_main() -> int:
     loaded = register_all(bot)
     runtime.handlers_loaded = loaded
     await _set_commands(bot)
+    await _setup_menu_button(bot)
 
     runner = await health.start(settings.port)
     await runtime.player.start_background()

@@ -50,7 +50,8 @@ except Exception:  # pragma: no cover
 _RICH_ONLY = (
     "h1", "h2", "h3", "h4", "h5", "h6", "table", "thead", "tbody", "tr", "th",
     "td", "details", "summary", "mark", "sub", "sup", "tg-button", "button",
-    "footer", "header", "img",
+    "footer", "header", "img", "aside", "ul", "ol", "li",
+    "tg-button-row", "tg-thinking", "tg-math-block", "hr",
 )
 _RICH_ONLY_RE = re.compile(r"</?(?:%s)\b" % "|".join(_RICH_ONLY), re.I)
 _BLOCK_BREAK_RE = re.compile(
@@ -142,14 +143,34 @@ def to_html(markup: str) -> str:
     text = re.sub(r"<footer[^>]*>(.*?)</footer>", r"\n<i>\1</i>", text, flags=re.I | re.S)
     text = re.sub(r"<summary>(.*?)</summary>", r"<b>\1</b>\n", text, flags=re.I | re.S)
     text = re.sub(r"<mark>(.*?)</mark>", r"<b>\1</b>", text, flags=re.I | re.S)
-    text = re.sub(r"<tg-button\s+url=\"([^\"]*)\">(.*?)</tg-button>", r'<a href="\1">\2</a>', text, flags=re.I | re.S)
-    text = re.sub(r"<tg-button[^>]*>(.*?)</tg-button>", r"<b>\1</b>", text, flags=re.I | re.S)
+    text = re.sub(r"<tg-button-row[^>]*>", "", text, flags=re.I)
+    text = re.sub(
+        r'<tg-button[^>]*\burl="([^"]*)"[^>]*>(.*?)</tg-button>',
+        r'<a href="\1">\2</a>',
+        text,
+        flags=re.I | re.S,
+    )
+    text = re.sub(r"<tg-button(?:\s[^>]*)?>(.*?)</tg-button>", r"<b>\1</b>", text, flags=re.I | re.S)
     text = re.sub(r"<button[^>]*>(.*?)</button>", r"<b>\1</b>", text, flags=re.I | re.S)
 
+    # block-level decorations → readable text equivalents
+    text = re.sub(r"<hr\s*/?>", "\n──────────\n", text, flags=re.I)
+    text = re.sub(r"<tg-thinking\s*>\s*</tg-thinking>", "…", text, flags=re.I)
+    text = re.sub(r"</tg-button-row>", "\n", text, flags=re.I)
+    text = re.sub(r"<tg-button-row[^>]*>", "", text, flags=re.I)
+    text = re.sub(r"<tg-math-block>(.*?)</tg-math-block>", r"<code>\1</code>", text, flags=re.I | re.S)
+    text = re.sub(r"<li\b[^>]*>", "• ", text, flags=re.I)
+    text = re.sub(r"</li>", "\n", text, flags=re.I)
+    text = re.sub(r"<aside>(.*?)</aside>", r"<i>\1</i>", text, flags=re.I | re.S)
     text = _CELL_BREAK_RE.sub("  ·  ", text)
     text = re.sub(r"</tr>", "\n", text, flags=re.I)
     text = re.sub(r"</table>", "\n", text, flags=re.I)
-    text = re.sub(r"</?(?:%s)(?:\s[^>]*)?>" % "|".join(_RICH_ONLY), "", text, flags=re.I)
+    text = re.sub(
+        r"</?(?:table|thead|tbody|tr|th|td|details|summary|mark|sub|sup|button|footer|header|img|ul|ol|tg-button-row|tg-thinking|tg-math-block)\b[^>]*>",
+        "",
+        text,
+        flags=re.I,
+    )
     text = _BR_RE.sub("\n", text)
     text = re.sub(r"[ \t]{3,}", "  ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
@@ -206,6 +227,9 @@ async def send(
     if not markup:
         return None
     keyboard = markup_keyboard or reply_markup
+    # Cards that carry their own <tg-button> rows must not also receive a
+    # reply_markup in the rich lane — that would render two button sets.
+    inline_buttons = "<tg-button" in markup
     eph = _ephemeral(ephemeral_to, callback_query_id)
 
     rich_ok = (
@@ -220,7 +244,7 @@ async def send(
             message = await client.send_rich_message(
                 chat_id=chat_id,
                 rich_message=InputRichMessage(html=normalize(markup)),
-                reply_markup=keyboard,
+                reply_markup=None if inline_buttons else keyboard,
                 reply_parameters=ReplyParameters(message_id=reply_to) if reply_to else None,
                 message_thread_id=thread_id,
                 disable_notification=silent,
@@ -285,7 +309,7 @@ async def edit(
                 chat_id=chat_id,
                 message_id=message_id,
                 rich_message=InputRichMessage(html=normalize(markup)),
-                reply_markup=keyboard,
+                reply_markup=None if inline_buttons else keyboard,
             )
         except MessageNotModified:
             return None

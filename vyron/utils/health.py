@@ -29,20 +29,29 @@ async def _index(_request: web.Request) -> web.Response:
 
 
 async def _health(_request: web.Request) -> web.Response:
+    """Liveness probe.
+
+    Always 200 (Render/Koyeb treat non-2xx as unhealthy); `ready` tells you
+    whether the bot has finished booting.
+    """
     ready = runtime.bot is not None and runtime.storage is not None
-    return web.json_response({"ok": ready}, status=200 if ready else 503)
+    return web.json_response({"ok": True, "ready": ready})
 
 
-def build_app() -> web.Application:
+def build_app(*, with_webapp: bool = True) -> web.Application:
     app = web.Application()
     app.router.add_get("/", _index)
     app.router.add_get("/health", _health)
     app.router.add_get("/status", _index)
+    if with_webapp:
+        from vyron.web import register as register_webapp
+
+        register_webapp(app)
     return app
 
 
 async def start(port: int) -> web.AppRunner | None:
-    """Start the health server on 0.0.0.0:<port>. Returns the runner."""
+    """Start the health + web-app server on 0.0.0.0:<port>."""
     if not port:
         return None
     runner = web.AppRunner(build_app(), access_log=None)

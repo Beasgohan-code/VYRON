@@ -10,7 +10,7 @@ pytest.importorskip("pyrogram")
 from vyron.clients import build_assistant, build_bot
 from vyron.config import settings
 from vyron.core.queue import ChatState, LoopMode, Track
-from vyron.modules import register_all
+from vyron.modules import MODULES, register_all
 from vyron.runtime import runtime
 from vyron.ui import keyboards
 
@@ -32,8 +32,9 @@ def test_handlers_register_offline():
         return bot, loaded
 
     bot, loaded = asyncio.run(scenario())
-    assert len(loaded) == 8
-    assert "start" in loaded and "play" in loaded and "callbacks" in loaded
+    assert len(loaded) == len(MODULES)
+    for required in ("start", "play", "controls", "callbacks", "moderation", "locks", "effects_cmd", "inline"):
+        assert required in loaded
     assert len(bot.dispatcher.groups) >= 1
     total = sum(len(group) for group in bot.dispatcher.groups.values())
     assert total > 20

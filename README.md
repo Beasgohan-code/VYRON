@@ -32,6 +32,12 @@ Rich cards · premium emoji · instant search · zero-clutter controls
 | ⚙️ **Per-chat settings** | Volume, loop mode, autoplay and 24/7 — saved to Mongo or a JSON file. |
 | 🛡️ **Admin-first** | Only group admins (and sudo users) can touch playback; everyone can watch. |
 | 🚪 **Self-cleaning** | Leaves idle voice chats, expires stream URLs, purges the download cache, survives restarts. |
+| 🛡️ **Group management** | ban · kick · mute · warn (auto-ban at the limit) · purge · pin · promote/demote · welcome & goodbye with placeholders. |
+| 🔒 **Content locks + anti-flood** | lock media, links, forwards, stickers, bots, commands, NSFW; flood offenders get deleted and muted. |
+| 🎛️ **Audio effects** | bass, treble, nightcore, vaporwave, 8D, echo, karaoke, loudness, speed — as a rich toggle panel. |
+| 📡 **Channel play** | `/cplay` streams into the linked channel's voice chat. |
+| 🔎 **Inline mode** | `@VyronMusicBot <song>` returns shareable results in any chat. |
+| 🌐 **Mini App** | A full player UI served by the bot: now playing, queue, search, volume, settings. |
 
 ### Built on the *new* Telegram Bot API
 
@@ -130,11 +136,56 @@ Health check → <http://localhost:8080/health>
 
 `/lyrics` · `/fav` · `/favs` · `/history` · `/settings` · `/247` · `/stats` · `/ping` · `/id` · `/emojis`
 
+### Group management
+
+`/ban` · `/unban` · `/kick` · `/mute` · `/unmute` · `/warn` · `/warns` · `/resetwarns`
+`/setwarnlimit 3` · `/purge` (reply) · `/pin` · `/unpin` · `/promote` · `/demote`
+`/setwelcome …` · `/setgoodbye …` · `/admins`
+
+Placeholders: `{mention}` `{first}` `{chat}` `{id}` `{count}`
+
+### Locks & effects
+
+`/locks` — panel with coloured toggles for media, links, forwards, stickers, bots,
+commands and NSFW, plus anti-flood (`/antiflood 7`, `/setflood on|off`).
+`/lock media` · `/unlock links`
+`/effects` — toggle bass, treble, nightcore, vaporwave, 8D, echo, karaoke,
+loudness, mono, double/half speed (max 3 at once, applied from the next track).
+
 ### Owner only
 
-`/broadcast <text>` · `/leaveall` · `/cleanup` · `/active` · `/emojireload`
+`/broadcast <text>` · `/gcast <text>` · `/block <id>` · `/unblock <id>` · `/blocklist`
+`/activevc` · `/sysstats` · `/leaveall` · `/cleanup` · `/emojireload` · `/restart`
 
 Everything above also works from the inline buttons on the now-playing card.
+
+---
+
+## 🌐 Web app (Telegram Mini App)
+
+The health server doubles as the Mini App host:
+
+```bash
+WEBAPP_URL=https://your-deployment        # Render/Koyeb URL
+# then: /app in chat, or tap the bot's menu button
+```
+
+- **Backend** — `vyron/web/` (`aiohttp`) exposes `/api/state` and `/api/action`
+  over the *same* `Player` the bot uses, so chat and app never disagree.
+- **Auth** — Telegram `initData` (HMAC-verified) or a signed chat token, so the
+  app can control a *group* player opened from a `/app` link.
+- **Frontend** — `webapp/`: dark glass UI, four tabs (Player · Queue · Search ·
+  Settings), Telegram theme + haptics, zero build step.
+- **Swap the UI** — replace `webapp/*` with your own design; the API contract is
+  documented in [`webapp/README.md`](webapp/README.md). Nothing else changes.
+
+Preview it locally without any credentials:
+
+```bash
+python -m vyron.tools.preview --port 8080   # → http://localhost:8080/app/
+```
+
+Outside Telegram the page renders read-only demo data — perfect for design work.
 
 ---
 
@@ -214,10 +265,13 @@ VYRON/
 │   │   ├── cards.py            # every screen, declaratively
 │   │   ├── keyboards.py        # all inline buttons
 │   │   └── progress.py         # bars, durations, human formatting
-│   ├── modules/                # start, play, controls, queue, settings, tools, admin, callbacks
+│   ├── modules/                # start, play, controls, queue, settings, tools, effects,
+│   │                           # channel, moderation, locks, admin, extras, inline, callbacks
+│   ├── web/                    # Mini App: auth, JSON API
 │   ├── utils/                  # helpers, filters, net, health server
 │   └── tools/                  # session generator, emoji pack builder
-└── tests/                      # 44 offline tests
+├── webapp/                     # Mini App UI (index.html · styles.css · app.js)
+└── tests/                      # 69 offline tests
 ```
 
 **Design rules**
@@ -259,13 +313,15 @@ Full list with comments: [`.env.example`](.env.example).
 
 ```bash
 pip install pytest pytest-asyncio
-python -m pytest tests -q      # 44 passed
+python -m pytest tests -q      # 69 passed
 ```
 
 Covered offline: duration parsing, progress bars, loop semantics, queue
 add/dedupe/limit/remove/move/shuffle/rotate, elapsed-time maths, pending-picker
-TTL, rich↔HTML conversion, escaping, card rendering, keyboard wiring,
-handler registration and client construction.
+TTL, rich↔HTML conversion, escaping, card rendering, keyboard wiring, coloured
+button markup, effect filter chains, lock panels, welcome placeholders,
+Mini App auth (initData HMAC + signed tokens), the JSON API surface, handler
+registration and client construction.
 CI runs the same suite on Python 3.11 and 3.12.
 
 ---
@@ -286,11 +342,16 @@ CI runs the same suite on Python 3.11 and 3.12.
 
 ## 🙏 Credits
 
-- [Kurigram](https://github.com/KurimuzonAkuma/kurigram) — Pyrogram fork with the new Bot API surface
-- [PyTgCalls](https://github.com/pytgcalls/pytgcalls) + [ntgcalls](https://github.com/pytgcalls/ntgcalls) — the actual voice engine
+- [Kurigram](https://github.com/KurimuzonAkuma/kurigram) — Bot API 10.3 client
+- [**richgram**](https://github.com/Badmunda05/richgram) by [BadmundaXd](https://t.me/BadmundaXd) — rich-message builders (tables, coloured buttons, details) used throughout the UI
+- [PyTgCalls](https://github.com/pytgcalls/pytgcalls) + [ntgcalls](https://github.com/pytgcalls/ntgcalls) — the voice engine
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp) — extraction that (mostly) keeps working
 - [LRCLIB](https://lrclib.net) — free lyrics API
-- UI ideas and the rich-message groundwork from [Videl](https://github.com/Beasgohan-code/Videl) and the broader music-bot ecosystem
+- [**Videl**](https://github.com/Beasgohan-code/Videl) — feature scope & inspiration: search picker, effects, locks/antiflood, group management, cplay
+- [**FallenMusic**](https://github.com/AnonymousX1025/FallenMusic) — operational command surface: activevc, leaveall, sysstats, gcast, empty-VC watcher
+- [**ShizuMusic**](https://github.com/Badmunda05/ShizuMusic) — Bot API 10.3 + PyTgCalls integration reference
+
+Full attribution and license notes: [**CREDITS.md**](CREDITS.md).
 
 ## 📄 License
 

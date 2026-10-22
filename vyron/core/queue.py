@@ -119,6 +119,7 @@ class ChatState:
     playing: bool = False
     is_video: bool = False
     always_on: bool = False
+    effects: list[str] = field(default_factory=list)
 
     # timing (monotonic clock; see vyron.ui.progress.now)
     started_at: float = 0.0
@@ -267,6 +268,7 @@ class QueueManager:
                 "shuffle": state.shuffle,
                 "volume": state.volume,
                 "always_on": state.always_on,
+                "effects": list(state.effects),
             }
             for chat_id, state in self._states.items()
         }

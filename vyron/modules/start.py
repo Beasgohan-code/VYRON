@@ -44,7 +44,35 @@ def register(client: Client) -> None:
 
     @client.on_message(filters.command(["about", "source", "repo"]))
     async def _about(_: Client, message: Message) -> None:
-        await rich.send(message._client, message.chat.id, cards.about_card(), reply_to=message.id)
+        await rich.send(
+            message._client,
+            message.chat.id,
+            cards.about_card(),
+            markup_keyboard=keyboards.back_close("v:help:main"),
+            reply_to=message.id,
+        )
+
+    @client.on_message(filters.command(["app", "player", "webapp", "web"]))
+    async def _webapp(_: Client, message: Message) -> None:
+        url = settings.webapp_url
+        if not url:
+            await rich.send(
+                message._client,
+                message.chat.id,
+                cards.warn_card(
+                    "<b>Web app is not configured</b>\n"
+                    "<blockquote>Set <code>WEBAPP_URL</code> to the public URL of this "
+                    "deployment, then restart.</blockquote>"
+                ),
+                reply_to=message.id,
+            )
+            return
+        await rich.send(
+            message._client,
+            message.chat.id,
+            cards.webapp_card(url, message.chat.title or ""),
+            reply_to=message.id,
+        )
 
     @client.on_message(filters.command("ping"))
     async def _ping(_: Client, message: Message) -> None:

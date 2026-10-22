@@ -19,6 +19,7 @@ from pytgcalls.exceptions import NoActiveGroupCall, NotInCallError
 from pytgcalls.types import AudioQuality, GroupCallConfig, MediaStream, VideoQuality
 
 from vyron.config import Settings
+from vyron.core import effects as audio_fx
 from vyron.core.queue import ChatState, LoopMode, QueueManager, Track
 from vyron.core.search import MediaError, YouTube
 from vyron.database import Storage
@@ -72,6 +73,7 @@ class Player:
         self._idle_task: asyncio.Task | None = None
         self._running = False
         self.tracks_played = 0
+        self._empty_checks: dict[int, int] = {}
 
     # ── infrastructure ─────────────────────────────────────────────────────
     @property
@@ -92,6 +94,7 @@ class Player:
             state.autoplay = bool(data.get("autoplay", state.autoplay))
             state.volume = int(data.get("volume", state.volume) or state.volume)
             state.always_on = bool(data.get("always_on", state.always_on))
+            state.effects = audio_fx.resolve(data.get("effects", []))
         return state
 
     async def persist(self, chat_id: int) -> None:
@@ -126,7 +129,9 @@ class Player:
             url,
             audio_parameters=_audio_quality(self.settings.audio_quality),
             video_parameters=_video_quality(self.settings.video_quality),
-            ffmpeg_parameters=(f"-ss {int(seek)}" if seek else None),
+            ffmpeg_parameters=audio_fx.ffmpeg_parameters(
+                state.effects, seek=seek
+            ),
             video_flags=(MediaStream.Flags.REQUIRED if video else MediaStream.Flags.IGNORE),
         )
         try:
@@ -459,14 +464,54 @@ class Player:
     async def start_background(self) -> None:
         self._running = True
         self._idle_task = asyncio.create_task(self._idle_worker())
+        self._empty_task = asyncio.create_task(self._empty_vc_worker())
 
     async def shutdown(self) -> None:
         self._running = False
-        if self._idle_task and not self._idle_task.done():
-            self._idle_task.cancel()
+        for task in (getattr(self, "_idle_task", None), getattr(self, "_empty_task", None)):
+            if task and not task.done():
+                task.cancel()
         for task in list(self._np_tasks.values()):
             if not task.done():
                 task.cancel()
+
+    async def _vc_is_empty(self, chat_id: int) -> bool:
+        """True when the assistant is alone in the voice chat."""
+        if not self.calls:
+            return False
+        try:
+            participants = await self.calls.get_participants(chat_id)
+        except Exception:
+            return False
+        if participants is None:
+            return False
+        humans = [p for p in participants if int(getattr(p, "user_id", 0) or 0) != 0]
+        return len(humans) <= 1
+
+    async def _empty_vc_worker(self) -> None:
+        """Leave voice chats nobody is listening to (Fallen/Videl watcher idea)."""
+        await asyncio.sleep(45)
+        while self._running:
+            try:
+                for chat_id in list(self._in_call):
+                    state = self.queues.get(chat_id)
+                    if state.always_on or not state.playing:
+                        self._empty_checks.pop(chat_id, None)
+                        continue
+                    if await self._vc_is_empty(chat_id):
+                        checks = self._empty_checks.get(chat_id, 0) + 1
+                        self._empty_checks[chat_id] = checks
+                        if checks >= 3:  # ~3 minutes of silence
+                            logger.info("leaving empty voice chat %s", chat_id)
+                            await self.stop(chat_id, leave=True)
+                            self._empty_checks.pop(chat_id, None)
+                    else:
+                        self._empty_checks.pop(chat_id, None)
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                logger.debug("empty-vc worker error: %s", exc)
+            await asyncio.sleep(60)
 
     async def _idle_worker(self) -> None:
         interval = 20

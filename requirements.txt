@@ -8,6 +8,10 @@ py-tgcalls==2.2.11
 ntgcalls>=2.2.5,<3.0.0
 tgcrypto==1.2.5
 
+# ─── Rich UI (Bot API 10.3 cards) ───────────────────────────────────────────
+# richgram by BadmundaXd — tables, coloured buttons, details, text fallbacks
+richgram>=0.2.0
+
 # ─── Media ──────────────────────────────────────────────────────────────────
 yt-dlp>=2025.1.1
 

@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0b12" />
+  <title>VYRON Player</title>
+  <link rel="stylesheet" href="/app/static/styles.css" />
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+  <div class="glow glow-a"></div>
+  <div class="glow glow-b"></div>
+
+  <div id="preview-ribbon" class="ribbon" hidden>
+    Preview mode · open from Telegram to control the player
+  </div>
+
+  <main class="shell">
+    <!-- ── header ─────────────────────────────────────────────── -->
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">V</span>
+        <div class="brand-text">
+          <strong>VYRON</strong>
+          <span id="chat-name" class="muted">Player</span>
+        </div>
+      </div>
+      <button id="btn-refresh" class="ghost" aria-label="Refresh">
+        <svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/></svg>
+      </button>
+    </header>
+
+    <!-- ── player tab ─────────────────────────────────────────── -->
+    <section id="tab-player" class="tab-panel active">
+      <article class="now-card">
+        <div class="art-wrap">
+          <img id="cover" class="art" alt="" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E" />
+          <div class="art-fallback" id="cover-fallback">♪</div>
+        </div>
+
+        <div class="meta">
+          <h1 id="track-title" class="title">Nothing playing</h1>
+          <p id="track-artist" class="artist">Send /play in the chat to start</p>
+          <div class="chips">
+            <span id="chip-source" class="chip">idle</span>
+            <span id="chip-quality" class="chip">high</span>
+            <span id="chip-requester" class="chip" hidden></span>
+          </div>
+        </div>
+
+        <div class="progress-wrap">
+          <input id="seek" class="seek" type="range" min="0" max="100" value="0" step="1" />
+          <div class="times">
+            <span id="time-elapsed">0:00</span>
+            <span id="time-total">0:00</span>
+          </div>
+        </div>
+
+        <div class="transport">
+          <button class="ctl" data-action="loop" aria-label="Loop">
+            <svg viewBox="0 0 24 24"><path d="M17 2l4 4-4 4M7 22l-4-4 4-4"/><path d="M3 11V9a4 4 0 0 1 4-4h14M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+          </button>
+          <button class="ctl" data-action="skipBack" aria-label="Restart">
+            <svg viewBox="0 0 24 24"><path d="M18 5v14L8 12z"/><path d="M5 5v14"/></svg>
+          </button>
+          <button id="play" class="play" data-action="toggle" aria-label="Play / pause">
+            <svg id="play-icon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+          </button>
+          <button class="ctl" data-action="skip" aria-label="Next">
+            <svg viewBox="0 0 24 24"><path d="M6 5v14l10-7z"/><path d="M19 5v14"/></svg>
+          </button>
+          <button class="ctl danger" data-action="stop" aria-label="Stop">
+            <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+          </button>
+        </div>
+
+        <div class="volume-row">
+          <svg class="vol-icon" viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M17 8a5 5 0 0 1 0 8"/></svg>
+          <input id="volume" class="seek vol" type="range" min="1" max="200" value="100" />
+          <span id="volume-value" class="muted">100%</span>
+        </div>
+
+        <div class="quick-actions">
+          <button class="pill-btn" data-action="favorite">♥ Save</button>
+          <button class="pill-btn" data-action="shuffle">⤨ Shuffle</button>
+          <button class="pill-btn" data-action="autoplay">✨ Autoplay</button>
+          <button class="pill-btn" data-action="always">🕒 24/7</button>
+        </div>
+      </article>
+    </section>
+
+    <!-- ── queue tab ──────────────────────────────────────────── -->
+    <section id="tab-queue" class="tab-panel">
+      <div class="section-head">
+        <h2>Queue <span id="queue-count" class="muted">0</span></h2>
+        <button class="ghost small" data-action="clear">Clear</button>
+      </div>
+      <ul id="queue-list" class="list"></ul>
+      <p id="queue-empty" class="empty">Queue is empty — search something below.</p>
+    </section>
+
+    <!-- ── search tab ─────────────────────────────────────────── -->
+    <section id="tab-search" class="tab-panel">
+      <form id="search-form" class="searchbar">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        <input id="search-input" type="search" placeholder="Search a song or paste a link" autocomplete="off" />
+        <button type="submit" class="primary small">Go</button>
+      </form>
+      <ul id="search-results" class="list"></ul>
+      <p id="search-hint" class="empty">Results appear here — tap one to stream it.</p>
+    </section>
+
+    <!-- ── settings tab ───────────────────────────────────────── -->
+    <section id="tab-settings" class="tab-panel">
+      <h2>Settings</h2>
+      <div class="card">
+        <label class="row">
+          <span>Autoplay related tracks</span>
+          <input type="checkbox" class="switch" data-setting="autoplay" />
+        </label>
+        <label class="row">
+          <span>24/7 mode (stay in voice chat)</span>
+          <input type="checkbox" class="switch" data-setting="always" />
+        </label>
+        <label class="row">
+          <span>Loop mode</span>
+          <select id="loop-select" class="select">
+            <option value="off">Off</option>
+            <option value="one">One track</option>
+            <option value="all">Whole queue</option>
+          </select>
+        </label>
+      </div>
+
+      <h2>Favourites</h2>
+      <ul id="fav-list" class="list"></ul>
+      <p id="fav-empty" class="empty">Nothing saved yet — tap ♥ Save on a track.</p>
+
+      <div class="card about">
+        <div class="row"><span class="muted">Version</span><span id="app-version">–</span></div>
+        <div class="row"><span class="muted">Voice engine</span><span id="app-streaming">–</span></div>
+        <div class="row"><span class="muted">Credits</span><span>Videl · richgram · Kurigram</span></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ── bottom navigation ────────────────────────────────────── -->
+  <nav class="tabbar">
+    <button class="tab active" data-tab="player">
+      <svg viewBox="0 0 24 24"><path d="M9 18V5l10-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/></svg>
+      <span>Player</span>
+    </button>
+    <button class="tab" data-tab="queue">
+      <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+      <span>Queue</span>
+    </button>
+    <button class="tab" data-tab="search">
+      <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <span>Search</span>
+    </button>
+    <button class="tab" data-tab="settings">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.3 1a7 7 0 0 0-1.7-1L14.5 3h-5l-.4 2.6a7 7 0 0 0-1.7 1l-2.3-1-2 3.4L5.1 11a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 1.7 1l.4 2.6h5l.4-2.6a7 7 0 0 0 1.7-1l2.3 1 2-3.4-2-1.5c.1-.3.1-.7.1-1z"/></svg>
+      <span>Settings</span>
+    </button>
+  </nav>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="/app/static/app.js"></script>
+</body>
+</html>

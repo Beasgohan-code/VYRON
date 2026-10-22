@@ -10,7 +10,13 @@ from pyrogram import Client
 from vyron.modules import (
     admin,
     callbacks,
+    channel,
     controls,
+    effects_cmd,
+    extras,
+    inline,
+    locks,
+    moderation,
     play,
     queue_cmd,
     settings_cmd,
@@ -20,7 +26,22 @@ from vyron.modules import (
 
 logger = logging.getLogger(__name__)
 
-MODULES = (start, play, controls, queue_cmd, settings_cmd, tools, admin, callbacks)
+MODULES = (
+    start,
+    play,
+    controls,
+    queue_cmd,
+    settings_cmd,
+    tools,
+    effects_cmd,
+    channel,
+    moderation,
+    locks,
+    admin,
+    extras,
+    inline,
+    callbacks,
+)
 
 
 def register_all(client: Client) -> list[str]:

@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 _CONTROL_ACTIONS = {
     "pause", "resume", "skip", "stop", "loop", "shuffle", "queue",
-    "clearqueue", "vol", "set", "pick", "get", "dl",
+    "clearqueue", "vol", "set", "pick", "get", "dl", "lock", "fx",
 }
 
 
@@ -217,12 +217,7 @@ def register(client: Client) -> None:
                 return
             index = int(arg)
             if action == "dl":
-                await _show(
-                    client,
-                    cq,
-                    cards.download_card(entry.tracks[index], "video" if entry.video else "audio"),
-                    keyboards.download_choice(index),
-                )
+                await _show(client, cq, cards.download_choice_card(entry.tracks[index]))
                 await cq.answer()
                 return
 
@@ -257,6 +252,43 @@ def register(client: Client) -> None:
                 kind == "video",
                 status_id=cq.message.id,
             )
+            return
+
+        # ── locks panel ────────────────────────────────────────────────────
+        if action == "lock":
+            from vyron.core import chatcfg
+            from vyron.modules.locks import locks_panel
+
+            locks_cfg = await chatcfg.get(chat.id, "locks", {})
+            flood_cfg = await chatcfg.get(chat.id, "flood", {})
+            if arg == "flood":
+                flood_cfg["enabled"] = not flood_cfg.get("enabled", True)
+                await chatcfg.set(chat.id, "flood", flood_cfg)
+            elif arg in locks_cfg:
+                locks_cfg[arg] = not locks_cfg.get(arg)
+                await chatcfg.set(chat.id, "locks", locks_cfg)
+            await _show(client, cq, locks_panel(locks_cfg, flood_cfg))
+            await cq.answer("Saved")
+            return
+
+        # ── audio effects ──────────────────────────────────────────────────
+        if action == "fx":
+            from vyron.core import chatcfg, effects as audio_fx
+            from vyron.modules.effects_cmd import panel as fx_panel
+
+            active = audio_fx.resolve(await chatcfg.get(chat.id, "effects", []) or [])
+            if arg == "off":
+                active = []
+            elif arg in audio_fx.EFFECTS:
+                if arg in active:
+                    active = [name for name in active if name != arg]
+                else:
+                    active = audio_fx.resolve(active + [arg])
+            await chatcfg.set(chat.id, "effects", active)
+            if player:
+                player.queues.get(chat.id).effects = active
+            await _show(client, cq, fx_panel(active))
+            await cq.answer(f"Active: {audio_fx.labels(active)}")
             return
 
         # ── owner panel ────────────────────────────────────────────────────

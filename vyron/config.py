@@ -91,6 +91,20 @@ class Settings:
     ephemeral_cards: bool = field(default_factory=lambda: _flag("EPHEMERAL_CARDS", True))
     np_refresh_seconds: int = field(default_factory=lambda: max(5, _int("NP_REFRESH_SECONDS", 12)))
 
+    # ── Group management ────────────────────────────────────────────────────
+    logger_id: int = field(default_factory=lambda: _int("LOGGER_ID", 0))
+    default_warn_limit: int = field(default_factory=lambda: max(1, _int("WARN_LIMIT", 3)))
+    default_flood_limit: int = field(default_factory=lambda: max(2, _int("FLOOD_LIMIT", 7)))
+    flood_window: int = field(default_factory=lambda: max(3, _int("FLOOD_WINDOW", 9)))
+    welcome_default: str = field(default_factory=lambda: _env("WELCOME_TEXT"))
+
+    # ── Web app (Telegram Mini App) ─────────────────────────────────────────
+    webapp: bool = field(default_factory=lambda: _flag("WEBAPP", True))
+    webapp_url: str = field(default_factory=lambda: _env("WEBAPP_URL").rstrip("/"))
+    webapp_allow_anon: bool = field(default_factory=lambda: _flag("WEBAPP_ALLOW_ANON", False))
+    webapp_title: str = field(default_factory=lambda: _env("WEBAPP_TITLE", "VYRON Player"))
+    webapp_dir: Path = field(default_factory=lambda: Path(_env("WEBAPP_DIR", str(ROOT / "webapp"))))
+
     # ── Runtime ─────────────────────────────────────────────────────────────
     port: int = field(default_factory=lambda: _int("PORT", 8080))
     log_level: str = field(default_factory=lambda: _env("LOG_LEVEL", "INFO").upper())
@@ -151,6 +165,10 @@ class Settings:
         if not self.owner_id and not self.sudo_users:
             errors.append("OWNER_ID (or SUDO_USERS) is missing — you will have no admin access.")
         return errors
+
+    @property
+    def webapp_ready(self) -> bool:
+        return bool(self.webapp and self.webapp_url)
 
     def ensure_dirs(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
