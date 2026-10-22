@@ -9,7 +9,7 @@ from pyrogram.types import InlineKeyboardButton as B
 from pyrogram.types import InlineKeyboardMarkup as KM
 
 from vyron.config import settings
-from vyron.core.queue import ChatState, LoopMode
+from vyron.core.queue import ChatState
 from vyron.ui.theme import raw_glyph as G
 
 
@@ -114,12 +114,14 @@ def start_panel() -> KM:
 
 
 def help_nav(section: str = "main") -> KM:
-    tabs = ["main", "playback", "queue", "tools"]
+    tabs = ["main", "playback", "queue", "tools", "social", "power"]
     labels = {
         "main": "Basics",
         "playback": "Playback",
         "queue": "Queue",
         "tools": "Tools",
+        "social": "Groups",
+        "power": "Owner",
     }
     row = [
         _btn(("• " if tab == section else "") + labels[tab], f"v:help:{tab}")

@@ -33,7 +33,10 @@ def test_handlers_register_offline():
 
     bot, loaded = asyncio.run(scenario())
     assert len(loaded) == len(MODULES)
-    for required in ("start", "play", "controls", "callbacks", "moderation", "locks", "effects_cmd", "inline"):
+    for required in (
+        "start", "play", "controls", "callbacks", "moderation", "locks", "effects_cmd",
+        "inline", "power", "savedplaylists", "smartqueue", "diagnostics",
+    ):
         assert required in loaded
     assert len(bot.dispatcher.groups) >= 1
     total = sum(len(group) for group in bot.dispatcher.groups.values())

@@ -9,6 +9,7 @@ from pyrogram import Client
 
 from vyron.modules import (
     admin,
+    assistant_tools,
     callbacks,
     channel,
     controls,
@@ -19,6 +20,7 @@ from vyron.modules import (
     locks,
     moderation,
     play,
+    power,
     queue_cmd,
     savedplaylists,
     settings_cmd,
@@ -47,6 +49,8 @@ MODULES = (
     smartqueue,
     savedplaylists,
     diagnostics,
+    power,
+    assistant_tools,
 )
 
 

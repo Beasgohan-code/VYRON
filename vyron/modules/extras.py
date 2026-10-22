@@ -10,7 +10,6 @@ import logging
 import os
 import platform
 import sys
-import time
 
 from pyrogram import Client, filters
 from pyrogram.types import Message
@@ -21,7 +20,7 @@ from vyron.ui import rich
 from vyron.ui.progress import human_size, human_time
 from vyron.ui.theme import E
 from vyron.utils.filters import owner
-from vyron.utils.helpers import command_args, is_chat_admin, is_owner
+from vyron.utils.helpers import command_args, is_owner
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +35,7 @@ def _blocked_store():
 
 def register(client: Client) -> None:
     # ── blocklist ──────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["block"]) & owner)
+    @client.on_message(filters.command(["block", "gblock", "ublock"]) & owner)
     async def _block(_: Client, message: Message) -> None:
         arg = command_args(message)
         target = None
@@ -55,7 +54,7 @@ def register(client: Client) -> None:
             B.row(B.btn(f"{E('cross')} Blocked {target}", data="v:noop", style="danger")),
         )
 
-    @client.on_message(filters.command(["unblock"]) & owner)
+    @client.on_message(filters.command(["unblock", "gunblock", "uunblock"]) & owner)
     async def _unblock(_: Client, message: Message) -> None:
         arg = command_args(message)
         target = int(arg) if arg.lstrip("-").isdigit() else None

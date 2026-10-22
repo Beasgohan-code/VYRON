@@ -60,6 +60,11 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-asyncio
 
+      - name: Lint
+        run: |
+          pip install ruff
+          ruff check vyron tests main.py --select F,E9
+
       - name: Byte-compile
         run: python -m compileall -q vyron main.py
 

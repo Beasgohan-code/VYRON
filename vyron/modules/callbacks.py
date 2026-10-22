@@ -10,7 +10,7 @@ from pyrogram.enums import ChatType
 from pyrogram.types import CallbackQuery
 
 from vyron.core import pending
-from vyron.core.queue import LoopMode
+from vyron.config import settings
 from vyron.runtime import runtime
 from vyron.ui import cards, keyboards, rich
 from vyron.ui.progress import truncate
@@ -100,6 +100,48 @@ def register(client: Client) -> None:
 
         if action == "about":
             await _show(client, cq, cards.about_card(), keyboards.back_close("v:help:main"))
+            await cq.answer()
+            return
+
+        # ── entry buttons (welcome card, quick actions) ────────────────────
+        if action == "play":
+            query = ":".join(parts[2:]).strip()
+            if not query or runtime.youtube is None:
+                await cq.answer("Nothing to play.", show_alert=True)
+                return
+            try:
+                track = await runtime.youtube.resolve(
+                    query,
+                    requester=(
+                        cq.from_user.id if cq.from_user else 0,
+                        (cq.from_user.first_name if cq.from_user else "") or "",
+                    ),
+                )
+                idle = not state.playing and state.current is None
+                position = await player.enqueue(chat.id, track, play_now=idle)
+                await cq.answer(
+                    f"{'Playing' if idle else 'Queued'} · {truncate(track.title, 28)}",
+                    show_alert=False,
+                )
+                if position == -1:
+                    await cq.answer("Already in the queue.", show_alert=True)
+            except Exception as exc:
+                await cq.answer(f"Could not play that: {truncate(str(exc), 60)}", show_alert=True)
+            return
+
+        if action == "app":
+            if not settings.webapp_url:
+                await cq.answer("Set WEBAPP_URL first.", show_alert=True)
+                return
+            await _show(client, cq, cards.webapp_card(settings.webapp_url, chat.title or ""),
+                        keyboards.back_close("v:help:main"))
+            await cq.answer()
+            return
+
+        if action == "settings":
+            cfg = await runtime.storage.chat_settings(chat.id) if runtime.storage else {}
+            await _show(client, cq, cards.settings_card(cfg, chat.title or ""),
+                        keyboards.back_close("v:np"))
             await cq.answer()
             return
 

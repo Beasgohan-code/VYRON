@@ -85,4 +85,80 @@ def register(client: Client) -> None:
         await rich.send(client, chat_id, "".join(parts), reply_to=message.id)
 
 
+
+    # ── single-effect shortcuts ────────────────────────────────────────────
+    async def _toggle_effect(message: Message, name: str, enable: bool) -> None:
+        chat_id = message.chat.id
+        if not (
+            is_owner(message.from_user.id)
+            or await is_chat_admin(client, chat_id, message.from_user.id)
+        ):
+            await rich.send(
+                client,
+                chat_id,
+                B.row(B.btn(f"{E('shield')} Admins only", data="v:noop", style="danger")),
+            )
+            return
+        current = await _active(chat_id)
+        if enable:
+            if name in current:
+                await rich.send(client, chat_id, B.note(f"{E('info')} <b>{name}</b> is already on."))
+                return
+            updated = effects.resolve([*current, name])
+        else:
+            updated = [item for item in current if item != name]
+        await chatcfg.set(chat_id, "effects", updated)
+        if runtime.player:
+            runtime.player.queues.get(chat_id).effects = updated
+        await rich.send(
+            client,
+            chat_id,
+            B.note(
+                f"{E('check') if enable else E('cross')} "
+                f"<b>{effects.EFFECTS[name].label}</b> {'on' if enable else 'off'} · "
+                f"active: {effects.labels(updated)}"
+            ),
+            reply_to=message.id,
+        )
+
+    @client.on_message(filters.command(["effecton", "fxon"]))
+    async def _effect_on(_: Client, message: Message) -> None:
+        name = effects.resolve([command_args(message).strip()])
+        if not name:
+            names = ", ".join(effects.EFFECTS)
+            await rich.send(client, message.chat.id, B.note(f"{E('info')} Pick one: {names}"))
+            return
+        await _toggle_effect(message, name[0], True)
+
+    @client.on_message(filters.command(["effectoff", "fxoff"]))
+    async def _effect_off(_: Client, message: Message) -> None:
+        arg = command_args(message).strip()
+        if not arg:
+            await chatcfg.set(message.chat.id, "effects", [])
+            if runtime.player:
+                runtime.player.queues.get(message.chat.id).effects = []
+            await rich.send(client, message.chat.id, B.note(f"{E('cross')} All effects off."))
+            return
+        name = effects.resolve([arg])
+        if not name:
+            await rich.send(client, message.chat.id, B.note(f"{E('warn')} Unknown effect."))
+            return
+        await _toggle_effect(message, name[0], False)
+
+    def _make_shortcut(effect_name: str):
+        async def _on(_: Client, message: Message) -> None:
+            await _toggle_effect(message, effect_name, True)
+
+        async def _off(_: Client, message: Message) -> None:
+            await _toggle_effect(message, effect_name, False)
+
+        return _on, _off
+
+    for shortcut, effect_name in (("bass", "bass"), ("nightcore", "nightcore"), ("vaporwave", "vaporwave")):
+        on_handler, off_handler = _make_shortcut(effect_name)
+        client.on_message(filters.command([shortcut]))(on_handler)
+        client.on_message(filters.command([f"{shortcut}off"]))(off_handler)
+
+
+
 __all__ = ["panel", "register"]

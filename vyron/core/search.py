@@ -67,7 +67,6 @@ class YouTube:
             "extractor_retries": 2,
             "socket_timeout": 15,
             "retries": 2,
-            "noplaylist": True,
         }
         if self.settings.cookies_file:
             opts["cookiefile"] = self.settings.cookies_file

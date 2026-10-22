@@ -12,7 +12,6 @@ from vyron.core.queue import LoopMode
 from vyron.runtime import runtime
 from vyron.ui import cards, keyboards, rich
 from vyron.ui.theme import E
-from vyron.utils.filters import control
 from vyron.utils.helpers import command_args, parse_seek
 from vyron.utils import thumbnails
 

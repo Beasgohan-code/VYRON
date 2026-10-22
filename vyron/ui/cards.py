@@ -11,7 +11,7 @@
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 
-from typing import Iterable, Sequence
+from typing import Iterable
 
 from vyron.config import settings
 from vyron.core.lyrics import LyricsResult
@@ -167,6 +167,33 @@ _HELP: dict[str, tuple[str, list[tuple[str, str]]]] = {
             ("/247", "toggle 24/7 mode"),
             ("/emojis", "premium emoji pack status"),
             ("/app", "open the player web app"),
+            ("/whoami", "your id, role and chat"),
+        ],
+    ),
+    "social": (
+        "Groups",
+        [
+            ("/voteskip set 3", "require votes before a skip"),
+            ("/vskip", "cast your vote"),
+            ("/suggest", "tracks like the one playing"),
+            ("/next <song>", "insert a track up front"),
+            ("/savepl [name]", "save the queue to a playlist"),
+            ("/playlists · /pl <name>", "list and queue your playlists"),
+            ("/locks · /antiflood", "content locks and flood control"),
+        ],
+    ),
+    "power": (
+        "Owner",
+        [
+            ("/eval <code>", "run python in the bot process"),
+            ("/vars", "configuration snapshot (masked)"),
+            ("/dbstats", "storage size and counters"),
+            ("/speedtest", "latency, throughput, VC health"),
+            ("/sudoers", "who can operate the bot"),
+            ("/clearcache", "wipe downloads and temp files"),
+            ("/stats · /activevc", "usage and live sessions"),
+            ("/assistant · /setname", "rebrand the voice-chat account"),
+            ("/setbio · /setpfp", "bio and profile picture"),
         ],
     ),
 }
@@ -190,7 +217,14 @@ def help_card(section: str = "main") -> str:
         ),
     )
     tabs = ""
-    for key, label in (("main", "Basics"), ("playback", "Playback"), ("queue", "Queue"), ("tools", "Tools")):
+    for key, label in (
+        ("main", "Basics"),
+        ("playback", "Playback"),
+        ("queue", "Queue"),
+        ("tools", "Tools"),
+        ("social", "Groups"),
+        ("power", "Owner"),
+    ):
         style = "primary" if key == section else None
         tabs += B.btn(("• " if key == section else "") + label, data=f"v:help:{key}", style=style)
     return (

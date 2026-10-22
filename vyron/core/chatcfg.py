@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from vyron.config import settings
 from vyron.runtime import runtime
 
 DEFAULTS: dict[str, Any] = {
@@ -28,6 +27,7 @@ DEFAULTS: dict[str, Any] = {
     "welcome": "",
     "goodbye": "",
     "effects": [],
+    "voteskip": 0,
     "thumbnail": "",
 }
 

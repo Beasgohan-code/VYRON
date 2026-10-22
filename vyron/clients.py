@@ -48,7 +48,6 @@ def build_assistant(settings: Settings) -> Client | None:
 async def start_group_call(assistant: Client, chat_id: int) -> bool:
     """Explicitly start a voice chat (fallback when auto-start is not wanted)."""
     try:
-        from pyrogram import enums
 
         peer = await assistant.resolve_peer(chat_id)
         await assistant.invoke(

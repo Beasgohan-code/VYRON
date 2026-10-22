@@ -297,6 +297,8 @@ async def edit(
     if not markup or not message_id:
         return None
     keyboard = markup_keyboard or reply_markup
+    # rich payloads can embed their own <tg-button> rows; don't double up
+    inline_buttons = "<tg-button" in markup
 
     if (
         settings.rich_messages

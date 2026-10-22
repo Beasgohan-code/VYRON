@@ -144,6 +144,15 @@ Health check → <http://localhost:8080/health> · Mini App → <http://localhos
 `/lyrics` · `/fav` · `/favs` · `/history` · `/settings` · `/247` · `/stats` · `/ping` · `/id` · `/emojis`
 `/whoami`
 
+### Groups & voting
+
+| Command | What it does |
+|---|---|
+| `/voteskip set <n>` | require *n* votes before a skip (admins; `0` disables) |
+| `/vskip` | cast your vote for the current track (admins skip instantly) |
+| `/suggest [query]` | tracks similar to what's playing — tap to queue |
+| `/savepl [name]` | save the current track / queue into a playlist |
+
 ### Playlists
 
 | Command | What it does |
@@ -156,10 +165,28 @@ Health check → <http://localhost:8080/health> · Mini App → <http://localhos
 Playlists are per-user, capped at 40 lists × 200 tracks, and the same store
 feeds the Library view of the web app. (YouTube imports stay on `/playlist`.)
 
-### Diagnostics
+### Diagnostics & owner console
 
-`/speedtest` — Bot API latency, media-CDN throughput, voice-chat readiness, uptime
-`/sudoers` — owner + `SUDO_USERS` with resolved names (owner only)
+| Command | What it does |
+|---|---|
+| `/speedtest` | Bot API latency, media-CDN throughput, voice-chat readiness, uptime |
+| `/sudoers` | owner + `SUDO_USERS` with resolved names |
+| `/eval <code>` | run Python inside the bot process (owner, async aware) |
+| `/vars` | configuration snapshot — secrets masked, DM'd in groups |
+| `/dbstats` | storage backend, chats, counters, cache size, uptime |
+| `/clearcache` | wipe downloads and temp files, report space freed |
+| `/assistant` | profile card of the account that joins voice chats |
+| `/setname <first> [last]` | rename the assistant account |
+| `/setbio <text>` | change its bio (70 chars) |
+| `/setpfp` (reply to a photo) | replace its profile picture |
+| `/delpfp` | clear its profile pictures |
+| `/gblock` · `/gunblock` · `/ublock` · `/uunblock` | aliases of `/block` & `/unblock` |
+
+Effect shortcuts: `/bass` `/bassoff` `/nightcore` `/nightcoreoff` `/vaporwave` `/vaporwaveoff`
+`/effecton <name>` · `/effectoff <name|all>`
+
+The bot also announces itself politely when added to a group (with Play / Web app /
+Help buttons) and logs when it is removed.
 
 ### Group management
 
@@ -306,6 +333,7 @@ VYRON/
 │   │   ├── downloader.py       # MP3/MP4 cache
 │   │   ├── lyrics.py           # LRCLIB client
 │   │   ├── charts.py           # trending / mixes / moods (TTL-cached)
+│   │   ├── votes.py            # group vote-skip tallies
 │   │   ├── playlists.py        # per-user saved playlists
 │   │   └── pending.py          # short-lived picker state
 │   ├── ui/
@@ -316,13 +344,14 @@ VYRON/
 │   │   └── progress.py         # bars, durations, human formatting
 │   ├── modules/                # start, play, controls, queue, settings, tools, effects,
 │   │                           # channel, moderation, locks, admin, extras, inline, callbacks,
-│   │                           # smartqueue, savedplaylists, diagnostics
+│   │                           # smartqueue, savedplaylists, diagnostics, power,
+│   │                           # assistant_tools
 │   ├── web/                    # Mini App: auth, JSON API
 │   ├── utils/                  # helpers, filters, net, health server, artwork renderer
 │   └── tools/                  # session generator, emoji pack builder, cover generator, preview
 ├── frontend/                   # React + TS + Vite Mini App (src/views · src/components · src/lib)
 ├── webapp/dist/                # built bundle served at /app (regenerate with npm run build)
-└── tests/                      # 87 offline tests
+└── tests/                      # 103 offline tests
 ```
 
 **Design rules**
@@ -364,7 +393,7 @@ Full list with comments: [`.env.example`](.env.example).
 
 ```bash
 pip install pytest pytest-asyncio
-python -m pytest tests -q      # 87 passed
+python -m pytest tests -q      # 103 passed
 
 cd frontend && npm test        # 5 component tests (vitest + jsdom)
 ```
