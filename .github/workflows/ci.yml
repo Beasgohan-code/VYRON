@@ -8,6 +8,7 @@ on:
 jobs:
   frontend:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -38,6 +39,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -51,8 +53,8 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
-      - name: System deps
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      # The suite is fully offline — ffmpeg is only needed at runtime (the
+      # Docker image installs it), so CI skips the slow apt step.
 
       - name: Install
         run: |
