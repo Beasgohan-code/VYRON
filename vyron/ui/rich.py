@@ -1,0 +1,349 @@
+# ---------------------------------------------------------------------------
+#  VYRON — rich message delivery
+#
+#  Two rendering lanes, chosen automatically:
+#
+#    * RICH   — Telegram's Bot-API "rich message" (headings, tables, collapsible
+#               sections, <tg-button>, images).  Beautiful, but messages cannot
+#               be edited afterwards, so it is used only for *static* cards.
+#    * HTML   — classic parse_mode=HTML, editable in place.  Used for live
+#               cards (now-playing, queue) that refresh their progress bar.
+#
+#  Every call is defensive: if the rich lane raises (old Kurigram build, server
+#  rejection, malformed markup) we down-convert the exact same markup to plain
+#  HTML and resend, so a user never sees a crash or an empty message.
+# ---------------------------------------------------------------------------
+from __future__ import annotations
+
+import html as _html
+import logging
+import re
+from typing import Any
+
+from pyrogram.enums import ParseMode
+from pyrogram.errors import MessageNotModified
+from pyrogram.types import ReplyParameters
+
+from vyron.config import settings
+
+logger = logging.getLogger(__name__)
+
+try:  # capability probe for the rich-message lane
+    from pyrogram import Client as _Client
+
+    RICH_AVAILABLE = hasattr(_Client, "send_rich_message")
+except Exception:  # pragma: no cover
+    RICH_AVAILABLE = False
+
+try:
+    from pyrogram.types import EphemeralMessageParameters
+except Exception:  # pragma: no cover
+    EphemeralMessageParameters = None  # type: ignore[assignment]
+
+try:
+    from pyrogram.types import InputRichMessage
+except Exception:  # pragma: no cover
+    InputRichMessage = None  # type: ignore[assignment]
+
+
+# ── tag vocabulary ──────────────────────────────────────────────────────────
+_RICH_ONLY = (
+    "h1", "h2", "h3", "h4", "h5", "h6", "table", "thead", "tbody", "tr", "th",
+    "td", "details", "summary", "mark", "sub", "sup", "tg-button", "button",
+    "footer", "header", "img",
+)
+_RICH_ONLY_RE = re.compile(r"</?(?:%s)\b" % "|".join(_RICH_ONLY), re.I)
+_BLOCK_BREAK_RE = re.compile(
+    r"</(?:h[1-6]|tr|details|summary|blockquote|table|pre|p)>", re.I
+)
+_CELL_BREAK_RE = re.compile(r"</(?:th|td)>", re.I)
+_ANY_TAG_RE = re.compile(r"<[^>]+>")
+_VERBATIM_RE = re.compile(r"(<(?:table|pre)\b[\s\S]*?</(?:table|pre)>)", re.I)
+_EMOJI_RE = re.compile(
+    r'<(?:tg-)?emoji\s+(?:emoji-)?id="[^"]*"\s*>(.*?)</(?:tg-)?emoji>', re.I | re.S
+)
+_BR_RE = re.compile(r"<br\s*/?>\s*\n?", re.I)
+
+# Messages that were delivered through the rich lane can only be edited through
+# it as well; remember them (bounded, oldest entries dropped first).
+_RICH_SENT: dict[tuple[int, int], float] = {}
+_RICH_SENT_MAX = 400
+
+
+def _remember(chat_id: int, message_id: int | None, stamp: float | None = None) -> None:
+    if not message_id:
+        return
+    import time as _time
+
+    _RICH_SENT[(int(chat_id), int(message_id))] = stamp or _time.time()
+    if len(_RICH_SENT) > _RICH_SENT_MAX:
+        for key in sorted(_RICH_SENT, key=_RICH_SENT.get)[: len(_RICH_SENT) - _RICH_SENT_MAX]:
+            _RICH_SENT.pop(key, None)
+
+
+def _was_rich(chat_id: int, message_id: int) -> bool:
+    return (int(chat_id), int(message_id)) in _RICH_SENT
+
+
+def _forget(chat_id: int, message_id: int) -> None:
+    _RICH_SENT.pop((int(chat_id), int(message_id)), None)
+
+
+def esc(value: Any) -> str:
+    """Escape untrusted text (titles, names, error strings) for card markup."""
+    if value is None:
+        return ""
+    return _html.escape(str(value), quote=False)
+
+
+def has_rich_tags(markup: str) -> bool:
+    return bool(markup) and bool(_RICH_ONLY_RE.search(markup))
+
+
+def normalize(markup: str) -> str:
+    """Prepare rich HTML for Telegram.
+
+    * newlines outside <table>/<pre> collapse in rich messages → <br/>
+    * unquoted ``href=`` (as produced by ``User.mention()``) is rejected → quote
+    """
+    if not markup:
+        return ""
+    text = str(markup).replace("\r\n", "\n")
+    text = re.sub(r"href='([^']*)'", r'href="\1"', text)
+    text = re.sub(r'href=(?!["\'])([^\s">]+)', r'href="\1"', text)
+
+    parts = _VERBATIM_RE.split(text)
+    for index in range(0, len(parts), 2):
+        if not parts[index]:
+            continue
+        block = parts[index]
+        # Preserve intentional blank lines, convert single breaks.
+        block = re.sub(r"\n{2,}", "\x00", block)
+        block = block.replace("\n", "<br/>\n")
+        block = block.replace("\x00", "<br/><br/>\n")
+        parts[index] = block
+    return "".join(parts)
+
+
+def to_html(markup: str) -> str:
+    """Down-convert rich markup into classic parse_mode=HTML.
+
+    Keeps only the inline tags Telegram's standard parser accepts, so the same
+    card source can be used for both delivery lanes.
+    """
+    if not markup:
+        return ""
+    text = normalize(markup)
+
+    text = re.sub(r"<img\b[^>]*/?>", "", text, flags=re.I)
+    text = re.sub(r"<p\b[^>]*>", "", text, flags=re.I)
+    text = re.sub(r"</p>", "\n\n", text, flags=re.I)
+    text = re.sub(r"<h[1-6]>(.*?)</h[1-6]>", r"\n<b>\1</b>\n", text, flags=re.I | re.S)
+    text = re.sub(r"<footer[^>]*>(.*?)</footer>", r"\n<i>\1</i>", text, flags=re.I | re.S)
+    text = re.sub(r"<summary>(.*?)</summary>", r"<b>\1</b>\n", text, flags=re.I | re.S)
+    text = re.sub(r"<mark>(.*?)</mark>", r"<b>\1</b>", text, flags=re.I | re.S)
+    text = re.sub(r"<tg-button\s+url=\"([^\"]*)\">(.*?)</tg-button>", r'<a href="\1">\2</a>', text, flags=re.I | re.S)
+    text = re.sub(r"<tg-button[^>]*>(.*?)</tg-button>", r"<b>\1</b>", text, flags=re.I | re.S)
+    text = re.sub(r"<button[^>]*>(.*?)</button>", r"<b>\1</b>", text, flags=re.I | re.S)
+
+    text = _CELL_BREAK_RE.sub("  ·  ", text)
+    text = re.sub(r"</tr>", "\n", text, flags=re.I)
+    text = re.sub(r"</table>", "\n", text, flags=re.I)
+    text = re.sub(r"</?(?:%s)(?:\s[^>]*)?>" % "|".join(_RICH_ONLY), "", text, flags=re.I)
+    text = _BR_RE.sub("\n", text)
+    text = re.sub(r"[ \t]{3,}", "  ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def to_plain_text(markup: str) -> str:
+    """Rich markup → completely tag-free text (used for toasts/notifications)."""
+    if not markup:
+        return ""
+    text = _EMOJI_RE.sub(r"\1", str(markup))
+    text = _BLOCK_BREAK_RE.sub("\n", text)
+    text = _BR_RE.sub("\n", text)
+    text = _ANY_TAG_RE.sub("", text)
+    text = _html.unescape(text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+# ── delivery ────────────────────────────────────────────────────────────────
+def _ephemeral(receiver_user_id: int | None, callback_query_id: str | None):
+    if not receiver_user_id or EphemeralMessageParameters is None:
+        return None
+    try:
+        return EphemeralMessageParameters(
+            receiver_user_id=int(receiver_user_id),
+            callback_query_id=callback_query_id,
+        )
+    except Exception:  # pragma: no cover - older builds
+        return None
+
+
+async def send(
+    client,
+    chat_id: int | str,
+    markup: str,
+    *,
+    markup_keyboard=None,
+    reply_markup=None,
+    reply_to: int | None = None,
+    editable: bool = False,
+    ephemeral_to: int | None = None,
+    callback_query_id: str | None = None,
+    silent: bool = False,
+    protect: bool = False,
+    thread_id: int | None = None,
+    effect_id: int | None = None,
+):
+    """Send *markup* as a card. Returns the Message (or None on total failure).
+
+    ``editable=True`` forces the classic HTML lane so the message can later be
+    updated in place (progress bars).  ``ephemeral_to=<user id>`` asks Telegram
+    to show the message only to that user (groups/supergroups only).
+    """
+    if not markup:
+        return None
+    keyboard = markup_keyboard or reply_markup
+    eph = _ephemeral(ephemeral_to, callback_query_id)
+
+    rich_ok = (
+        RICH_AVAILABLE
+        and InputRichMessage is not None
+        and settings.rich_messages
+        and (eph is not None or (has_rich_tags(markup) and not editable))
+    )
+
+    if rich_ok:
+        try:
+            message = await client.send_rich_message(
+                chat_id=chat_id,
+                rich_message=InputRichMessage(html=normalize(markup)),
+                reply_markup=keyboard,
+                reply_parameters=ReplyParameters(message_id=reply_to) if reply_to else None,
+                message_thread_id=thread_id,
+                disable_notification=silent,
+                protect_content=protect,
+                effect_id=effect_id,
+                ephemeral_message_parameters=eph,
+            )
+            if message is not None and eph is None:
+                _remember(chat_id, message.id)
+            return message
+        except Exception as exc:  # fall through to the HTML lane
+            logger.debug("rich send failed (%s) — falling back to HTML", exc)
+
+    kwargs: dict[str, Any] = dict(
+        chat_id=chat_id,
+        text=to_html(markup),
+        parse_mode=ParseMode.HTML,
+        reply_markup=keyboard,
+        disable_notification=silent,
+        protect_content=protect,
+        link_preview_options=None,
+        reply_parameters=ReplyParameters(message_id=reply_to) if reply_to else None,
+        message_thread_id=thread_id,
+        effect_id=effect_id,
+    )
+    if eph is not None:
+        kwargs["ephemeral_message_parameters"] = eph
+    try:
+        return await client.send_message(**kwargs)
+    except Exception:
+        # Last resort: drop the ephemeral wrapper (older servers).
+        kwargs.pop("ephemeral_message_parameters", None)
+        try:
+            return await client.send_message(**kwargs)
+        except Exception as exc:
+            logger.warning("card send failed: %s", exc)
+            return None
+
+
+async def edit(
+    client,
+    chat_id: int | str,
+    message_id: int,
+    markup: str,
+    *,
+    markup_keyboard=None,
+    reply_markup=None,
+):
+    """Edit a card in place, preserving its original (rich or HTML) lane."""
+    if not markup or not message_id:
+        return None
+    keyboard = markup_keyboard or reply_markup
+
+    if (
+        settings.rich_messages
+        and RICH_AVAILABLE
+        and InputRichMessage is not None
+        and _was_rich(chat_id, message_id)
+    ):
+        try:
+            return await client.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                rich_message=InputRichMessage(html=normalize(markup)),
+                reply_markup=keyboard,
+            )
+        except MessageNotModified:
+            return None
+        except Exception as exc:
+            logger.debug("rich edit failed (%s) — falling back", exc)
+            _forget(chat_id, message_id)
+
+    try:
+        return await client.edit_message_text(
+            chat_id=chat_id,
+            message_id=message_id,
+            text=to_html(markup),
+            parse_mode=ParseMode.HTML,
+            reply_markup=keyboard,
+            link_preview_options=None,
+        )
+    except MessageNotModified:
+        return None
+    except Exception as exc:
+        logger.debug("card edit failed: %s", exc)
+        return None
+
+
+async def edit_inline(media_message, markup: str, *, markup_keyboard=None):
+    """Edit an inline card (media message) in place."""
+    try:
+        return await media_message.edit_text(
+            text=to_html(markup),
+            parse_mode=ParseMode.HTML,
+            reply_markup=markup_keyboard,
+            link_preview_options=None,
+        )
+    except MessageNotModified:
+        return None
+    except Exception as exc:
+        logger.debug("inline edit failed: %s", exc)
+        return None
+
+
+async def react(message, glyph: str) -> None:
+    """Best-effort custom reaction on a user's message (Bot API 7+)."""
+    try:
+        from pyrogram.types import ReactionTypeEmoji
+
+        await message.react([ReactionTypeEmoji(emoji=glyph)])
+    except Exception:
+        pass
+
+
+__all__ = [
+    "RICH_AVAILABLE",
+    "edit",
+    "edit_inline",
+    "esc",
+    "has_rich_tags",
+    "normalize",
+    "react",
+    "send",
+    "to_html",
+    "to_plain_text",
+]

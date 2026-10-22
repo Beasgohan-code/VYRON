@@ -1,0 +1,30 @@
+{
+  "_readme": [
+    "Premium emoji pack for VYRON.",
+    "Run:  python -m vyron.tools.emoji_fetch --pack <your_custom_emoji_pack>",
+    "It writes emoji.json automatically (this file is just the shape).",
+    "Entries with an empty id are ignored, so partial packs are safe.",
+    "fallback = the plain unicode emoji used when custom emoji cannot render."
+  ],
+  "brand": { "id": "", "fallback": "🎧" },
+  "play": { "id": "", "fallback": "▶️" },
+  "pause": { "id": "", "fallback": "⏸️" },
+  "skip": { "id": "", "fallback": "⏭️" },
+  "stop": { "id": "", "fallback": "⏹️" },
+  "queue": { "id": "", "fallback": "📜" },
+  "volume": { "id": "", "fallback": "🔊" },
+  "loop": { "id": "", "fallback": "🔁" },
+  "shuffle": { "id": "", "fallback": "🔀" },
+  "search": { "id": "", "fallback": "🔎" },
+  "song": { "id": "", "fallback": "🎵" },
+  "video": { "id": "", "fallback": "🎬" },
+  "lyrics": { "id": "", "fallback": "📝" },
+  "favorite": { "id": "", "fallback": "❤️" },
+  "spark": { "id": "", "fallback": "✨" },
+  "settings": { "id": "", "fallback": "⚙️" },
+  "stats": { "id": "", "fallback": "📊" },
+  "clock": { "id": "", "fallback": "⏱️" },
+  "download": { "id": "", "fallback": "💾" },
+  "rocket": { "id": "", "fallback": "🚀" },
+  "note": { "id": "", "fallback": "🎶" }
+}

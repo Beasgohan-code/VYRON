@@ -1,0 +1,52 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  VYRON — Render blueprint
+#  New + Blueprint → point at this repo → fill the secrets → deploy.
+# ─────────────────────────────────────────────────────────────────────────────
+services:
+  - type: web
+    name: vyron
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    region: singapore
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: API_ID
+        sync: false
+      - key: API_HASH
+        sync: false
+      - key: STRING_SESSION
+        sync: false
+      - key: OWNER_ID
+        sync: false
+      - key: BOT_USERNAME
+        value: VyronMusicBot
+      - key: MONGO_URL
+        sync: false
+      - key: AUDIO_QUALITY
+        value: high
+      - key: VIDEO_QUALITY
+        value: 720p
+      - key: DEFAULT_VOLUME
+        value: "100"
+      - key: IDLE_LEAVE_SECONDS
+        value: "300"
+      - key: PREMIUM_EMOJI
+        value: "true"
+      - key: RICH_MESSAGES
+        value: "true"
+      - key: LOG_LEVEL
+        value: INFO
+      - key: PORT
+        value: "8080"
+      - key: DATA_DIR
+        value: /app/data
+      - key: DOWNLOADS_DIR
+        value: /app/data/downloads
+    disk:
+      name: vyron-data
+      mountPath: /app/data
+      sizeGB: 1

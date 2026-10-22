@@ -1,0 +1,30 @@
+# ─── Python ────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.Python
+
+# ─── Secrets & state ───────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.session
+*.session-journal
+cookies.txt
+emoji.json
+data/
+downloads/
+log.txt
+
+# ─── Tooling / editors ─────────────────────────────────────────────────────
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.idea/
+.vscode/
+.DS_Store
