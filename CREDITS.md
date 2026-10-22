@@ -10,6 +10,7 @@ excellent open-source projects. Everything below is MIT-licensed unless noted.
 | [Kurigram](https://github.com/KurimuzonAkuma/kurigram) | KurimuzonAkuma | Telegram client with Bot API 10.3 support (rich messages, ephemeral cards) — the base library installed as `kurigram` |
 | [richgram](https://github.com/Badmunda05/richgram) | [BadmundaXd](https://t.me/BadmundaXd) | Rich-message helpers: coloured buttons, tables, details, drafts, plain-text fallback. VYRON's `vyron/ui/blocks.py` is a themed wrapper around it |
 | [PyTgCalls](https://github.com/pytgcalls/pytgcalls) + [ntgcalls](https://github.com/pytgcalls/ntgcalls) | MarshalX / pytgcalls org | Voice-chat streaming engine |
+| [Pillow](https://python-pillow.org) | generated now-playing artwork + fallback covers |
 | [yt-dlp](https://github.com/yt-dlp/yt-dlp) | yt-dlp contributors | Search, stream resolution, downloads |
 | [LRCLIB](https://lrclib.net) | LRCLIB | Free synced/plain lyrics API |
 | [Telegram Bot API](https://core.telegram.org/bots/api) | Telegram | Rich message format, custom emoji, Mini Apps |

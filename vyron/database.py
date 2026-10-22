@@ -60,6 +60,15 @@ class Storage:
     async def all_chat_ids(self) -> list[int]:
         return []
 
+    # playlists --------------------------------------------------------
+    async def playlists(self, user_id: int) -> list[dict]:
+        return []
+
+    async def save_playlist(self, user_id: int, playlist: dict) -> None: ...
+
+    async def delete_playlist(self, user_id: int, playlist_id: str) -> bool:
+        return False
+
 
 # ── in-memory / JSON backend ────────────────────────────────────────────────
 class JsonStorage(Storage):
@@ -72,6 +81,7 @@ class JsonStorage(Storage):
             "favorites": {},
             "history": {},
             "counters": {},
+            "playlists": {},
         }
         self._lock = asyncio.Lock()
 
@@ -137,6 +147,30 @@ class JsonStorage(Storage):
 
     async def history(self, user_id: int, limit: int = 10) -> list[dict]:
         return self._data["history"].get(str(user_id), [])[:limit]
+
+    async def playlists(self, user_id: int) -> list[dict]:
+        return [dict(item) for item in self._data.setdefault("playlists", {}).get(str(user_id), [])]
+
+    async def save_playlist(self, user_id: int, playlist: dict) -> None:
+        async with self._lock:
+            bucket = self._data.setdefault("playlists", {}).setdefault(str(user_id), [])
+            for index, item in enumerate(bucket):
+                if item.get("id") == playlist.get("id"):
+                    bucket[index] = playlist
+                    break
+            else:
+                bucket.insert(0, playlist)
+            await self._flush()
+
+    async def delete_playlist(self, user_id: int, playlist_id: str) -> bool:
+        async with self._lock:
+            bucket = self._data.setdefault("playlists", {}).setdefault(str(user_id), [])
+            kept = [item for item in bucket if item.get("id") != playlist_id]
+            changed = len(kept) != len(bucket)
+            self._data["playlists"][str(user_id)] = kept
+            if changed:
+                await self._flush()
+            return changed
 
     async def bump(self, key: str, amount: int = 1) -> None:
         async with self._lock:
@@ -258,6 +292,34 @@ class MongoStorage(Storage):
             self._db.history.find_one, {"user_id": int(user_id)}
         )
         return (doc or {}).get("items", [])[:limit]
+
+    async def playlists(self, user_id: int) -> list[dict]:
+        doc = await asyncio.to_thread(
+            self._db.playlists.find_one, {"user_id": int(user_id)}
+        )
+        return list((doc or {}).get("items", []))
+
+    async def save_playlist(self, user_id: int, playlist: dict) -> None:
+        def _save():
+            doc = self._db.playlists.find_one({"user_id": int(user_id)}) or {}
+            items = {item["id"]: item for item in doc.get("items", [])}
+            items[playlist["id"]] = playlist
+            ordered = sorted(items.values(), key=lambda item: item.get("created", 0), reverse=True)
+            self._db.playlists.update_one(
+                {"user_id": int(user_id)},
+                {"$set": {"items": ordered[:40]}},
+                True,
+            )
+
+        await asyncio.to_thread(_save)
+
+    async def delete_playlist(self, user_id: int, playlist_id: str) -> bool:
+        result = await asyncio.to_thread(
+            self._db.playlists.update_one,
+            {"user_id": int(user_id)},
+            {"$pull": {"items": {"id": playlist_id}}},
+        )
+        return bool(result.modified_count)
 
     async def bump(self, key: str, amount: int = 1) -> None:
         await asyncio.to_thread(

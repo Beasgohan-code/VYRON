@@ -98,6 +98,13 @@ GLYPHS: dict[str, str] = {
     "code": "🧩",
     "tools": "🛠️",
     "cloud": "☁️",
+    "playlist": "≡",
+    "plus": "➕",
+    "minus": "➖",
+    "id": "🆔",
+    "next": "⏭️",
+    "web": "🌐",
+    "interface": "🪄",
 }
 
 # ── Premium-emoji pack loader ───────────────────────────────────────────────

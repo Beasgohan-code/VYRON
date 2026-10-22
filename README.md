@@ -126,7 +126,10 @@ Health check → <http://localhost:8080/health>
 | `/volume 80` · `/volume +10` | assistant volume (1–200) |
 | `/loop [off\|one\|all]` | repeat mode |
 | `/shuffle` · `/autoplay` | queue behaviour |
-| `/np` | refresh the now-playing card |
+| `/np` | now-playing card (rendered artwork when Pillow is installed) |
+| `/suggest [query]` | tracks similar to what's playing — tap to queue |
+| `/next <query>` | insert a track at the front of the queue |
+| `/qinfo` | queue health: length, remaining time, loop, effects |
 
 ### Queue
 
@@ -135,6 +138,24 @@ Health check → <http://localhost:8080/health>
 ### Tools
 
 `/lyrics` · `/fav` · `/favs` · `/history` · `/settings` · `/247` · `/stats` · `/ping` · `/id` · `/emojis`
+`/whoami`
+
+### Playlists
+
+| Command | What it does |
+|---|---|
+| `/savepl [name]` | save the current track (or the whole queue, or a replied audio file) into a playlist |
+| `/playlists` | list your saved playlists |
+| `/pl <name>` | queue a saved playlist |
+| `/pldel <name>` | delete one |
+
+Playlists are per-user, capped at 40 lists × 200 tracks, and the same store
+feeds the Library view of the web app. (YouTube imports stay on `/playlist`.)
+
+### Diagnostics
+
+`/speedtest` — Bot API latency, media-CDN throughput, voice-chat readiness, uptime
+`/sudoers` — owner + `SUDO_USERS` with resolved names (owner only)
 
 ### Group management
 
@@ -170,12 +191,16 @@ WEBAPP_URL=https://your-deployment        # Render/Koyeb URL
 # then: /app in chat, or tap the bot's menu button
 ```
 
-- **Backend** — `vyron/web/` (`aiohttp`) exposes `/api/state` and `/api/action`
-  over the *same* `Player` the bot uses, so chat and app never disagree.
+- **Backend** — `vyron/web/` (`aiohttp`) exposes `/api/state`, `/api/action`,
+  `/api/home`, `/api/search`, `/api/mix`, `/api/rooms` and `/api/playlists` over
+  the *same* `Player` the bot uses, so chat and app never disagree.
 - **Auth** — Telegram `initData` (HMAC-verified) or a signed chat token, so the
   app can control a *group* player opened from a `/app` link.
-- **Frontend** — `webapp/`: dark glass UI, four tabs (Player · Queue · Search ·
-  Settings), Telegram theme + haptics, zero build step.
+- **Frontend** — `webapp/`: dark-glass desktop layout (sidebar · content ·
+  now-playing rail) with Home / Search / Library / Queue / Playlists / Rooms /
+  Profile, ranked trending cards, "made for you" mixes, mood chips, listen-together
+  rooms, generated fallback artwork, 3 themes × 6 accents, mobile tabbar + mini
+  player, keyboard shortcuts — zero build step.
 - **Swap the UI** — replace `webapp/*` with your own design; the API contract is
   documented in [`webapp/README.md`](webapp/README.md). Nothing else changes.
 
@@ -185,7 +210,13 @@ Preview it locally without any credentials:
 python -m vyron.tools.preview --port 8080   # → http://localhost:8080/app/
 ```
 
-Outside Telegram the page renders read-only demo data — perfect for design work.
+Outside Telegram the page renders read-only demo data — with local gradient
+covers, so the whole layout (shelves, moods, rooms, playlists) is visible even
+with no network access. Regenerate those covers after palette changes:
+
+```bash
+python -m vyron.tools.covers
+```
 
 ---
 
@@ -258,6 +289,8 @@ VYRON/
 │   │   ├── search.py           # yt-dlp search / stream resolution / autoplay
 │   │   ├── downloader.py       # MP3/MP4 cache
 │   │   ├── lyrics.py           # LRCLIB client
+│   │   ├── charts.py           # trending / mixes / moods (TTL-cached)
+│   │   ├── playlists.py        # per-user saved playlists
 │   │   └── pending.py          # short-lived picker state
 │   ├── ui/
 │   │   ├── theme.py            # premium-emoji engine + glyph map
@@ -266,12 +299,13 @@ VYRON/
 │   │   ├── keyboards.py        # all inline buttons
 │   │   └── progress.py         # bars, durations, human formatting
 │   ├── modules/                # start, play, controls, queue, settings, tools, effects,
-│   │                           # channel, moderation, locks, admin, extras, inline, callbacks
+│   │                           # channel, moderation, locks, admin, extras, inline, callbacks,
+│   │                           # smartqueue, savedplaylists, diagnostics
 │   ├── web/                    # Mini App: auth, JSON API
-│   ├── utils/                  # helpers, filters, net, health server
-│   └── tools/                  # session generator, emoji pack builder
-├── webapp/                     # Mini App UI (index.html · styles.css · app.js)
-└── tests/                      # 69 offline tests
+│   ├── utils/                  # helpers, filters, net, health server, artwork renderer
+│   └── tools/                  # session generator, emoji pack builder, cover generator, preview
+├── webapp/                     # Mini App UI (index.html · styles.css · app.js · assets/covers)
+└── tests/                      # 87 offline tests
 ```
 
 **Design rules**
@@ -313,15 +347,16 @@ Full list with comments: [`.env.example`](.env.example).
 
 ```bash
 pip install pytest pytest-asyncio
-python -m pytest tests -q      # 69 passed
+python -m pytest tests -q      # 87 passed
 ```
 
 Covered offline: duration parsing, progress bars, loop semantics, queue
 add/dedupe/limit/remove/move/shuffle/rotate, elapsed-time maths, pending-picker
 TTL, rich↔HTML conversion, escaping, card rendering, keyboard wiring, coloured
 button markup, effect filter chains, lock panels, welcome placeholders,
-Mini App auth (initData HMAC + signed tokens), the JSON API surface, handler
-registration and client construction.
+Mini App auth (initData HMAC + signed tokens), the whole JSON API surface
+(state/home/search/mix/rooms/playlists/actions), playlist storage round-trips,
+chart caching, generated artwork, handler registration and client construction.
 CI runs the same suite on Python 3.11 and 3.12.
 
 ---

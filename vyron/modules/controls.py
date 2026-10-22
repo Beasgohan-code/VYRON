@@ -3,6 +3,8 @@
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 
+import logging
+
 from pyrogram import Client, filters
 from pyrogram.types import Message
 
@@ -12,6 +14,9 @@ from vyron.ui import cards, keyboards, rich
 from vyron.ui.theme import E
 from vyron.utils.filters import control
 from vyron.utils.helpers import command_args, parse_seek
+from vyron.utils import thumbnails
+
+logger = logging.getLogger(__name__)
 
 
 def _player():
@@ -160,11 +165,32 @@ def register(client: Client) -> None:
         if not state.current:
             await rich.send(message._client, message.chat.id, cards.warn_card("Nothing is playing right now."))
             return
+        markup = cards.now_playing_card(state)
+        keyboard = keyboards.now_playing(state)
+
+        # Artwork card: when Pillow is installed we render a real image and use
+        # the text card as its caption.  Any failure silently degrades to the
+        # plain rich card below.
+        art = await thumbnails.now_playing(state, state.current)
+        if art:
+            try:
+                import io
+
+                await message._client.send_photo(
+                    chat_id=message.chat.id,
+                    photo=io.BytesIO(art),
+                    caption=rich.to_plain_text(markup)[:1024],
+                    reply_markup=keyboard,
+                )
+                return
+            except Exception as exc:  # pragma: no cover - network
+                logger.debug("artwork send failed: %s", exc)
+
         await rich.send(
             message._client,
             message.chat.id,
-            cards.now_playing_card(state),
-            markup_keyboard=keyboards.now_playing(state),
+            markup,
+            markup_keyboard=keyboard,
             reply_to=message.id,
         )
 

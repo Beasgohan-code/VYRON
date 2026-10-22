@@ -13,6 +13,7 @@ from typing import Any
 from pyrogram import Client
 
 from vyron.config import Settings, settings as default_settings
+from vyron.core.charts import Charts
 from vyron.core.downloader import Downloader
 from vyron.core.lyrics import LyricsClient
 from vyron.core.player import Player
@@ -31,6 +32,7 @@ class Runtime:
     storage: Storage | None = None
     youtube: YouTube | None = None
     downloader: Downloader | None = None
+    charts: Charts | None = None
     lyrics: LyricsClient | None = None
     player: Player | None = None
     started_at: float = field(default_factory=time.time)
@@ -56,6 +58,7 @@ class Runtime:
         from vyron.database import make_storage
 
         self.youtube = YouTube(self.settings)
+        self.charts = Charts(self.youtube)
         self.downloader = Downloader(self.settings)
         self.lyrics = LyricsClient()
         self.storage = await make_storage(self.settings)

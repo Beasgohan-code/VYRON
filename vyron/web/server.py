@@ -1,18 +1,19 @@
 # ---------------------------------------------------------------------------
 #  VYRON — web app API
 #
-#  A small JSON surface over the same Player the bot uses, so the Mini App and
-#  the chat never disagree about state.
+#  JSON surface over the same Player the bot uses.  Views in `webapp/`:
+#    Home · Search · Queue · Library · Playlists · Rooms · Profile
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 
 from aiohttp import web
-from pyrogram.enums import ChatType
 
 from vyron.config import settings
+from vyron.core import playlists as pl
 from vyron.core.queue import LoopMode, Track
 from vyron.runtime import runtime
 from vyron.web.auth import WebUser, make_token, resolve_user
@@ -22,36 +23,117 @@ logger = logging.getLogger(__name__)
 WEB_DIR = Path(getattr(settings, "webapp_dir", Path(__file__).resolve().parent.parent.parent / "webapp"))
 
 
-DEMO_STATE = {
+# ── demo payload (browser preview) ──────────────────────────────────────────
+# Served to anonymous visitors and to the standalone preview server, so the UI
+# can be developed without Telegram credentials or network access.  Covers are
+# the procedural artwork shipped in webapp/assets/covers.
+def _demo_track(index: int, title: str, uploader: str, duration: int) -> dict:
+    return {
+        "id": f"demo{index:02d}",
+        "title": title,
+        "uploader": uploader,
+        "duration": duration,
+        "thumbnail": f"/app/static/assets/covers/{index:02d}.jpg",
+        "source": "youtube",
+        "url": "",
+        "query": f"{title} {uploader}",
+    }
+
+
+_DEMO_TRACKS = [
+    _demo_track(1, "Neon Skyline", "VYRON Sessions", 198),
+    _demo_track(2, "Slow Motion", "Aria Vale", 241),
+    _demo_track(3, "Afterglow", "Kite & Co.", 167),
+    _demo_track(4, "Midnight Drive", "Lumen", 212),
+    _demo_track(5, "Paper Planes", "Nova Ray", 189),
+    _demo_track(6, "Golden Hour", "Sable", 233),
+    _demo_track(7, "Static Bloom", "Halcyon", 205),
+    _demo_track(8, "Riverline", "Ora", 176),
+    _demo_track(9, "Glasshouse", "Mirage Club", 254),
+    _demo_track(10, "Ultraviolet", "Neon Hills", 221),
+]
+
+_DEMO_QUEUE = [{**track, "index": index} for index, track in enumerate(_DEMO_TRACKS[:6], 1)]
+
+_DEMO_MIXES = [
+    ("daily", "Daily Mix", "sun"),
+    ("chill", "Chill Vibes", "wave"),
+    ("anime", "Anime Mix", "star"),
+    ("workout", "Workout", "bolt"),
+    ("focus", "Focus", "moon"),
+    ("night", "Night Vibes", "moon"),
+]
+
+DEMO = {
     "version": "preview",
     "streaming": True,
-    "user": {"id": 0, "name": "Preview", "username": ""},
+    "bot": "VyronMusicBot",
+    "user": {"id": 0, "name": "Preview Listener", "username": "preview"},
     "chat": {"id": 0, "title": "VYRON Preview", "is_group": False},
     "now": {
-        "title": "Midnight Drive",
-        "uploader": "VYRON Demo",
-        "duration": 212,
+        **_DEMO_TRACKS[3],
         "elapsed": 74.0,
         "progress": 0.35,
         "paused": False,
+        "requested_by": "you",
+    },
+    "queue": _DEMO_QUEUE,
+    "settings": {
         "volume": 100,
         "loop": "off",
-        "source": "youtube",
-        "requested_by": "you",
-        "thumbnail": "",
-        "url": "",
+        "autoplay": True,
+        "always_on": False,
+        "shuffle": False,
+        "effects": [],
     },
-    "queue": [
-        {"index": 1, "title": "Neon Skyline", "uploader": "VYRON Demo", "duration": 198, "thumbnail": ""},
-        {"index": 2, "title": "Slow Motion", "uploader": "VYRON Demo", "duration": 241, "thumbnail": ""},
-        {"index": 3, "title": "Afterglow", "uploader": "VYRON Demo", "duration": 167, "thumbnail": ""},
+    "favorites": _DEMO_TRACKS[:5],
+    "history": _DEMO_TRACKS[5:],
+    "playlists": [
+        {
+            "id": "p1",
+            "name": "Late Night",
+            "count": 4,
+            "duration": 848,
+            "covers": [t["thumbnail"] for t in _DEMO_TRACKS[:4]],
+            "tracks": _DEMO_TRACKS[:4],
+        },
+        {
+            "id": "p2",
+            "name": "Focus Session",
+            "count": 3,
+            "duration": 651,
+            "covers": [t["thumbnail"] for t in _DEMO_TRACKS[4:7]],
+            "tracks": _DEMO_TRACKS[4:7],
+        },
     ],
-    "settings": {"volume": 100, "loop": "off", "autoplay": True, "always_on": False, "shuffle": False},
-    "favorites": [{"id": "demo", "title": "Saved track", "uploader": "VYRON Demo", "duration": 180}],
+    "rooms": [
+        {
+            "chat_id": -1001,
+            "title": "Chill Squad",
+            "username": "vyronmusichub",
+            "listeners": 4,
+            "playing": True,
+            "paused": False,
+            "track": _DEMO_TRACKS[1],
+            "volume": 90,
+            "effects": ["bass"],
+        },
+        {
+            "chat_id": -1002,
+            "title": "Late Night Lo-fi",
+            "username": "",
+            "listeners": 12,
+            "playing": True,
+            "paused": True,
+            "track": _DEMO_TRACKS[6],
+            "volume": 70,
+            "effects": [],
+        },
+    ],
+    "stats": {"users": 4832, "chats": 128, "tracks": 12400},
 }
 
 
-# ── helpers ─────────────────────────────────────────────────────────────────
 def _track_json(track: Track | None, *, index: int | None = None) -> dict | None:
     if track is None:
         return None
@@ -65,6 +147,7 @@ def _track_json(track: Track | None, *, index: int | None = None) -> dict | None
         "requested_by": track.requested_name,
         "video": track.is_video,
         "url": track.watch_url,
+        "query": f"{track.title} {track.uploader}".strip(),
     }
     if index is not None:
         payload["index"] = index
@@ -95,7 +178,7 @@ async def _identify(request: web.Request) -> WebUser:
     )
 
 
-def _guard(user: WebUser) -> web.Response | None:
+def _denied(user: WebUser) -> web.Response | None:
     if user.authenticated or settings.webapp_allow_anon:
         return None
     return web.json_response(
@@ -104,19 +187,15 @@ def _guard(user: WebUser) -> web.Response | None:
     )
 
 
-async def _is_admin(chat_id: int, user_id: int) -> bool:
-    if not runtime.bot or not user_id:
-        return False
-    if user_id in settings.owners:
-        return True
-    try:
-        member = await runtime.bot.get_chat_member(chat_id, user_id)
-        return member.status.name in {"ADMINISTRATOR", "OWNER"}
-    except Exception:
-        return True  # private chat / unknown → the player still guards itself
+def _is_preview(user: WebUser) -> bool:
+    return user.source == "anon" and runtime.player is None
 
 
-# ── routes ──────────────────────────────────────────────────────────────────
+def _chat_id(user: WebUser) -> int:
+    return user.chat_id or user.user_id
+
+
+# ── static shell ────────────────────────────────────────────────────────────
 async def index(_: web.Request) -> web.StreamResponse:
     page = WEB_DIR / "index.html"
     if not page.is_file():
@@ -124,31 +203,31 @@ async def index(_: web.Request) -> web.StreamResponse:
     return web.FileResponse(page)
 
 
+# ── state ───────────────────────────────────────────────────────────────────
 async def state(request: web.Request) -> web.Response:
     user = await _identify(request)
-    denied = _guard(user)
+    denied = _denied(user)
     if denied:
         return denied
+    if _is_preview(user):
+        return web.json_response({"ok": True, "preview": True, **DEMO})
 
     player = runtime.player
-    if user.source == "anon" and player is None:
-        return web.json_response(
-            {"ok": True, "preview": True, **DEMO_STATE}
-        )
-    chat_id = user.chat_id or user.user_id
+    chat_id = _chat_id(user)
     state_obj = player.queues.get(chat_id) if player else None
     current = state_obj.current if state_obj else None
 
     now = _track_json(current)
     if now and state_obj:
-        now["elapsed"] = round(state_obj.elapsed(), 1)
-        now["paused"] = state_obj.paused
-        now["volume"] = state_obj.volume
-        now["loop"] = state_obj.loop.value
-        now["progress"] = (
-            round(min(1.0, state_obj.elapsed() / current.duration), 4)
-            if current.duration
-            else 0
+        elapsed = state_obj.elapsed()
+        now.update(
+            elapsed=round(elapsed, 1),
+            paused=state_obj.paused,
+            volume=state_obj.volume,
+            loop=state_obj.loop.value,
+            progress=(
+                round(min(1.0, elapsed / current.duration), 4) if current.duration else 0
+            ),
         )
 
     chat_title = ""
@@ -159,13 +238,23 @@ async def state(request: web.Request) -> web.Response:
         except Exception:
             chat_title = ""
 
+    favorites = await runtime.storage.favorites(user.user_id, 50) if runtime.storage else []
+    history = await runtime.storage.history(user.user_id, 20) if runtime.storage else []
+    playlists = [pl.summary(entry) for entry in await pl.list_playlists(user.user_id)]
+    counters = await runtime.storage.counters() if runtime.storage else {}
+
     return web.json_response(
         {
             "ok": True,
             "version": runtime.version,
+            "bot": settings.bot_username,
             "streaming": runtime.streaming_ready,
             "user": {"id": user.user_id, "name": user.name, "username": user.username},
-            "chat": {"id": chat_id, "title": chat_title, "is_group": bool(user.chat_id) and chat_id < 0},
+            "chat": {
+                "id": chat_id,
+                "title": chat_title,
+                "is_group": bool(user.chat_id) and chat_id < 0,
+            },
             "now": now,
             "queue": [
                 _track_json(track, index=index + 1)
@@ -177,44 +266,239 @@ async def state(request: web.Request) -> web.Response:
                 "autoplay": state_obj.autoplay if state_obj else settings.autoplay_default,
                 "always_on": state_obj.always_on if state_obj else False,
                 "shuffle": state_obj.shuffle if state_obj else False,
+                "effects": state_obj.effects if state_obj else [],
             },
             "favorites": [
-                _track_json(Track.from_dict(item))
-                for item in (await runtime.storage.favorites(user.user_id, 10) if runtime.storage else [])
+                {**_track_json(Track.from_dict(item))} for item in favorites
             ],
+            "history": [{**_track_json(Track.from_dict(item))} for item in history],
+            "playlists": playlists,
+            "stats": {
+                "tracks": counters.get("tracks", 0),
+                "downloads": counters.get("downloads", 0),
+                "chats": len(await runtime.storage.all_chat_ids()) if runtime.storage else 0,
+            },
         }
     )
 
 
+# ── home / discovery ────────────────────────────────────────────────────────
+async def home(request: web.Request) -> web.Response:
+    user = await _identify(request)
+    denied = _denied(user)
+    if denied:
+        return denied
+    if _is_preview(user) or runtime.charts is None:
+        return web.json_response(
+            {
+                "ok": True,
+                "preview": True,
+                "hero": {
+                    "headline": "Music hits different here.",
+                    "subline": "Discover, stream, download and listen together — all in one place.",
+                    "cover": "/app/static/assets/covers/07.jpg",
+                },
+                "trending": _DEMO_TRACKS[:8],
+                "shelves": [
+                    {
+                        "key": key,
+                        "title": title,
+                        "glyph": glyph,
+                        "kind": "mix",
+                        "tracks": [
+                            _DEMO_TRACKS[(index * 2 + offset) % len(_DEMO_TRACKS)]
+                            for offset in range(4)
+                        ],
+                    }
+                    for index, (key, title, glyph) in enumerate(_DEMO_MIXES)
+                ],
+                "moods": [
+                    {"key": key, "title": title.replace(" Mix", ""), "glyph": "note"}
+                    for key, title, _glyph in _DEMO_MIXES
+                ]
+                + [
+                    {"key": "romance", "title": "Romance", "glyph": "heart"},
+                    {"key": "party", "title": "Party", "glyph": "spark"},
+                ],
+            }
+        )
+
+    payload = await runtime.charts.home()
+    return web.json_response({"ok": True, **payload})
+
+
+async def search(request: web.Request) -> web.Response:
+    user = await _identify(request)
+    denied = _denied(user)
+    if denied:
+        return denied
+    body = await _read_json(request)
+    query = str(body.get("query") or request.query.get("q") or "").strip()
+    if not query:
+        return web.json_response({"ok": True, "results": []})
+    if _is_preview(user):
+        return web.json_response({"ok": True, "results": _DEMO_TRACKS, "preview": True})
+
+    limit = min(20, max(4, int(body.get("limit") or 10)))
+    try:
+        tracks = await runtime.youtube.search(
+            query, limit=limit, requester=(user.user_id, user.name or "")
+        )
+    except Exception as exc:
+        return web.json_response({"ok": False, "error": str(exc)}, status=400)
+    return web.json_response(
+        {"ok": True, "query": query, "results": [_track_json(track, index=i) for i, track in enumerate(tracks, 1)]}
+    )
+
+
+async def mix(request: web.Request) -> web.Response:
+    user = await _identify(request)
+    denied = _denied(user)
+    if denied:
+        return denied
+    key = request.query.get("key", "")
+    if _is_preview(user) or runtime.charts is None:
+        return web.json_response({"ok": True, "tracks": _DEMO_TRACKS, "preview": True})
+    tracks = await runtime.charts.mix(key, limit=25)
+    if not tracks:
+        tracks = await runtime.charts.mood(key, limit=25)
+    return web.json_response(
+        {"ok": True, "key": key, "tracks": [_track_json(t, index=i) for i, t in enumerate(tracks, 1)]}
+    )
+
+
+# ── rooms (listen together) ─────────────────────────────────────────────────
+async def rooms(request: web.Request) -> web.Response:
+    user = await _identify(request)
+    denied = _denied(user)
+    if denied:
+        return denied
+    if _is_preview(user) or runtime.player is None:
+        return web.json_response({"ok": True, "rooms": DEMO["rooms"], "preview": True})
+
+    entries = []
+    for chat_id in runtime.player.active_chats():
+        state_obj = runtime.player.queues.get(chat_id)
+        title = f"Chat {chat_id}"
+        username = ""
+        try:
+            chat = await runtime.bot.get_chat(chat_id)
+            title = chat.title or chat.first_name or title
+            username = chat.username or ""
+        except Exception:
+            pass
+        listeners = 0
+        try:
+            participants = await runtime.calls.get_participants(chat_id)
+            listeners = max(0, len(participants or []) - 1)
+        except Exception:
+            listeners = 0
+        entries.append(
+            {
+                "chat_id": chat_id,
+                "title": title,
+                "username": username,
+                "listeners": listeners,
+                "playing": bool(state_obj and state_obj.playing),
+                "paused": bool(state_obj and state_obj.paused),
+                "track": _track_json(state_obj.current) if state_obj else None,
+                "volume": state_obj.volume if state_obj else 100,
+                "effects": state_obj.effects if state_obj else [],
+            }
+        )
+    return web.json_response({"ok": True, "rooms": entries})
+
+
+# ── playlists ───────────────────────────────────────────────────────────────
+async def playlists_route(request: web.Request) -> web.Response:
+    user = await _identify(request)
+    denied = _denied(user)
+    if denied:
+        return denied
+    if _is_preview(user):
+        return web.json_response({"ok": True, "playlists": DEMO["playlists"], "preview": True})
+    return web.json_response(
+        {
+            "ok": True,
+            "playlists": [pl.summary(entry) for entry in await pl.list_playlists(user.user_id)],
+        }
+    )
+
+
+# ── actions ─────────────────────────────────────────────────────────────────
+# Background jobs started by the web app (downloads) — kept referenced so they
+# are not garbage-collected mid-flight.
+_TASKS: set[asyncio.Task] = set()
+
+# Every action /api/action understands.  Unknown names are rejected before the
+# player guard so a stale frontend gets a useful 400 instead of a 503.
+KNOWN_ACTIONS = frozenset(
+    {
+        "play", "play_now", "play_next", "pause", "resume", "toggle", "skip",
+        "stop", "seek", "volume", "loop", "shuffle", "clear", "remove", "move",
+        "jump", "autoplay", "always", "effects", "favorite", "unfavorite",
+        "favorite_track", "playlist_create", "playlist_delete", "playlist_add",
+        "playlist_remove", "playlist_play", "search", "download",
+    }
+)
+
+# Actions that work without an active voice-chat player.
+PLAYERLESS_ACTIONS = frozenset(
+    {
+        "playlist_create", "playlist_delete", "playlist_add", "playlist_remove",
+        "favorite_track", "unfavorite", "search",
+    }
+)
+
+
 async def action(request: web.Request) -> web.Response:
     user = await _identify(request)
-    denied = _guard(user)
+    denied = _denied(user)
     if denied:
         return denied
 
     body = await _read_json(request)
     name = str(body.get("action") or "")
     value = body.get("value")
-    chat_id = user.chat_id or user.user_id
-    player = runtime.player
-    if player is None:
-        return web.json_response({"ok": False, "error": "player not ready"}, status=503)
+    chat_id = _chat_id(user)
 
-    state_obj = player.queues.get(chat_id)
+    if _is_preview(user):
+        return web.json_response({"ok": True, "preview": True, "action": name})
+
+    if name not in KNOWN_ACTIONS:
+        return web.json_response(
+            {"ok": False, "error": f"unknown action {name!r}", "actions": sorted(KNOWN_ACTIONS)},
+            status=400,
+        )
+
+    player = runtime.player
+    if player is None and name not in PLAYERLESS_ACTIONS:
+        return web.json_response({"ok": False, "error": "player not ready"}, status=503)
+    state_obj = player.queues.get(chat_id) if player else None
 
     def ok(**extra) -> web.Response:
         return web.json_response({"ok": True, **extra})
 
     try:
+        # ── playback ──────────────────────────────────────────────────────
         if name == "play":
             query = str(value or "").strip()
             if not query:
                 return web.json_response({"ok": False, "error": "empty query"}, status=400)
-            track = await runtime.youtube.resolve(
-                query, requester=(user.user_id, user.name or "")
-            )
+            track = await runtime.youtube.resolve(query, requester=(user.user_id, user.name or ""))
             position = await player.enqueue(chat_id, track, play_now=True)
             return ok(position=position, track=_track_json(track))
+
+        if name in {"play_now", "play_next"}:
+            query = str(value or "").strip()
+            if not query:
+                return web.json_response({"ok": False, "error": "empty query"}, status=400)
+            track = await runtime.youtube.resolve(query, requester=(user.user_id, user.name or ""))
+            if name == "play_now":
+                await player.play_track(chat_id, track)
+                return ok(track=_track_json(track))
+            await player.enqueue(chat_id, track, index=0)
+            return ok(track=_track_json(track))
 
         if name == "pause":
             return ok(changed=await player.pause(chat_id))
@@ -223,8 +507,7 @@ async def action(request: web.Request) -> web.Response:
         if name == "toggle":
             return ok(changed=await player.toggle(chat_id))
         if name == "skip":
-            track = await player.skip(chat_id, count=int(value or 1))
-            return ok(track=_track_json(track))
+            return ok(track=_track_json(await player.skip(chat_id, count=int(value or 1))))
         if name == "stop":
             await player.stop(chat_id, leave=True)
             return ok()
@@ -245,11 +528,9 @@ async def action(request: web.Request) -> web.Response:
             return ok(track=_track_json(track))
         if name == "move":
             pair = value if isinstance(value, dict) else {}
-            moved = player.queues.move(chat_id, int(pair.get("from", 0)), int(pair.get("to", 0)))
-            return ok(moved=moved)
+            return ok(moved=player.queues.move(chat_id, int(pair.get("from", 0)), int(pair.get("to", 0))))
         if name == "jump":
-            track = await player.jump(chat_id, int(value or 0))
-            return ok(track=_track_json(track))
+            return ok(track=_track_json(await player.jump(chat_id, int(value or 0))))
         if name == "autoplay":
             state_obj.autoplay = not state_obj.autoplay
             await player.persist(chat_id)
@@ -258,30 +539,94 @@ async def action(request: web.Request) -> web.Response:
             state_obj.always_on = not state_obj.always_on
             await player.persist(chat_id)
             return ok(always_on=state_obj.always_on)
+        if name == "effects":
+            from vyron.core import chatcfg, effects as audio_fx
+
+            active = audio_fx.resolve(value if isinstance(value, list) else [])
+            await chatcfg.set(chat_id, "effects", active)
+            state_obj.effects = active
+            return ok(effects=active, labels=audio_fx.labels(active))
+
+        # ── library ───────────────────────────────────────────────────────
         if name == "favorite":
             if not state_obj.current or runtime.storage is None:
                 return ok(saved=False)
-            saved = await runtime.storage.add_favorite(
-                user.user_id, state_obj.current.to_dict()
-            )
+            saved = await runtime.storage.add_favorite(user.user_id, state_obj.current.to_dict())
             return ok(saved=saved)
+        if name == "unfavorite":
+            media_id = str(value or "")
+            removed = await runtime.storage.remove_favorite(user.user_id, media_id)
+            return ok(removed=removed)
+        if name == "favorite_track":
+            payload = value if isinstance(value, dict) else {}
+            if runtime.storage is None or not payload.get("id"):
+                return ok(saved=False)
+            saved = await runtime.storage.add_favorite(user.user_id, payload)
+            return ok(saved=saved)
+
+        # ── playlists ─────────────────────────────────────────────────────
+        if name == "playlist_create":
+            entry = await pl.create(user.user_id, str(value or "New playlist"))
+            return ok(playlist=pl.summary(entry))
+        if name == "playlist_delete":
+            return ok(deleted=await pl.delete(user.user_id, str(value or "")))
+        if name == "playlist_add":
+            payload = value if isinstance(value, dict) else {}
+            playlist_id = str(payload.get("playlist_id") or "")
+            track_payload = payload.get("track") or {}
+            tracks: list[Track] = []
+            if track_payload.get("id"):
+                tracks = [Track.from_dict(track_payload)]
+            elif state_obj and state_obj.current:
+                tracks = [state_obj.current]
+            added = await pl.add_tracks(user.user_id, playlist_id, tracks)
+            return ok(added=added)
+        if name == "playlist_remove":
+            payload = value if isinstance(value, dict) else {}
+            return ok(
+                removed=await pl.remove_track(
+                    user.user_id, str(payload.get("playlist_id") or ""), str(payload.get("id") or "")
+                )
+            )
+        if name == "playlist_play":
+            playlist_id = str(value or "")
+            title, tracks = await pl.as_tracks(user.user_id, playlist_id)
+            if not tracks:
+                return web.json_response({"ok": False, "error": "playlist is empty"}, status=400)
+            started = 0
+            for track in tracks[:60]:
+                position = await player.enqueue(chat_id, track)
+                if position > 0:
+                    started += 1
+            return ok(queued=started, name=title)
+
         if name == "search":
             query = str(value or "").strip()
             if not query:
                 return web.json_response({"ok": False, "error": "empty query"}, status=400)
-            results = await runtime.youtube.search(
-                query, limit=6, requester=(user.user_id, user.name or "")
+            tracks = await runtime.youtube.search(
+                query, limit=8, requester=(user.user_id, user.name or "")
             )
-            return ok(
-                results=[
-                    {**_track_json(track), "index": index}
-                    for index, track in enumerate(results)
-                ]
+            return ok(results=[_track_json(t, index=i) for i, t in enumerate(tracks, 1)])
+
+        if name == "download":
+            payload = value if isinstance(value, dict) else {}
+            query = str(payload.get("query") or "").strip()
+            kind = "video" if payload.get("kind") == "video" else "audio"
+            if not query:
+                return web.json_response({"ok": False, "error": "empty query"}, status=400)
+            if runtime.bot is None:
+                return web.json_response({"ok": False, "error": "bot unavailable"}, status=503)
+            from vyron.modules.play import deliver
+
+            track = await runtime.youtube.resolve(query, requester=(user.user_id, user.name or ""))
+            task = asyncio.create_task(
+                deliver(runtime.bot, chat_id, track, kind == "video", reply_to=None)
             )
-        if name == "play_index":
-            return web.json_response(
-                {"ok": False, "error": "use action=play with a query"}, status=400
-            )
+            _TASKS.add(task)
+            task.add_done_callback(_TASKS.discard)
+            return ok(started=True, track=_track_json(track))
+
     except Exception as exc:
         logger.warning("web action %s failed: %s", name, exc)
         return web.json_response({"ok": False, "error": str(exc)}, status=400)
@@ -289,6 +634,7 @@ async def action(request: web.Request) -> web.Response:
     return web.json_response({"ok": False, "error": f"unknown action {name!r}"}, status=400)
 
 
+# ── misc ────────────────────────────────────────────────────────────────────
 async def info(_: web.Request) -> web.Response:
     return web.json_response(
         {
@@ -297,22 +643,21 @@ async def info(_: web.Request) -> web.Response:
             "bot": settings.bot_username,
             "version": runtime.version,
             "auth_required": not settings.webapp_allow_anon,
+            "streaming": runtime.streaming_ready,
         }
     )
 
 
 async def authenticate(request: web.Request) -> web.Response:
-    """Exchange Telegram initData for a chat-scoped token (used by /app links)."""
     user = await _identify(request)
-    denied = _guard(user)
+    denied = _denied(user)
     if denied:
         return denied
-    token = make_token(user.chat_id or user.user_id, user.user_id, settings.bot_token)
-    return web.json_response({"ok": True, "token": token, "chat_id": user.chat_id or user.user_id})
+    token = make_token(_chat_id(user), user.user_id, settings.bot_token)
+    return web.json_response({"ok": True, "token": token, "chat_id": _chat_id(user)})
 
 
 def chat_link(chat_id: int, user_id: int) -> str:
-    """Public Mini App URL for a chat (used by the /app command)."""
     if not settings.webapp_url:
         return ""
     token = make_token(chat_id, user_id, settings.bot_token)
@@ -320,20 +665,23 @@ def chat_link(chat_id: int, user_id: int) -> str:
 
 
 def register(app: web.Application) -> None:
-    """Attach the Mini App routes to an existing aiohttp application."""
     if not settings.webapp:
         return
-    static_dir = WEB_DIR
     app.router.add_get("/app", index)
     app.router.add_get("/app/", index)
-    if static_dir.is_dir():
-        app.router.add_static("/app/static", static_dir, show_index=False)
+    if WEB_DIR.is_dir():
+        app.router.add_static("/app/static", WEB_DIR, show_index=False)
     app.router.add_get("/api/info", info)
+    app.router.add_get("/api/home", home)
+    app.router.add_get("/api/rooms", rooms)
+    app.router.add_get("/api/playlists", playlists_route)
+    app.router.add_get("/api/mix", mix)
     app.router.add_get("/api/state", state)
     app.router.add_post("/api/state", state)
+    app.router.add_post("/api/search", search)
     app.router.add_post("/api/action", action)
     app.router.add_post("/api/auth", authenticate)
-    logger.info("web app mounted from %s", static_dir)
+    logger.info("web app mounted from %s", WEB_DIR)
 
 
-__all__ = ["WEB_DIR", "chat_link", "register"]
+__all__ = ["DEMO", "WEB_DIR", "chat_link", "register"]

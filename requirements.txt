@@ -15,6 +15,11 @@ richgram>=0.2.0
 # ─── Media ──────────────────────────────────────────────────────────────────
 yt-dlp>=2025.1.1
 
+# ─── Artwork (optional) ─────────────────────────────────────────────────────
+# Renders the /np "now playing" image (1280×720).  Without it VYRON simply
+# falls back to the rich text card, so it is a soft dependency.
+Pillow>=10.4
+
 # ─── Runtime ────────────────────────────────────────────────────────────────
 aiohttp>=3.9.3
 python-dotenv>=1.0.1

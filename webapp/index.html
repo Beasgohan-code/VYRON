@@ -1,172 +1,427 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="beat" data-accent="violet">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#0b0b12" />
-  <title>VYRON Player</title>
-  <link rel="stylesheet" href="/app/static/styles.css" />
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#08080e" />
+<title>VYRON · Music Beyond Limits</title>
+<link rel="preconnect" href="https://i.ytimg.com" />
+<link rel="stylesheet" href="/app/static/styles.css" />
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
-  <div class="glow glow-a"></div>
-  <div class="glow glow-b"></div>
 
-  <div id="preview-ribbon" class="ribbon" hidden>
-    Preview mode · open from Telegram to control the player
-  </div>
+<!-- ───────────────────────── icon sprite ───────────────────────── -->
+<svg class="sprite" aria-hidden="true">
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></symbol>
+  <symbol id="i-library" viewBox="0 0 24 24"><path d="M5 4v16M10 4v16M15 5l4 15"/></symbol>
+  <symbol id="i-queue" viewBox="0 0 24 24"><path d="M4 7h16M4 12h10M4 17h7"/></symbol>
+  <symbol id="i-playlist" viewBox="0 0 24 24"><path d="M4 6h12M4 11h12M4 16h7"/><circle cx="18" cy="16" r="3"/><path d="M21 16V8l-3 1"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 20a6 6 0 0 1 12 0"/><circle cx="17.5" cy="9.5" r="2.5"/><path d="M16 20a5 5 0 0 1 5-4.6"/></symbol>
+  <symbol id="i-bot" viewBox="0 0 24 24"><rect x="4" y="7" width="16" height="12" rx="4"/><circle cx="9" cy="13" r="1.3"/><circle cx="15" cy="13" r="1.3"/><path d="M12 3v4M8 19v2M16 19v2"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 15V10a6 6 0 1 0-12 0v5l-2 3h16z"/><path d="M10 21h4"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 5h3v14H8zM13 5h3v14h-3z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-prev" viewBox="0 0 24 24"><path d="M18 6v12L9 12z" fill="currentColor" stroke="none"/><path d="M6 5v14"/></symbol>
+  <symbol id="i-next" viewBox="0 0 24 24"><path d="M6 6v12l9-6z" fill="currentColor" stroke="none"/><path d="M18 5v14"/></symbol>
+  <symbol id="i-shuffle" viewBox="0 0 24 24"><path d="M16 4h4v4M4 20l16-16M16 20h4v-4M4 4l5 5"/></symbol>
+  <symbol id="i-repeat" viewBox="0 0 24 24"><path d="M17 3l4 4-4 4M7 21l-4-4 4-4"/><path d="M3 12V9a4 4 0 0 1 4-4h14M21 12v3a4 4 0 0 1-4 4H3"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v10M8 11l4 4 4-4"/><path d="M4 18h16"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20s-7-4.6-7-9.4A4.1 4.1 0 0 1 12 7a4.1 4.1 0 0 1 7 3.6C19 15.4 12 20 12 20z"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="6" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="18" cy="12" r="1.4" fill="currentColor"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></symbol>
+  <symbol id="i-volume" viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M17 8.5a5 5 0 0 1 0 7"/></symbol>
+  <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.5 2.6 2.5 14.4 0 17-2.5-2.6-2.5-14.4 0-17z"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></symbol>
+  <symbol id="i-wave" viewBox="0 0 24 24"><path d="M3 12h2l2-5 3 12 3-16 3 13 2-4h3"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 20V9M8 12l4-4 4 4"/><path d="M4 5h16"/></symbol>
+</svg>
 
-  <main class="shell">
-    <!-- ── header ─────────────────────────────────────────────── -->
-    <header class="topbar">
-      <div class="brand">
-        <span class="brand-mark">V</span>
-        <div class="brand-text">
-          <strong>VYRON</strong>
-          <span id="chat-name" class="muted">Player</span>
-        </div>
+<!-- ───────────────────────── app shell ───────────────────────── -->
+<div class="app" id="app">
+
+  <!-- sidebar -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo"><svg class="i"><use href="#i-sparkle"/></svg></div>
+      <div>
+        <strong>VYRON</strong>
+        <span>music beyond limits</span>
       </div>
-      <button id="btn-refresh" class="ghost" aria-label="Refresh">
-        <svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/></svg>
-      </button>
+    </div>
+
+    <nav class="nav" id="sidebar-nav">
+      <button class="nav-item active" data-view="home"><svg class="i"><use href="#i-home"/></svg><span>Home</span></button>
+      <button class="nav-item" data-view="search"><svg class="i"><use href="#i-search"/></svg><span>Search</span></button>
+      <button class="nav-item" data-view="library"><svg class="i"><use href="#i-library"/></svg><span>Library</span></button>
+      <button class="nav-item" data-view="queue"><svg class="i"><use href="#i-queue"/></svg><span>Queue</span></button>
+      <button class="nav-item" data-view="playlists"><svg class="i"><use href="#i-playlist"/></svg><span>Playlists</span></button>
+      <button class="nav-item" data-view="rooms"><svg class="i"><use href="#i-users"/></svg><span>Listen Together</span><em class="tag">new</em></button>
+      <a class="nav-item" id="nav-bot" href="https://t.me/VyronMusicBot" target="_blank" rel="noopener"><svg class="i"><use href="#i-bot"/></svg><span>Telegram Bot</span></a>
+      <button class="nav-item" data-view="profile"><svg class="i"><use href="#i-settings"/></svg><span>Settings</span></button>
+    </nav>
+
+    <div class="side-foot">
+      <div class="mini-user">
+        <div class="avatar" id="side-avatar">V</div>
+        <div class="mini-meta">
+          <strong id="side-name">VYRON</strong>
+          <span id="side-handle">@VyronMusicBot</span>
+          <span class="online"><i></i><span id="side-listeners">Online</span></span>
+        </div>
+        <button class="icon-btn" id="side-send" aria-label="Open in Telegram"><svg class="i"><use href="#i-upload"/></svg></button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- main -->
+  <main class="main" id="main">
+
+    <!-- top bar -->
+    <header class="topbar">
+      <button class="icon-btn only-mobile" data-view="search" aria-label="Search"><svg class="i"><use href="#i-search"/></svg></button>
+      <form class="global-search" id="global-search">
+        <svg class="i"><use href="#i-search"/></svg>
+        <input id="global-query" type="search" placeholder="Search songs, artists, albums, playlists…" autocomplete="off" />
+        <kbd>/</kbd>
+      </form>
+      <div class="top-actions">
+        <button class="icon-btn" id="btn-bell" aria-label="Notifications"><svg class="i"><use href="#i-bell"/></svg><i class="dot"></i></button>
+        <a class="pill-btn accent" href="https://t.me/VyronMusicBot" target="_blank" rel="noopener"><svg class="i"><use href="#i-sparkle"/></svg>Premium</a>
+        <button class="avatar small" data-view="profile" id="top-avatar">V</button>
+      </div>
     </header>
 
-    <!-- ── player tab ─────────────────────────────────────────── -->
-    <section id="tab-player" class="tab-panel active">
-      <article class="now-card">
-        <div class="art-wrap">
-          <img id="cover" class="art" alt="" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E" />
-          <div class="art-fallback" id="cover-fallback">♪</div>
-        </div>
-
-        <div class="meta">
-          <h1 id="track-title" class="title">Nothing playing</h1>
-          <p id="track-artist" class="artist">Send /play in the chat to start</p>
-          <div class="chips">
-            <span id="chip-source" class="chip">idle</span>
-            <span id="chip-quality" class="chip">high</span>
-            <span id="chip-requester" class="chip" hidden></span>
+    <!-- ═══════════ HOME ═══════════ -->
+    <section class="view active" id="view-home">
+      <div class="hero">
+        <div class="hero-copy">
+          <h1 id="greeting">Good evening,<br />Music hits different here.</h1>
+          <p>Discover, stream, download and listen together — all in one place. Powered by VYRON.</p>
+          <div class="hero-actions">
+            <button class="pill-btn accent" data-view="search"><svg class="i"><use href="#i-search"/></svg>Search</button>
+            <button class="pill-btn" data-open="download"><svg class="i"><use href="#i-download"/></svg>Download</button>
+            <button class="pill-btn" data-view="playlists"><svg class="i"><use href="#i-playlist"/></svg>Playlists</button>
+            <button class="pill-btn" data-view="rooms"><svg class="i"><use href="#i-users"/></svg>Listen Together</button>
           </div>
         </div>
-
-        <div class="progress-wrap">
-          <input id="seek" class="seek" type="range" min="0" max="100" value="0" step="1" />
-          <div class="times">
-            <span id="time-elapsed">0:00</span>
-            <span id="time-total">0:00</span>
-          </div>
-        </div>
-
-        <div class="transport">
-          <button class="ctl" data-action="loop" aria-label="Loop">
-            <svg viewBox="0 0 24 24"><path d="M17 2l4 4-4 4M7 22l-4-4 4-4"/><path d="M3 11V9a4 4 0 0 1 4-4h14M21 13v2a4 4 0 0 1-4 4H3"/></svg>
-          </button>
-          <button class="ctl" data-action="skipBack" aria-label="Restart">
-            <svg viewBox="0 0 24 24"><path d="M18 5v14L8 12z"/><path d="M5 5v14"/></svg>
-          </button>
-          <button id="play" class="play" data-action="toggle" aria-label="Play / pause">
-            <svg id="play-icon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-          </button>
-          <button class="ctl" data-action="skip" aria-label="Next">
-            <svg viewBox="0 0 24 24"><path d="M6 5v14l10-7z"/><path d="M19 5v14"/></svg>
-          </button>
-          <button class="ctl danger" data-action="stop" aria-label="Stop">
-            <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
-          </button>
-        </div>
-
-        <div class="volume-row">
-          <svg class="vol-icon" viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M17 8a5 5 0 0 1 0 8"/></svg>
-          <input id="volume" class="seek vol" type="range" min="1" max="200" value="100" />
-          <span id="volume-value" class="muted">100%</span>
-        </div>
-
-        <div class="quick-actions">
-          <button class="pill-btn" data-action="favorite">♥ Save</button>
-          <button class="pill-btn" data-action="shuffle">⤨ Shuffle</button>
-          <button class="pill-btn" data-action="autoplay">✨ Autoplay</button>
-          <button class="pill-btn" data-action="always">🕒 24/7</button>
-        </div>
-      </article>
-    </section>
-
-    <!-- ── queue tab ──────────────────────────────────────────── -->
-    <section id="tab-queue" class="tab-panel">
-      <div class="section-head">
-        <h2>Queue <span id="queue-count" class="muted">0</span></h2>
-        <button class="ghost small" data-action="clear">Clear</button>
+        <div class="hero-art"><div class="hero-glow"></div><div class="hero-note">“Music is not just sound,<br />it's a feeling.”</div></div>
       </div>
-      <ul id="queue-list" class="list"></ul>
-      <p id="queue-empty" class="empty">Queue is empty — search something below.</p>
+
+      <div class="section-head">
+        <h2><span class="flame">🔥</span> Trending Now</h2>
+        <button class="link-btn" data-view="search" data-focus="trending">View all<svg class="i"><use href="#i-chevron"/></svg></button>
+      </div>
+      <div class="shelf" id="shelf-trending" data-loading="true"></div>
+
+      <div class="section-head">
+        <h2><span class="flame">✨</span> Made For You</h2>
+      </div>
+      <div class="shelf shelf-mixes" id="shelf-mixes" data-loading="true"></div>
+
+      <div class="section-head"><h2>Moods</h2></div>
+      <div class="chips-row" id="mood-chips"></div>
+
+      <div class="cards-grid">
+        <article class="panel" id="panel-search-mini">
+          <div class="panel-head"><h3><svg class="i"><use href="#i-search"/></svg>Quick search</h3></div>
+          <form class="inline-form" id="mini-search">
+            <input type="search" id="mini-query" placeholder="What do you want to hear?" />
+            <button class="pill-btn accent" type="submit">Go</button>
+          </form>
+          <ul class="rows" id="mini-results"><li class="empty-row">Results appear here.</li></ul>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head"><h3><svg class="i"><use href="#i-download"/></svg>Download</h3></div>
+          <p class="muted small">Paste a link or type a name — the bot sends the file to your chat.</p>
+          <form class="inline-form" id="download-form">
+            <input type="text" id="download-input" placeholder="Paste link or search…" />
+            <button class="pill-btn accent" type="submit"><svg class="i"><use href="#i-download"/></svg>Get</button>
+          </form>
+          <div class="quality-row" id="quality-row">
+            <label><input type="radio" name="quality" value="audio" checked /> <span>MP3 · 320 kbps</span></label>
+            <label><input type="radio" name="quality" value="video" /> <span>MP4 · 720p</span></label>
+          </div>
+          <div class="source-row">
+            <span class="source yt">YouTube</span><span class="source">SoundCloud</span><span class="source">Links</span><span class="source">Replies</span>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head"><h3><svg class="i"><use href="#i-users"/></svg>Listen Together</h3><span class="tag">live</span></div>
+          <p class="muted small">Rooms are live voice chats the bot is streaming in right now.</p>
+          <ul class="rows" id="rooms-mini"><li class="empty-row">No active rooms yet.</li></ul>
+          <button class="pill-btn ghost wide" data-view="rooms">Browse rooms<svg class="i"><use href="#i-chevron"/></svg></button>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head"><h3><svg class="i"><use href="#i-library"/></svg>Your library</h3></div>
+          <div class="lib-stats" id="lib-stats"></div>
+          <ul class="rows" id="home-history"><li class="empty-row">Nothing played yet.</li></ul>
+        </article>
+      </div>
     </section>
 
-    <!-- ── search tab ─────────────────────────────────────────── -->
-    <section id="tab-search" class="tab-panel">
-      <form id="search-form" class="searchbar">
-        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
-        <input id="search-input" type="search" placeholder="Search a song or paste a link" autocomplete="off" />
-        <button type="submit" class="primary small">Go</button>
+    <!-- ═══════════ SEARCH ═══════════ -->
+    <section class="view" id="view-search">
+      <div class="view-head">
+        <h1>Search</h1>
+        <p class="muted">Songs, artists or links</p>
+      </div>
+      <form class="searchbar" id="search-form">
+        <svg class="i"><use href="#i-search"/></svg>
+        <input id="search-input" type="search" placeholder="Search or paste a YouTube link…" autocomplete="off" />
+        <button class="clear-btn" type="button" id="search-clear" hidden><svg class="i"><use href="#i-close"/></svg></button>
+        <button class="search-go" type="submit" aria-label="Search"><svg class="i"><use href="#i-search"/></svg></button>
       </form>
-      <ul id="search-results" class="list"></ul>
-      <p id="search-hint" class="empty">Results appear here — tap one to stream it.</p>
+
+      <div class="tabs" id="search-tabs">
+        <button class="tab active" data-filter="all">All</button>
+        <button class="tab" data-filter="songs">Songs</button>
+        <button class="tab" data-filter="playlists">Playlists</button>
+        <button class="tab" data-filter="artists">Artists</button>
+      </div>
+
+      <ul class="result-list" id="search-results"></ul>
+      <p class="empty-state" id="search-empty">Type something above — results appear instantly.</p>
+
+      <div class="section-head" id="recent-head" hidden><h2>Recent searches</h2></div>
+      <div class="chips-row" id="recent-searches"></div>
     </section>
 
-    <!-- ── settings tab ───────────────────────────────────────── -->
-    <section id="tab-settings" class="tab-panel">
-      <h2>Settings</h2>
-      <div class="card">
-        <label class="row">
-          <span>Autoplay related tracks</span>
-          <input type="checkbox" class="switch" data-setting="autoplay" />
-        </label>
-        <label class="row">
-          <span>24/7 mode (stay in voice chat)</span>
-          <input type="checkbox" class="switch" data-setting="always" />
-        </label>
-        <label class="row">
-          <span>Loop mode</span>
+    <!-- ═══════════ LIBRARY ═══════════ -->
+    <section class="view" id="view-library">
+      <div class="view-head row-between">
+        <div><h1>Library</h1><p class="muted">Liked songs, playlists and recently played</p></div>
+        <div class="head-actions">
+          <button class="pill-btn ghost" id="lib-export"><svg class="i"><use href="#i-upload"/></svg>Export</button>
+          <button class="pill-btn accent" id="lib-new"><svg class="i"><use href="#i-plus"/></svg>New</button>
+        </div>
+      </div>
+
+      <div class="tabs" id="library-tabs">
+        <button class="tab active" data-filter="liked">Liked Songs</button>
+        <button class="tab" data-filter="playlists">Playlists</button>
+        <button class="tab" data-filter="history">Recently Played</button>
+      </div>
+
+      <div class="liked-card" id="liked-card">
+        <div class="liked-art"><svg class="i"><use href="#i-heart"/></svg></div>
+        <div>
+          <strong>Liked Songs</strong>
+          <span class="muted" id="liked-count">0 tracks</span>
+        </div>
+        <button class="round-play" data-action="play-liked" aria-label="Play liked"><svg class="i"><use href="#i-play"/></svg></button>
+      </div>
+
+      <ul class="result-list" id="library-list"></ul>
+      <p class="empty-state" id="library-empty">Nothing here yet — like a track while it plays.</p>
+    </section>
+
+    <!-- ═══════════ QUEUE ═══════════ -->
+    <section class="view" id="view-queue">
+      <div class="view-head row-between">
+        <div><h1>Queue</h1><p class="muted" id="queue-sub">Nothing queued</p></div>
+        <label class="switch-row"><span>Autoplay</span><input type="checkbox" class="switch" id="queue-autoplay" /></label>
+      </div>
+      <ul class="queue-list" id="queue-list"></ul>
+      <p class="empty-state" id="queue-empty">The queue is empty — search something to add.</p>
+      <div class="queue-actions">
+        <button class="pill-btn" data-action="shuffle"><svg class="i"><use href="#i-shuffle"/></svg>Shuffle</button>
+        <button class="pill-btn danger" data-action="clear"><svg class="i"><use href="#i-close"/></svg>Clear queue</button>
+      </div>
+    </section>
+
+    <!-- ═══════════ PLAYLISTS ═══════════ -->
+    <section class="view" id="view-playlists">
+      <div class="view-head row-between">
+        <div><h1>Playlists</h1><p class="muted" id="playlists-sub">Your saved collections</p></div>
+        <button class="pill-btn accent" id="playlist-new"><svg class="i"><use href="#i-plus"/></svg>Create</button>
+      </div>
+      <div class="playlist-grid" id="playlist-grid"></div>
+      <p class="empty-state" id="playlist-empty">No playlists yet — create one, or save a queue from the bot with <code>/saveplaylist</code>.</p>
+
+      <div class="playlist-detail" id="playlist-detail" hidden>
+        <div class="panel-head">
+          <h3 id="playlist-title">Playlist</h3>
+          <div class="head-actions">
+            <button class="pill-btn accent" id="playlist-play"><svg class="i"><use href="#i-play"/></svg>Play all</button>
+            <button class="icon-btn" id="playlist-close"><svg class="i"><use href="#i-close"/></svg></button>
+          </div>
+        </div>
+        <ul class="result-list" id="playlist-tracks"></ul>
+      </div>
+    </section>
+
+    <!-- ═══════════ ROOMS ═══════════ -->
+    <section class="view" id="view-rooms">
+      <div class="view-head">
+        <h1>Listen Together</h1>
+        <p class="muted">Join a live room — everyone hears what the bot streams</p>
+      </div>
+
+      <div class="room-hero">
+        <div class="room-orbit"><svg class="i"><use href="#i-users"/></svg></div>
+        <h3>Music is better together</h3>
+        <p class="muted">Rooms mirror the bot's live voice chats. Start one from a Telegram group, then control it here.</p>
+        <div class="hero-actions center">
+          <a class="pill-btn accent" href="https://t.me/VyronMusicBot?startgroup=true" target="_blank" rel="noopener">Create room</a>
+          <button class="pill-btn" data-action="refresh-rooms">Refresh</button>
+        </div>
+      </div>
+
+      <div class="section-head"><h2>Active rooms</h2><span class="muted" id="rooms-count"></span></div>
+      <ul class="rooms" id="rooms-list"></ul>
+      <p class="empty-state" id="rooms-empty">No rooms live right now. Add the bot to a group and start a voice chat.</p>
+    </section>
+
+    <!-- ═══════════ PROFILE / SETTINGS ═══════════ -->
+    <section class="view" id="view-profile">
+      <div class="view-head">
+        <h1>Profile</h1>
+        <p class="muted">Account, appearance and playback</p>
+      </div>
+
+      <div class="profile-card">
+        <div class="avatar xl" id="profile-avatar">V</div>
+        <strong id="profile-name">Listener</strong>
+        <span class="muted" id="profile-handle">@telegram</span>
+        <span class="pill-tiny" id="profile-chat">private chat</span>
+      </div>
+
+      <h3 class="group-title">Appearance</h3>
+      <div class="theme-grid">
+        <button class="theme-card active" data-theme="beat">
+          <div class="theme-preview"><span class="tp-bar"></span><span class="tp-dot" style="background:linear-gradient(135deg,#8b5cf6,#22d3ee)"></span></div>
+          <strong>Beat</strong>
+        </button>
+        <button class="theme-card" data-theme="telegram">
+          <div class="theme-preview"><span class="tp-bar"></span><span class="tp-dot" style="background:linear-gradient(135deg,#3b82f6,#60a5fa)"></span></div>
+          <strong>Telegram</strong>
+        </button>
+        <button class="theme-card" data-theme="system">
+          <div class="theme-preview"><span class="tp-bar"></span><span class="tp-dot" style="background:linear-gradient(135deg,#22d3ee,#a3e635)"></span></div>
+          <strong>System</strong>
+        </button>
+      </div>
+      <p class="muted small" id="theme-hint">Colours follow Telegram. Pick another theme to change the accent.</p>
+
+      <div class="accent-row" id="accent-row">
+        <button class="accent-dot active" data-accent="violet" style="--c:#8b5cf6"></button>
+        <button class="accent-dot" data-accent="blue" style="--c:#3b82f6"></button>
+        <button class="accent-dot" data-accent="cyan" style="--c:#22d3ee"></button>
+        <button class="accent-dot" data-accent="green" style="--c:#34d399"></button>
+        <button class="accent-dot" data-accent="pink" style="--c:#f472b6"></button>
+        <button class="accent-dot" data-accent="amber" style="--c:#fbbf24"></button>
+      </div>
+
+      <h3 class="group-title">Playback</h3>
+      <div class="panel settings-list">
+        <label class="row"><span>Autoplay related tracks</span><input type="checkbox" class="switch" data-setting="autoplay" /></label>
+        <label class="row"><span>24/7 mode (stay in voice chat)</span><input type="checkbox" class="switch" data-setting="always" /></label>
+        <label class="row"><span>Loop</span>
           <select id="loop-select" class="select">
             <option value="off">Off</option>
             <option value="one">One track</option>
             <option value="all">Whole queue</option>
           </select>
         </label>
+        <label class="row"><span>Volume</span>
+          <input id="volume-slider" class="slider" type="range" min="1" max="200" value="100" />
+        </label>
+        <label class="row"><span>Normalise volume</span><input type="checkbox" class="switch" data-ui="normalise" /></label>
       </div>
 
-      <h2>Favourites</h2>
-      <ul id="fav-list" class="list"></ul>
-      <p id="fav-empty" class="empty">Nothing saved yet — tap ♥ Save on a track.</p>
+      <h3 class="group-title">Audio effects</h3>
+      <div class="chips-row" id="effects-chips"></div>
 
-      <div class="card about">
-        <div class="row"><span class="muted">Version</span><span id="app-version">–</span></div>
-        <div class="row"><span class="muted">Voice engine</span><span id="app-streaming">–</span></div>
-        <div class="row"><span class="muted">Credits</span><span>Videl · richgram · Kurigram</span></div>
+      <h3 class="group-title">Telegram integration</h3>
+      <div class="panel settings-list">
+        <div class="row"><span><svg class="i"><use href="#i-bot"/></svg> Bot</span><b id="integ-bot">@VyronMusicBot</b></div>
+        <div class="row"><span><svg class="i"><use href="#i-wave"/></svg> Voice engine</span><b id="integ-stream">–</b></div>
+        <div class="row"><span><svg class="i"><use href="#i-globe"/></svg> Chat</span><b id="integ-chat">–</b></div>
+        <div class="row"><span><svg class="i"><use href="#i-mic"/></svg> Version</span><b id="integ-version">–</b></div>
+        <a class="row link" href="https://t.me/VyronMusicBot" target="_blank" rel="noopener"><span>Open in Telegram</span><svg class="i"><use href="#i-chevron"/></svg></a>
       </div>
+
+      <h3 class="group-title">App</h3>
+      <div class="panel settings-list">
+        <button class="row link" id="btn-fullscreen"><span>Fullscreen</span><svg class="i"><use href="#i-chevron"/></svg></button>
+        <button class="row link" id="btn-logout"><span>Clear local data</span><svg class="i"><use href="#i-close"/></svg></button>
+      </div>
+      <p class="credits">VYRON · Kurigram + PyTgCalls · UI inspired by richgram</p>
     </section>
   </main>
 
-  <!-- ── bottom navigation ────────────────────────────────────── -->
-  <nav class="tabbar">
-    <button class="tab active" data-tab="player">
-      <svg viewBox="0 0 24 24"><path d="M9 18V5l10-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/></svg>
-      <span>Player</span>
-    </button>
-    <button class="tab" data-tab="queue">
-      <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
-      <span>Queue</span>
-    </button>
-    <button class="tab" data-tab="search">
-      <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
-      <span>Search</span>
-    </button>
-    <button class="tab" data-tab="settings">
-      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.3 1a7 7 0 0 0-1.7-1L14.5 3h-5l-.4 2.6a7 7 0 0 0-1.7 1l-2.3-1-2 3.4L5.1 11a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 1.7 1l.4 2.6h5l.4-2.6a7 7 0 0 0 1.7-1l2.3 1 2-3.4-2-1.5c.1-.3.1-.7.1-1z"/></svg>
-      <span>Settings</span>
-    </button>
-  </nav>
+  <!-- right rail -->
+  <aside class="rail">
+    <article class="np-card">
+      <div class="np-head"><h3>Now Playing</h3><span class="pill-tiny" id="np-source">idle</span></div>
+      <div class="np-art">
+        <img id="np-cover" alt="" />
+        <div class="np-fallback" id="np-fallback"><svg class="i"><use href="#i-wave"/></svg></div>
+        <div class="np-wave" id="np-wave"></div>
+      </div>
+      <div class="np-meta">
+        <strong id="np-title">Nothing playing</strong>
+        <span class="muted" id="np-artist">Send /play in the chat</span>
+      </div>
+      <div class="np-progress">
+        <input id="np-seek" class="slider" type="range" min="0" max="1000" value="0" />
+        <div class="np-times"><span id="np-elapsed">0:00</span><span id="np-total">0:00</span></div>
+      </div>
+      <div class="np-transport">
+        <button class="icon-btn" data-action="toggle" id="np-play" aria-label="Play or pause"><svg class="i" id="np-play-icon"><use href="#i-play"/></svg></button>
+        <button class="icon-btn" data-action="skip" aria-label="Next"><svg class="i"><use href="#i-next"/></svg></button>
+        <button class="icon-btn" data-action="loop" id="np-loop" aria-label="Loop"><svg class="i"><use href="#i-repeat"/></svg></button>
+        <button class="icon-btn" data-action="favorite" aria-label="Like"><svg class="i"><use href="#i-heart"/></svg></button>
+        <button class="icon-btn" data-action="shuffle" aria-label="Shuffle"><svg class="i"><use href="#i-shuffle"/></svg></button>
+      </div>
+    </article>
 
-  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <article class="panel quick">
+      <div class="panel-head"><h3>Quick Actions</h3></div>
+      <button class="quick-row" data-open="download"><span class="qi"><svg class="i"><use href="#i-download"/></svg></span><span><b>Download Music</b><small>Save your favourite tracks</small></span></button>
+      <button class="quick-row" data-view="playlists"><span class="qi"><svg class="i"><use href="#i-playlist"/></svg></span><span><b>Create Playlist</b><small>Organise your music</small></span></button>
+      <button class="quick-row" data-view="rooms"><span class="qi"><svg class="i"><use href="#i-users"/></svg></span><span><b>Listen Together</b><small>Real-time sync with friends</small></span></button>
+      <a class="quick-row" href="https://t.me/VyronMusicBot" target="_blank" rel="noopener"><span class="qi"><svg class="i"><use href="#i-bot"/></svg></span><span><b>Telegram Bot</b><small>Use VYRON in Telegram</small></span></a>
+    </article>
+  </aside>
+</div>
 
-  <script src="/app/static/app.js"></script>
+<!-- mobile mini player -->
+<div class="mini-player" id="mini-player" hidden>
+  <img id="mini-cover" alt="" />
+  <div class="mini-meta"><strong id="mini-title">Nothing playing</strong><span class="muted" id="mini-artist">–</span></div>
+  <button class="icon-btn" data-action="toggle" aria-label="Play or pause"><svg class="i"><use href="#i-play"/></svg></button>
+  <button class="icon-btn" data-action="skip" aria-label="Next"><svg class="i"><use href="#i-next"/></svg></button>
+</div>
+
+<!-- bottom nav (mobile) -->
+<nav class="tabbar" id="tabbar">
+  <button class="tab-item active" data-view="home"><svg class="i"><use href="#i-home"/></svg><span>Home</span></button>
+  <button class="tab-item" data-view="search"><svg class="i"><use href="#i-search"/></svg><span>Search</span></button>
+  <button class="tab-item" data-view="queue"><svg class="i"><use href="#i-queue"/></svg><span>Queue</span></button>
+  <button class="tab-item" data-view="library"><svg class="i"><use href="#i-library"/></svg><span>Library</span></button>
+  <button class="tab-item" data-view="profile"><svg class="i"><use href="#i-settings"/></svg><span>Profile</span></button>
+</nav>
+
+<!-- modal -->
+<div class="modal" id="modal" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true">
+    <div class="modal-head"><h3 id="modal-title">Download</h3><button class="icon-btn" id="modal-close"><svg class="i"><use href="#i-close"/></svg></button></div>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status"></div>
+<script src="/app/static/app.js"></script>
 </body>
 </html>

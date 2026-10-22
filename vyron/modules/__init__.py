@@ -12,6 +12,7 @@ from vyron.modules import (
     callbacks,
     channel,
     controls,
+    diagnostics,
     effects_cmd,
     extras,
     inline,
@@ -19,7 +20,9 @@ from vyron.modules import (
     moderation,
     play,
     queue_cmd,
+    savedplaylists,
     settings_cmd,
+    smartqueue,
     start,
     tools,
 )
@@ -41,6 +44,9 @@ MODULES = (
     extras,
     inline,
     callbacks,
+    smartqueue,
+    savedplaylists,
+    diagnostics,
 )
 
 

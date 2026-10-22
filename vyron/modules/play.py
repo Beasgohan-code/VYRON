@@ -256,14 +256,17 @@ def register(client: Client) -> None:
         )
 
     # ── /playlist ──────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["playlist", "pl"]))
+    @client.on_message(filters.command(["playlist", "ytpl"]))
     async def _playlist_cmd(_: Client, message: Message) -> None:
         query = command_args(message)
         if not query or not looks_like_url(query):
             await rich.send(
                 client,
                 message.chat.id,
-                cards.warn_card("Send a YouTube playlist or mix link: <code>/playlist https://…</code>"),
+                cards.warn_card(
+                    "Send a YouTube playlist or mix link: <code>/playlist https://…</code>\n"
+                    "<blockquote>Looking for your own saved lists? <code>/playlists</code></blockquote>"
+                ),
                 reply_to=message.id,
             )
             return
