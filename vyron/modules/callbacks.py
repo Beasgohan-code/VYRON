@@ -110,6 +110,8 @@ def register(client: Client) -> None:
                 await cq.answer("Nothing to play.", show_alert=True)
                 return
             try:
+                from vyron.modules.play import begin
+
                 track = await runtime.youtube.resolve(
                     query,
                     requester=(
@@ -117,14 +119,14 @@ def register(client: Client) -> None:
                         (cq.from_user.first_name if cq.from_user else "") or "",
                     ),
                 )
-                idle = not state.playing and state.current is None
-                position = await player.enqueue(chat.id, track, play_now=idle)
+                outcome = await begin(client, chat.id, track, status_id=cq.message.id)
                 await cq.answer(
-                    f"{'Playing' if idle else 'Queued'} · {truncate(track.title, 28)}",
-                    show_alert=False,
+                    {
+                        "streamed": f"Playing · {truncate(track.title, 26)}",
+                        "queued": f"Queued · {truncate(track.title, 26)}",
+                        "file": "Sending the file…",
+                    }[outcome]
                 )
-                if position == -1:
-                    await cq.answer("Already in the queue.", show_alert=True)
             except Exception as exc:
                 await cq.answer(f"Could not play that: {truncate(str(exc), 60)}", show_alert=True)
             return
@@ -263,18 +265,26 @@ def register(client: Client) -> None:
                 await cq.answer()
                 return
 
+            from vyron.modules.play import begin
+
             track = entry.tracks[index]
-            player_track_video = entry.video
-            position = await player.enqueue(
-                chat.id, track, video=player_track_video, play_now=True
-            )
-            await _show(
+            outcome = await begin(
                 client,
-                cq,
-                cards.started_card(track) if position == 1 else cards.queued_card(track, position),
-                keyboards.now_playing(state),
+                chat.id,
+                track,
+                video=entry.video,
+                status_id=cq.message.id,
             )
-            await cq.answer("Starting" if position == 1 else f"Queued #{position}")
+            if outcome != "file":
+                await _show(
+                    client,
+                    cq,
+                    cards.started_card(track) if outcome == "streamed" else cards.queued_card(track, 0),
+                    keyboards.now_playing(state),
+                )
+            await cq.answer(
+                {"streamed": "Starting", "queued": "Queued", "file": "Sending the file…"}[outcome]
+            )
             return
 
         if action == "get":

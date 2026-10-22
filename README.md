@@ -71,10 +71,10 @@ collapsible sections, not walls of bold text:
 | `API_ID` / `API_HASH` | [my.telegram.org](https://my.telegram.org) → API development tools |
 | `OWNER_ID` | [@userinfobot](https://t.me/userinfobot) |
 
-### 2 · Create the assistant session
+### 2 · Create the assistant session *(optional)*
 
 The **assistant** is a normal Telegram account (not a bot) — it is the one that
-joins voice chats. Run this once:
+joins voice chats. Run this once when you want voice streaming:
 
 ```bash
 python -m vyron.tools.session
@@ -82,13 +82,19 @@ python -m vyron.tools.session
 
 It prints a `STRING_SESSION=…` line. Keep it secret — it is full account access.
 
+**You can skip it to try the bot first.** Without a session VYRON still boots:
+`/play`, the search picker and quick actions fall back to **sending the audio
+file** into the chat, and everything non-voice (search, cards, lyrics, settings,
+playlists, moderation, the Mini App) works normally. Add the session later and
+restart to switch streaming on — nothing else changes.
+
 ### 3 · Configure
 
 ```bash
 git clone https://github.com/Beasgohan-code/VYRON.git
 cd VYRON
 cp .env.example .env
-# edit .env → BOT_TOKEN, API_ID, API_HASH, STRING_SESSION, OWNER_ID
+# edit .env → BOT_TOKEN, API_ID, API_HASH (STRING_SESSION + OWNER_ID optional)
 ```
 
 ### 4 · Run
@@ -297,7 +303,8 @@ user and ships a healthcheck. No local Node install is required for deploys.
 ### Render
 
 1. **New → Blueprint**, pick this repo (it reads `render.yaml`).
-2. Fill the secrets (`BOT_TOKEN`, `API_ID`, `API_HASH`, `STRING_SESSION`, `OWNER_ID`).
+2. Fill the secrets (`BOT_TOKEN`, `API_ID`, `API_HASH`; `STRING_SESSION` and
+   `OWNER_ID` can stay empty for a file-only test deploy).
 3. Deploy — the service is a **web service** so Render keeps it alive and
    `/health` is polled automatically.
 
@@ -367,8 +374,15 @@ VYRON/
 
 ## ⚙️ Configuration
 
-Only five values are required (`BOT_TOKEN`, `API_ID`, `API_HASH`, `STRING_SESSION`,
-`OWNER_ID`). The interesting optional ones:
+Only three values block startup (`BOT_TOKEN`, `API_ID`, `API_HASH`). These two
+are optional and only switch a feature off:
+
+| Variable | Without it |
+|---|---|
+| `STRING_SESSION` | **file-only mode** — `/play` sends the audio file instead of streaming into the voice chat |
+| `OWNER_ID` | no owner — owner commands (`/eval`, `/vars`, `/sudoers`) stay locked; group admins keep control of their own chats |
+
+The interesting optional ones:
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -415,6 +429,7 @@ persistence, modals). CI runs both on Python 3.11/3.12 and Node 22.
 | Symptom | Fix |
 |---|---|
 | `Start a voice chat in this group first` | The group has no active VC — start one (or `/vplay` after starting). |
+| Bot sends files instead of streaming | Expected without `STRING_SESSION` (file-only mode) — add a session and restart to stream. |
 | Assistant joins but is silent | The **assistant** needs *manage voice chats*; give the bot admin too. |
 | `Could not resolve that track` | YouTube changed something → `pip install -U yt-dlp`; for age-gated videos set `COOKIES_FILE`. |
 | Bot replies "already in use" | Two instances with the same `STRING_SESSION` — run only one. |

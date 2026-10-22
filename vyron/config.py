@@ -153,6 +153,7 @@ class Settings:
         return {}
 
     def validate(self) -> list[str]:
+        """Blocking problems — without these the bot cannot connect at all."""
         errors: list[str] = []
         if not self.bot_token:
             errors.append("BOT_TOKEN is missing — create a bot with @BotFather.")
@@ -160,11 +161,24 @@ class Settings:
             errors.append("API_ID is missing — get it from https://my.telegram.org.")
         if not self.api_hash:
             errors.append("API_HASH is missing — get it from https://my.telegram.org.")
-        if not self.session_string:
-            errors.append("STRING_SESSION is missing — generate one: python -m vyron.tools.session")
-        if not self.owner_id and not self.sudo_users:
-            errors.append("OWNER_ID (or SUDO_USERS) is missing — you will have no admin access.")
         return errors
+
+    def warnings(self) -> list[str]:
+        """Non-fatal gaps: the bot still boots and answers, one feature is off."""
+        notes: list[str] = []
+        if not self.session_string:
+            notes.append(
+                "STRING_SESSION is missing — voice chat is off, playback falls back to "
+                "sending the audio file. Generate one with: python -m vyron.tools.session"
+            )
+        if not self.owner_id and not self.sudo_users:
+            notes.append(
+                "OWNER_ID (or SUDO_USERS) is missing — nobody has admin access "
+                "(group admins can still control their own chats)."
+            )
+        if self.webapp and not self.webapp_url:
+            notes.append("WEBAPP=true but WEBAPP_URL is empty — the Mini App button stays hidden.")
+        return notes
 
     @property
     def webapp_ready(self) -> bool:

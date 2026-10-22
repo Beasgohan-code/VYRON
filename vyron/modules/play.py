@@ -10,9 +10,11 @@ from pyrogram import Client, filters
 from pyrogram.types import Message
 
 from vyron.core.pending import put as remember_search
+from vyron.core.player import StreamError
 from vyron.core.queue import Track
 from vyron.core.search import MediaError, looks_like_url
 from vyron.runtime import runtime
+from vyron.ui import blocks as B
 from vyron.ui import cards, keyboards, rich
 from vyron.ui.progress import truncate
 from vyron.ui.theme import E
@@ -82,7 +84,17 @@ def register(client: Client) -> None:
             media_track = track_from_message(message)
             if media_track:
                 if not runtime.streaming_ready:
-                    await rich.send(client, chat_id, cards.error_card("Voice streaming is not configured."))
+                    await rich.send(
+                        client,
+                        chat_id,
+                        cards.error_card(
+                            "<b>File mode</b>\n"
+                            "<blockquote>There's no assistant session, so I can't join a "
+                            "voice chat. Add <code>STRING_SESSION</code> to stream files, or "
+                            "send <code>/song &lt;query&gt;</code> to get an MP3.</blockquote>"
+                        ),
+                        reply_to=message.id,
+                    )
                     return
                 status = await _thinking(client, message, "Downloading from Telegram…")
                 try:
@@ -118,15 +130,21 @@ def register(client: Client) -> None:
                 if _too_long(track):
                     await _edit(client, chat_id, status.id if status else None, _too_long_text(track))
                     return
-                position = await _player().enqueue(
-                    chat_id, track, video=video, play_now=True
-                )
-                await _edit(
+                outcome = await begin(
                     client,
                     chat_id,
-                    status.id if status else None,
-                    cards.started_card(track) if position == 1 else cards.queued_card(track, position),
+                    track,
+                    video=video,
+                    status_id=status.id if status else None,
+                    reply_to=message.id,
                 )
+                if outcome != "file":
+                    await _edit(
+                        client,
+                        chat_id,
+                        status.id if status else None,
+                        cards.started_card(track) if outcome == "streamed" else cards.queued_card(track, 0),
+                    )
             except MediaError as exc:
                 await _edit(
                     client,
@@ -300,6 +318,52 @@ def register(client: Client) -> None:
         await _edit(client, message.chat.id, status.id if status else None, markup)
 
 
+async def begin(
+    client: Client,
+    chat_id: int,
+    track: Track,
+    *,
+    video: bool = False,
+    status_id: int | None = None,
+    reply_to: int | None = None,
+) -> str:
+    """Play *track* — streaming into the voice chat when the assistant exists.
+
+    With no ``STRING_SESSION`` (or a voice chat Telegram refuses to open) the
+    track is delivered as a normal Telegram file instead, so the bot stays
+    useful in file-only mode.  Returns ``"streamed"``, ``"queued"`` or ``"file"``.
+    """
+    if runtime.calls is None:
+        await deliver(
+            client,
+            chat_id,
+            track,
+            video,
+            status_id=status_id,
+            reply_to=reply_to,
+            hint=(
+                f"{E('info')} <b>File mode</b> — no assistant session, so this plays "
+                "as a Telegram file instead of a voice chat."
+            ),
+        )
+        return "file"
+    try:
+        position = await _player().enqueue(chat_id, track, video=video, play_now=True)
+    except StreamError as exc:
+        logger.info("stream unavailable (%s) — sending the file instead", exc)
+        await deliver(
+            client,
+            chat_id,
+            track,
+            video,
+            status_id=status_id,
+            reply_to=reply_to,
+            hint=f"{E('warn')} {rich.esc(truncate(str(exc), 120))}",
+        )
+        return "file"
+    return "streamed" if position == 1 else "queued"
+
+
 def _suffix(media) -> str:
     name = getattr(media, "file_name", "") or ""
     if "." in name:
@@ -315,9 +379,12 @@ async def deliver(
     *,
     status_id: int | None = None,
     reply_to: int | None = None,
+    hint: str | None = None,
 ) -> None:
     """Download a track and send it as a real Telegram file."""
     markup = cards.download_card(track, "video" if want_video else "audio")
+    if hint:
+        markup = B.note(hint) + markup
     await _edit(client, chat_id, status_id, markup)
 
     try:
@@ -383,4 +450,4 @@ async def deliver(
         )
 
 
-__all__ = ["deliver", "register"]
+__all__ = ["begin", "deliver", "register"]

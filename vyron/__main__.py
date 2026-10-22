@@ -107,8 +107,12 @@ async def _async_main() -> int:
             logger.error("config: %s", problem)
         logger.error("Copy .env.example to .env and fill it in — see README.md")
         return 1
+    for note in settings.warnings():
+        logger.warning("config: %s", note)
 
     settings.ensure_dirs()
+    # open the HTTP port first: Render/Koyeb polls it while the bot dials Telegram
+    runner = await health.start(settings.port)
     runtime.settings = settings
     runtime.version = __version__
     runtime.started_at = time.time()
@@ -146,7 +150,6 @@ async def _async_main() -> int:
     await _set_commands(bot)
     await _setup_menu_button(bot)
 
-    runner = await health.start(settings.port)
     await runtime.player.start_background()
     await _notify_owner(bot)
 
@@ -196,6 +199,14 @@ def run() -> None:
         sys.exit(asyncio.run(_async_main()))
     except KeyboardInterrupt:
         sys.exit(0)
+    except Exception as exc:  # noqa: BLE001 - last-resort deploy log
+        logger.debug("startup traceback", exc_info=True)
+        logger.error("startup failed: %s", exc)
+        logger.error(
+            "check BOT_TOKEN, that API_ID/API_HASH belong to the same app, "
+            "and that this host can reach api.telegram.org"
+        )
+        sys.exit(1)
 
 
 if __name__ == "__main__":

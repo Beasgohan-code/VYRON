@@ -136,3 +136,85 @@ def test_help_has_every_section_rendered():
     # unknown sections fall back to the basics
     fallback = cards.help_card("nope")
     assert "play" in fallback
+
+
+# ── file-only mode ─────────────────────────────────────────────────────────
+def test_play_falls_back_to_sending_the_file_without_a_session(tmp_path, monkeypatch):
+    """No STRING_SESSION → /play must still hand the user an audio file."""
+    from vyron import runtime as runtime_module
+    from vyron.core.queue import Track
+    from vyron.modules import play as play_module
+
+    audio = tmp_path / "song.m4a"
+    audio.write_bytes(b"\x00" * 64)
+
+    class FakeDownloader:
+        async def audio(self, track):
+            return audio
+
+        async def video(self, track):  # pragma: no cover - not exercised
+            return audio
+
+    sent = {}
+
+    class FakeClient:
+        async def send_audio(self, chat_id, path, **kwargs):
+            sent["audio"] = (chat_id, path, kwargs)
+            return SimpleNamespace(id=1)
+
+        async def send_video(self, chat_id, path, **kwargs):  # pragma: no cover
+            sent["video"] = (chat_id, path, kwargs)
+
+        async def delete_messages(self, *args, **kwargs):
+            return True
+
+        async def edit_message_text(self, *args, **kwargs):  # pragma: no cover
+            return None
+
+    runtime = runtime_module.runtime
+    monkeypatch.setattr(runtime, "calls", None)
+    monkeypatch.setattr(runtime, "downloader", FakeDownloader())
+    monkeypatch.setattr(runtime, "player", None)
+
+    track = Track(
+        id="abc123",
+        title="Test Song",
+        duration=120,
+        uploader="VYRON",
+        url="https://youtu.be/abc123",
+        source="youtube",
+    )
+
+    outcome = asyncio.run(play_module.begin(FakeClient(), -100, track, reply_to=5))
+
+    assert outcome == "file"
+    assert "audio" in sent
+    chat_id, path, kwargs = sent["audio"]
+    assert chat_id == -100 and path == str(audio)
+    assert kwargs["reply_to_message_id"] == 5
+    assert kwargs["title"].startswith("Test Song")
+
+
+def test_play_streams_when_the_engine_exists(monkeypatch):
+    from vyron import runtime as runtime_module
+    from vyron.core.queue import Track
+    from vyron.modules import play as play_module
+
+    class FakePlayer:
+        def __init__(self):
+            self.calls = []
+
+        async def enqueue(self, chat_id, track, *, video=False, play_now=False):
+            self.calls.append((chat_id, track.id, video, play_now))
+            return 1
+
+    runtime = runtime_module.runtime
+    player = FakePlayer()
+    monkeypatch.setattr(runtime, "calls", SimpleNamespace())
+    monkeypatch.setattr(runtime, "player", player)
+
+    track = Track(id="xyz", title="Stream Me", duration=200, url="https://youtu.be/xyz", source="youtube")
+    outcome = asyncio.run(play_module.begin(SimpleNamespace(), -200, track, video=True))
+
+    assert outcome == "streamed"
+    assert player.calls == [(-200, "xyz", True, True)]
