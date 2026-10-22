@@ -1,7 +1,7 @@
 # ---------------------------------------------------------------------------
 #  VYRON — group management
 #  ban · kick · mute · warn · purge · pin · welcome/goodbye · admin list
-#  Feature set modelled on Videl's admin module, rebuilt for VYRON's UI.
+#  Admin commands with a single consistent card UI.
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 

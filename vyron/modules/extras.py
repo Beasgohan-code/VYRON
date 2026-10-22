@@ -1,7 +1,7 @@
 # ---------------------------------------------------------------------------
 #  VYRON — owner & operations extras
 #  block/unblock · activevc · sysstats · leaveall · gcast · sudo list
-#  Ideas and command surface modelled on FallenMusic (AnonymousX1025) and Videl.
+#  Maintenance and broadcast commands.
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 

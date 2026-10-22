@@ -1,7 +1,7 @@
 # ---------------------------------------------------------------------------
 #  VYRON — channel playback (/cplay)
 #  Streams into the discussion group's voice chat from a linked channel, the
-#  same trick Videl's cplay uses.
+#  Mirrors what plays in a channel to a linked group.
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 

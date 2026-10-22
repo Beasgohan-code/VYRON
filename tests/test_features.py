@@ -1,4 +1,4 @@
-"""Tests for the Videl/Fallen-derived feature set (pure logic only)."""
+"""Tests for moderation, locks and effects (pure logic only)."""
 from __future__ import annotations
 
 import pytest

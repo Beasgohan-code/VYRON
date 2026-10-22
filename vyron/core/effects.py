@@ -2,7 +2,7 @@
 #  VYRON — audio effects
 #
 #  Effects are plain ffmpeg audio filters applied at stream start, so they cost
-#  nothing until someone enables one.  Inspired by Videl's effects module.
+#  nothing until someone enables one.
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 

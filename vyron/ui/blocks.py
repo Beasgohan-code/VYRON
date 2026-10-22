@@ -4,9 +4,6 @@
 #  Thin, themed wrapper around `richgram` (Bot API 10.3 rich messages) —
 #  tables, collapsible sections, dividers, lists and *coloured* in-message
 #  buttons — with a graceful local fallback when richgram is unavailable.
-#
-#  richgram — https://github.com/Badmunda05/richgram (MIT, BadmundaXd)
-#  Kurigram rich-message support — https://github.com/Kurigram
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 
@@ -164,7 +161,7 @@ def stat_pairs(pairs: Sequence[tuple[str, str, str]]) -> str:
     return kv([(f"{E(glyph)} {label}", f"<b>{value}</b>") for glyph, label, value in pairs])
 
 
-def credits_line(version: str = "") -> str:
+def powered_line(version: str = "") -> str:
     tail = f" · v{version}" if version else ""
     return footer(f"{SPARK} VYRON{tail} · built on Kurigram + PyTgCalls · UI by richgram")
 
@@ -203,7 +200,7 @@ __all__ = [
     "btn",
     "bullets",
     "code",
-    "credits_line",
+    "powered_line",
     "details",
     "divider",
     "esc",

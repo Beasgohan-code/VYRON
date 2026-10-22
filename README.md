@@ -97,10 +97,14 @@ cp .env.example .env
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 sudo apt install ffmpeg -y        # required by yt-dlp / ntgcalls
+
+# Mini App (React + Vite) — only needed once, the bundle is committed
+cd frontend && npm install && npm run build && cd ..
+
 python main.py
 ```
 
-Health check → <http://localhost:8080/health>
+Health check → <http://localhost:8080/health> · Mini App → <http://localhost:8080/app/>
 
 > **Group checklist:** add the bot **and** the assistant account, give the bot
 > *manage voice chats* + *delete messages*, start the voice chat, then `/play`.
@@ -184,27 +188,38 @@ Everything above also works from the inline buttons on the now-playing card.
 
 ## 🌐 Web app (Telegram Mini App)
 
-The health server doubles as the Mini App host:
+A real frontend, not a static page: **React 18 + TypeScript + Vite**, built to
+`webapp/dist` and served by the same aiohttp process that answers `/health`.
 
 ```bash
 WEBAPP_URL=https://your-deployment        # Render/Koyeb URL
 # then: /app in chat, or tap the bot's menu button
 ```
 
+- **Frontend** — `frontend/` (React + TS, `lucide-react` icons, hand-written
+  design system in `src/styles.css`). Seven routed views: Home, Search, Library,
+  Queue, Playlists, Rooms, Profile — plus a persistent now-playing rail on
+  desktop and a mini player + floating tabbar on mobile.
+- **Design system** — 3 themes (Beat / Telegram / System) × 6 accents, all
+  persisted locally and driven by CSS custom properties; glass panels, ranked
+  trending cards, "made for you" mix shelves, mood chips, cover mosaics,
+  skeleton loaders and micro-animations.
 - **Backend** — `vyron/web/` (`aiohttp`) exposes `/api/state`, `/api/action`,
   `/api/home`, `/api/search`, `/api/mix`, `/api/rooms` and `/api/playlists` over
   the *same* `Player` the bot uses, so chat and app never disagree.
 - **Auth** — Telegram `initData` (HMAC-verified) or a signed chat token, so the
   app can control a *group* player opened from a `/app` link.
-- **Frontend** — `webapp/`: dark-glass desktop layout (sidebar · content ·
-  now-playing rail) with Home / Search / Library / Queue / Playlists / Rooms /
-  Profile, ranked trending cards, "made for you" mixes, mood chips, listen-together
-  rooms, generated fallback artwork, 3 themes × 6 accents, mobile tabbar + mini
-  player, keyboard shortcuts — zero build step.
-- **Swap the UI** — replace `webapp/*` with your own design; the API contract is
-  documented in [`webapp/README.md`](webapp/README.md). Nothing else changes.
+- **Swap the UI** — `frontend/` is self-contained; any bundle dropped in
+  `webapp/dist` (or set `WEBAPP_DIR`) is served instead. Contract:
+  [`webapp/README.md`](webapp/README.md).
 
-Preview it locally without any credentials:
+```bash
+# dev loop with hot reload (API proxied to the preview server)
+cd frontend && npm run dev            # → http://localhost:5173
+python -m vyron.tools.preview --port 8099   # API + demo data
+```
+
+Preview the built bundle without any credentials:
 
 ```bash
 python -m vyron.tools.preview --port 8080   # → http://localhost:8080/app/
@@ -248,8 +263,9 @@ docker compose up -d --build
 docker compose logs -f
 ```
 
-The image is multi-stage-slim, runs as a non-root user, includes ffmpeg, and
-has a built-in healthcheck.
+Two stages: `node:22-alpine` builds the Mini App, then `python:3.12-slim-bookworm`
+installs ffmpeg + deps, copies the bundle into `webapp/dist`, runs as a non-root
+user and ships a healthcheck. No local Node install is required for deploys.
 
 ### Render
 
@@ -304,7 +320,8 @@ VYRON/
 │   ├── web/                    # Mini App: auth, JSON API
 │   ├── utils/                  # helpers, filters, net, health server, artwork renderer
 │   └── tools/                  # session generator, emoji pack builder, cover generator, preview
-├── webapp/                     # Mini App UI (index.html · styles.css · app.js · assets/covers)
+├── frontend/                   # React + TS + Vite Mini App (src/views · src/components · src/lib)
+├── webapp/dist/                # built bundle served at /app (regenerate with npm run build)
 └── tests/                      # 87 offline tests
 ```
 
@@ -348,6 +365,8 @@ Full list with comments: [`.env.example`](.env.example).
 ```bash
 pip install pytest pytest-asyncio
 python -m pytest tests -q      # 87 passed
+
+cd frontend && npm test        # 5 component tests (vitest + jsdom)
 ```
 
 Covered offline: duration parsing, progress bars, loop semantics, queue
@@ -357,7 +376,8 @@ button markup, effect filter chains, lock panels, welcome placeholders,
 Mini App auth (initData HMAC + signed tokens), the whole JSON API surface
 (state/home/search/mix/rooms/playlists/actions), playlist storage round-trips,
 chart caching, generated artwork, handler registration and client construction.
-CI runs the same suite on Python 3.11 and 3.12.
+The Mini App has its own component suite (render, navigation, search, accent
+persistence, modals). CI runs both on Python 3.11/3.12 and Node 22.
 
 ---
 
@@ -375,22 +395,9 @@ CI runs the same suite on Python 3.11 and 3.12.
 
 ---
 
-## 🙏 Credits
-
-- [Kurigram](https://github.com/KurimuzonAkuma/kurigram) — Bot API 10.3 client
-- [**richgram**](https://github.com/Badmunda05/richgram) by [BadmundaXd](https://t.me/BadmundaXd) — rich-message builders (tables, coloured buttons, details) used throughout the UI
-- [PyTgCalls](https://github.com/pytgcalls/pytgcalls) + [ntgcalls](https://github.com/pytgcalls/ntgcalls) — the voice engine
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp) — extraction that (mostly) keeps working
-- [LRCLIB](https://lrclib.net) — free lyrics API
-- [**Videl**](https://github.com/Beasgohan-code/Videl) — feature scope & inspiration: search picker, effects, locks/antiflood, group management, cplay
-- [**FallenMusic**](https://github.com/AnonymousX1025/FallenMusic) — operational command surface: activevc, leaveall, sysstats, gcast, empty-VC watcher
-- [**ShizuMusic**](https://github.com/Badmunda05/ShizuMusic) — Bot API 10.3 + PyTgCalls integration reference
-
-Full attribution and license notes: [**CREDITS.md**](CREDITS.md).
-
 ## 📄 License
 
-MIT © [Beasgohan-code](https://github.com/Beasgohan-code) — fork it, improve it, keep the credits.
+MIT © [Beasgohan-code](https://github.com/Beasgohan-code) — fork it, improve it, ship it.
 
 <div align="center">
 

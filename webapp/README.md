@@ -1,40 +1,62 @@
-# VYRON Player — Mini App
+# VYRON Player — Mini App bundle
 
-This folder is the entire web UI. **Swap it freely** — the backend only needs the
-API contract below to keep working.
+`webapp/dist` is the **built** Mini App, served by `vyron/web/server.py` at `/app/`.
+The source lives in [`../frontend`](../frontend) — React 18 + TypeScript + Vite,
+no UI framework, no CSS framework, one hand-written design system.
 
 ```
+frontend/                     # source of truth
+├── index.html                # shell (mounts #root, loads telegram-web-app.js)
+├── vite.config.ts            # base /app/static/ · outDir ../webapp/dist
+├── public/covers/*.jpg       # 10 procedural fallback covers
+└── src/
+    ├── main.tsx              # React root + AppProvider
+    ├── App.tsx               # shell: sidebar · views · rail · modal · toast
+    ├── styles.css            # tokens, themes, accents, components, breakpoints
+    ├── lib/
+    │   ├── api.ts            # typed fetch client, Telegram bridge, haptics
+    │   ├── store.tsx         # context: data, polling, actions, UI prefs
+    │   ├── types.ts          # every API payload
+    │   └── format.ts         # durations, greeting, cover hashing
+    ├── components/           # Sidebar, Topbar, NowPlayingRail, MobileChrome,
+    │                         # TrackCard, ResultRow, Panel, Cover, Modal
+    └── views/                # Home, Search, Library, Queue, Playlists,
+                              # Rooms, Profile
+
 webapp/
-├── index.html          # shell: sidebar · views · now-playing rail · mobile tabbar
-├── styles.css          # design tokens, 3 themes, 6 accents, 3 breakpoints
-├── app.js              # routing, rendering, actions, Telegram bridge
-├── assets/covers/      # 10 procedural covers (fallback artwork)
-└── README.md           # this file
+├── dist/                     # ← what is served (committed so plain `python main.py` works)
+└── README.md                 # this file
 ```
 
-Served at **`/app`** by the same aiohttp server that exposes `/health`
-(`vyron/web/server.py`). No build step, no framework, no bundler, no network
-needed for the demo mode.
+```bash
+cd frontend
+npm install
+npm run dev      # http://localhost:5173 with HMR (API proxied to :8099)
+npm run build    # typecheck + bundle → ../webapp/dist
+npm run typecheck
+```
+
+The Docker image builds the frontend in a `node:22-alpine` stage, so deployments
+never need Node locally.
 
 ---
 
 ## Views
 
-| View | Anchors | What it shows |
-|---|---|---|
-| **Home** | `#view-home` | greeting hero, 🔥 Trending (ranked cards), ✨ Made For You mixes, mood chips, quick-search panel, download panel with quality radios, Listen Together panel, library + recently played |
-| **Search** | `#view-search` | search bar, filter tabs (all/songs/artists/playlists), result rows with play / queue / menu, recent searches |
-| **Library** | `#view-library` | stat tiles, tabs (liked/playlists/history), export to JSON |
-| **Queue** | `#view-queue` | now-playing row, queued rows, autoplay switch, jump/remove per row |
-| **Playlists** | `#view-playlists` | 2×2 cover mosaic cards, detail panel, play-all, create/delete |
-| **Rooms** | `#view-rooms` | live voice chats: cover, listeners, playing state, open-in-Telegram |
-| **Profile** | `#view-profile` | avatar card, theme cards (Beat / Telegram / System), accent dots, playback switches, loop, volume, effects chips, integration + about |
+| View | What it shows |
+|---|---|
+| **Home** | greeting hero with live stats, 🔥 Trending (ranked cards), ✨ Made For You mix shelves, mood chips, quick-search panel, download panel with quality radios, Listen Together panel, library + recently played, CTA strips |
+| **Search** | search bar, filter tabs (All / Songs / Playlists / Artists), result rows with play · queue · menu, artist grid, recent searches |
+| **Library** | stat tiles, Liked / Playlists / Recently played tabs, liked-hero card, JSON export, playlist shelf |
+| **Queue** | now-playing row, queued rows with jump/remove, autoplay switch, shuffle/clear actions, state hint |
+| **Playlists** | cover mosaic cards, detail panel with play-all/delete, empty states |
+| **Rooms** | live voice chats with cover, listeners, volume/effects chips, open-in-Telegram, how-it-works |
+| **Profile** | avatar card, theme cards (Beat / Telegram / System), accent dots, playback switches, loop + volume, effects chips, Telegram integration, local-data reset |
 
-Desktop layout is a 3-column grid (`sidebar · content · rail`); the rail holds
-the Now Playing card, transport, waveform and quick actions. Below 1180 px the
-rail folds away, below 820 px the sidebar becomes a floating tabbar plus a mini
-player. Everything is keyboard-accessible: `/` focuses search, `Space` toggles
-playback, `N` skips, `Esc` closes the modal.
+Desktop is a 3-column grid (`sidebar · content · rail`) with a sticky now-playing
+card; below 1240 px the rail folds away, below 860 px the sidebar becomes a
+floating tabbar plus a mini player. Keyboard: `/` search · `Space` play/pause ·
+`N` skip · `Esc` close modal.
 
 ---
 
@@ -83,8 +105,8 @@ Every track object has the same shape everywhere:
 ```
 
 `thumbnail` may be empty — the UI then maps the track to one of
-`assets/covers/*.jpg`. Images that fail to load fall back the same way, which is
-what makes demo mode (no network) look complete.
+`/app/static/covers/*.jpg`. Images that fail to load fall back the same way,
+which is what makes demo mode (no network) look complete.
 
 ### `now` object
 
@@ -125,21 +147,21 @@ what makes demo mode (no network) look complete.
 | `search` | `"query"` | returns `results[]` |
 | `download` | `{query, kind}` | `kind`: `audio` \| `video`; the bot sends the file |
 
-Unknown actions return **400** with the full list of accepted names, and a
-missing player returns **503** — the UI shows both as a toast.
+Unknown actions return **400** with the list of accepted names, and a missing
+player returns **503** — the UI surfaces both as a toast.
 
 ---
 
 ## Replacing this UI
 
-1. Replace `index.html`, `styles.css`, `app.js` (any framework, just keep the
-   files or point `WEBAPP_DIR` at another folder).
-2. Read `/api/state` (poll it — the app polls every 5 s while visible) and
-   `/api/action` for commands. Add `/api/home`, `/api/rooms`, `/api/playlists`
-   when you want discovery, rooms and playlists.
+1. Build any frontend and drop the output in `webapp/dist` (or point
+   `WEBAPP_DIR` at your folder). `index.html` is served for `/app/` and any
+   `/app/*` deep link.
+2. Read `/api/state` (poll every ~5 s while visible) and call `/api/action`.
+   Add `/api/home`, `/api/rooms`, `/api/playlists` for discovery, rooms and lists.
 3. Include `telegram-web-app.js` and send `Telegram.WebApp.initData` in
    `X-Init-Data` so authentication keeps working.
-4. In non-Telegram browsers the page falls back to read-only demo data — handy
-   for previewing a design without deploying (`python -m vyron.tools.preview`).
+4. In non-Telegram browsers the API answers with demo data, so your design can be
+   previewed with `python -m vyron.tools.preview`.
 
 Nothing else in the bot needs to change.

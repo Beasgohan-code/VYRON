@@ -489,7 +489,7 @@ class Player:
         return len(humans) <= 1
 
     async def _empty_vc_worker(self) -> None:
-        """Leave voice chats nobody is listening to (Fallen/Videl watcher idea)."""
+        """Leave voice chats nobody is listening to."""
         await asyncio.sleep(45)
         while self._running:
             try:

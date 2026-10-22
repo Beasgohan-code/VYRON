@@ -1,8 +1,10 @@
 # ---------------------------------------------------------------------------
 #  VYRON — web app API
 #
-#  JSON surface over the same Player the bot uses.  Views in `webapp/`:
-#    Home · Search · Queue · Library · Playlists · Rooms · Profile
+#  JSON surface over the same Player the bot uses.  The UI is a React + Vite
+#  app in `frontend/`; `npm run build` writes it to `webapp/dist`, which is what
+#  this module serves.  Views: Home · Search · Library · Queue · Playlists ·
+#  Rooms · Profile.
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 
@@ -20,20 +22,25 @@ from vyron.web.auth import WebUser, make_token, resolve_user
 
 logger = logging.getLogger(__name__)
 
-WEB_DIR = Path(getattr(settings, "webapp_dir", Path(__file__).resolve().parent.parent.parent / "webapp"))
+_WEBAPP_ROOT = Path(
+    getattr(settings, "webapp_dir", Path(__file__).resolve().parent.parent.parent / "webapp")
+)
+# `webapp/dist` is the compiled SPA; fall back to the folder itself so a custom
+# or hand-written build (WEBAPP_DIR=…) keeps working.
+WEB_DIR = _WEBAPP_ROOT / "dist" if (_WEBAPP_ROOT / "dist" / "index.html").is_file() else _WEBAPP_ROOT
 
 
 # ── demo payload (browser preview) ──────────────────────────────────────────
 # Served to anonymous visitors and to the standalone preview server, so the UI
 # can be developed without Telegram credentials or network access.  Covers are
-# the procedural artwork shipped in webapp/assets/covers.
+# the procedural artwork shipped in frontend/public/covers.
 def _demo_track(index: int, title: str, uploader: str, duration: int) -> dict:
     return {
         "id": f"demo{index:02d}",
         "title": title,
         "uploader": uploader,
         "duration": duration,
-        "thumbnail": f"/app/static/assets/covers/{index:02d}.jpg",
+        "thumbnail": f"/app/static/covers/{index:02d}.jpg",
         "source": "youtube",
         "url": "",
         "query": f"{title} {uploader}",
@@ -199,8 +206,17 @@ def _chat_id(user: WebUser) -> int:
 async def index(_: web.Request) -> web.StreamResponse:
     page = WEB_DIR / "index.html"
     if not page.is_file():
-        return web.Response(status=404, text="web app not installed")
-    return web.FileResponse(page)
+        return web.Response(
+            status=404,
+            text=(
+                "web app not built — run `npm install && npm run build` in frontend/ "
+                "(output goes to webapp/dist)"
+            ),
+        )
+    response = web.FileResponse(page)
+    # never cache the shell: asset filenames are content-hashed by Vite
+    response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 # ── state ───────────────────────────────────────────────────────────────────
@@ -296,7 +312,7 @@ async def home(request: web.Request) -> web.Response:
                 "hero": {
                     "headline": "Music hits different here.",
                     "subline": "Discover, stream, download and listen together — all in one place.",
-                    "cover": "/app/static/assets/covers/07.jpg",
+                    "cover": "/app/static/covers/07.jpg",
                 },
                 "trending": _DEMO_TRACKS[:8],
                 "shelves": [
@@ -671,6 +687,8 @@ def register(app: web.Application) -> None:
     app.router.add_get("/app/", index)
     if WEB_DIR.is_dir():
         app.router.add_static("/app/static", WEB_DIR, show_index=False)
+    # SPA deep links (/app/anything) render the shell; the app routes in memory.
+    app.router.add_get("/app/{tail:(?!static/).+}", index)
     app.router.add_get("/api/info", info)
     app.router.add_get("/api/home", home)
     app.router.add_get("/api/rooms", rooms)

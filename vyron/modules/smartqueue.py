@@ -5,8 +5,7 @@
 #  /next <q> — insert the next track to play, ahead of the queue
 #  /qinfo    — a one-glance health view of the current queue
 #
-#  Idea borrowed from Videl's smartqueue module; re-implemented on top of
-#  VYRON's own queue/search/rich-card layers.
+#  Built on VYRON's queue / search / rich-card layers.
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 

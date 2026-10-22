@@ -5,7 +5,7 @@
 #  /sudoers    — who can operate the bot (owner + SUDO_USERS)
 #  /whoami     — quick card with your id, rights and current chat
 #
-#  Feature parity with FallenMusic's speedtest/sudoers, rebuilt for VYRON.
+#  Operational diagnostics for a self-hosted deployment.
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 

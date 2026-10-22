@@ -516,7 +516,7 @@ def about_card() -> str:
         )
         + B.row(B.btn(f"{E('back')} Back", data="v:help:main", style="primary"))
         + B.footer(
-            "Credits: Videl · richgram · ShizuMusic · Kurigram · PyTgCalls · yt-dlp · LRCLIB"
+            "Powered by Kurigram · PyTgCalls · yt-dlp · richgram"
         )
     )
 

@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 import time
+from pathlib import Path
 from urllib.parse import urlencode
 
 import pytest
@@ -133,10 +134,11 @@ def test_app_shell_is_served():
     from vyron.web.server import WEB_DIR
 
     page = WEB_DIR / "index.html"
-    assert page.is_file(), "webapp/index.html missing"
+    assert page.is_file(), "built Mini App missing — run `npm run build` in frontend/"
     html = page.read_text(encoding="utf-8")
     assert "telegram-web-app.js" in html
-    assert "/app/static/app.js" in html
+    assert "/app/static/assets/" in html
+    assert "root" in html
 
 
 # ── discovery / rooms / playlists ───────────────────────────────────────────
@@ -257,11 +259,26 @@ def test_action_unknown_name_is_rejected():
     asyncio.run(_with_client(scenario))
 
 
-def test_static_assets_are_served():
-    from vyron.web.server import WEB_DIR
+def test_frontend_sources_exist():
+    """The React app is the source of truth; dist/ is the built bundle."""
+    root = Path(__file__).resolve().parent.parent
+    frontend = root / "frontend"
+    for name in ("package.json", "vite.config.ts", "src/App.tsx", "src/main.tsx", "src/styles.css"):
+        assert (frontend / name).is_file(), f"frontend/{name} missing"
 
-    for name in ("app.js", "styles.css"):
-        assert (WEB_DIR / name).is_file(), f"webapp/{name} missing"
-    js = (WEB_DIR / "app.js").read_text(encoding="utf-8")
-    for needle in ("/api/state", "/api/home", "/api/playlists", "/api/rooms", "data-accent"):
-        assert needle in js
+    views = sorted((frontend / "src" / "views").glob("*.tsx"))
+    assert len(views) >= 7, "expected a view per screen"
+
+    sources = "\n".join(path.read_text(encoding="utf-8") for path in views)
+    for needle in ("home", "search", "library", "queue", "playlists", "rooms", "profile"):
+        assert needle.lower() in sources.lower()
+
+    api_source = (frontend / "src" / "lib" / "api.ts").read_text(encoding="utf-8")
+    for endpoint in ("/api/state", "/api/home", "/api/playlists", "/api/rooms", "/api/action"):
+        assert endpoint in api_source
+
+    covers = sorted((frontend / "public" / "covers").glob("*.jpg"))
+    assert len(covers) >= 8, "fallback artwork missing"
+
+    built = root / "webapp" / "dist" / "index.html"
+    assert built.is_file(), "webapp/dist not built"

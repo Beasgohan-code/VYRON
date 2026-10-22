@@ -1,8 +1,25 @@
 # ─────────────────────────────────────────────────────────────────────────────
 #  VYRON — production image
-#  python 3.12 + ffmpeg (ntgcalls ships manylinux_2_28 wheels for cp310–cp314)
+#
+#  stage 1  build the React Mini App (vite → webapp/dist)
+#  stage 2  python 3.12 + ffmpeg + the built frontend
+#
+#  ntgcalls publishes manylinux_2_28 wheels for cp310–cp314, hence 3.12-slim.
 # ─────────────────────────────────────────────────────────────────────────────
-FROM python:3.12-slim-bookworm
+FROM node:22-alpine AS frontend
+
+WORKDIR /ui
+
+# install deps first so the layer is cached while components change
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+
+COPY frontend/ ./
+# vite writes to ../webapp/dist — keep it inside the build context
+RUN npm run build -- --outDir dist && mkdir -p /ui/out && cp -r dist/* /ui/out/
+
+
+FROM python:3.12-slim-bookworm AS runtime
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -23,6 +40,8 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
+# the compiled Mini App from stage 1 (overrides any stale local build)
+COPY --from=frontend /ui/out/ /app/webapp/dist/
 
 RUN useradd --create-home --uid 1000 vyron \
     && mkdir -p /app/data /app/downloads \
