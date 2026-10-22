@@ -6,7 +6,12 @@ kurigram==2.2.26
 # ─── Voice chat ─────────────────────────────────────────────────────────────
 py-tgcalls==2.2.11
 ntgcalls>=2.2.5,<3.0.0
-tgcrypto==1.2.5
+# TgCrypto makes Telegram's MTProto layer ~5× faster. 1.2.5 only publishes
+# wheels up to cp311, so on 3.12 pip would try to compile it and abort without
+# a C toolchain. Kurigram transparently falls back to pure-python `pyaes`, and
+# the Docker image compiles the wheel itself (see Dockerfile) — so skip it here
+# for anything newer than 3.11 and install it explicitly where a compiler exists.
+tgcrypto==1.2.5; python_version < "3.12"
 
 # ─── Rich UI (Bot API 10.3 cards) ───────────────────────────────────────────
 # richgram by BadmundaXd — tables, coloured buttons, details, text fallbacks

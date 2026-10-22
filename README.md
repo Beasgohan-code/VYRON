@@ -389,6 +389,7 @@ persistence, modals). CI runs both on Python 3.11/3.12 and Node 22.
 | Assistant joins but is silent | The **assistant** needs *manage voice chats*; give the bot admin too. |
 | `Could not resolve that track` | YouTube changed something → `pip install -U yt-dlp`; for age-gated videos set `COOKIES_FILE`. |
 | Bot replies "already in use" | Two instances with the same `STRING_SESSION` — run only one. |
+| Docker build: `error: No such file or directory: 'gcc'` | TgCrypto has no cp312 wheel; the image compiles it in its own stage. Rebuild without cache (`docker compose build --no-cache`). |
 | `ntgcalls` import error | Python must be 3.10–3.14 on x86-64/arm64; Docker image handles this. |
 | Nothing renders as rich | Server/Kurigram build too old → set `RICH_MESSAGES=false`; everything still works. |
 | Health check fails on Render | Keep `PORT=8080` and `runtime: docker` (Render routes to it automatically). |
