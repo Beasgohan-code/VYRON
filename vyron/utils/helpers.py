@@ -138,31 +138,14 @@ async def is_chat_admin(client, chat_id: int, user_id: int) -> bool:
         return False
 
 
-async def is_dj(chat_id: int, user_id: int) -> bool:
-    """Is this user on the chat's DJ list (and does the chat use one)?"""
-    from vyron.core import chatcfg
-
-    try:
-        lineup = await chatcfg.get(int(chat_id), "dj", []) or []
-    except Exception:
-        return False
-    return any(str(user_id) == str(entry) for entry in lineup)
-
-
 async def can_control(client, message: Message) -> bool:
-    """Playback rights: owners always, DJs by invitation, admins, and DMs.
-
-    A chat that sets a DJ lineup hands the controls to those people *and*
-    keeps admins able to fix things — the lineup never locks an admin out.
-    """
+    """Playback rights: owners always, group admins in groups, DM always."""
     user = message.from_user
     if not user:
         return False
     if is_owner(user.id):
         return True
     if message.chat.type == ChatType.PRIVATE:
-        return True
-    if await is_dj(message.chat.id, user.id):
         return True
     return await is_chat_admin(client, message.chat.id, user.id)
 
@@ -251,7 +234,6 @@ __all__ = [
     "display_name",
     "first_word",
     "is_chat_admin",
-    "is_dj",
     "is_owner",
     "mention",
     "parse_seek",

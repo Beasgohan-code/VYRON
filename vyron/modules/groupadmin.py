@@ -101,19 +101,16 @@ def _approved_ids(raw) -> list[int]:
     return ids
 
 
-async def _approved(chat_id: int, key: str = "approved") -> list[int]:
-    """Read a stored int-list (approved users, DJ lineup) defensively."""
-    return _approved_ids(await chatcfg.get(chat_id, key, []))
+async def _approved(chat_id: int) -> list[int]:
+    return _approved_ids(await chatcfg.get(chat_id, "approved", []))
 
 
-async def _target_id(
-    client: Client, message: Message, *, words: list[str] | None = None
-) -> int | None:
+async def _target_id(client: Client, message: Message) -> int | None:
     """Resolve a reply, ``@username`` or a numeric id into a user id."""
     reply = message.reply_to_message
     if reply is not None and getattr(reply, "from_user", None):
         return reply.from_user.id
-    args = command_args(message).split() if words is None else words
+    args = command_args(message).split()
     if not args:
         return None
     raw = args[0]
@@ -827,99 +824,6 @@ def register(client: Client) -> None:
                 message.chat.id,
                 cards.captcha_card(member.mention, user_id=member.id),
             )
-
-    # ── DJ lineup ──────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["dj", "playerdj"]) & GROUP)
-    async def _dj(_: Client, message: Message) -> None:
-        chat_id = message.chat.id
-        args = command_args(message).split()
-        keyword = args[0].lower() if args else ""
-        verbose = keyword in {"list", "show", "all"}
-        changing = keyword in {"add", "del", "remove", "rm"}
-        action = "del" if keyword in {"del", "remove", "rm"} else "add"
-        rest = args[1:] if changing else ([] if verbose else args)
-
-        async def admins() -> int:
-            try:
-                return (await client.get_chat(chat_id)).admins_count or 0
-            except Exception:
-                return 0
-
-        # bare `/dj` (or `/dj list`) reads the lineup; a reply makes it an add
-        if not rest and not verbose and message.reply_to_message is None:
-            lineup = await _approved(chat_id, key="dj")
-            entries = [(f"user {index + 1}", str(uid)) for index, uid in enumerate(lineup)]
-            await rich.send(
-                client,
-                chat_id,
-                cards.dj_card(entries, admins=await admins()),
-                reply_to=message.id,
-            )
-            return
-
-        if not await _can_manage(client, message):
-            await _deny(client, message)
-            return
-
-        target = await _target_id(client, message, words=rest)
-        lineup = await _approved(chat_id, key="dj")
-        if target is None:
-            await rich.send(
-                client,
-                chat_id,
-                cards.notice_card(
-                    "Who should DJ?",
-                    "Reply to a user, or pass an @username or id.",
-                    tone="info",
-                ),
-                reply_to=message.id,
-            )
-            return
-
-        if action == "add":
-            if target in lineup:
-                await rich.send(
-                    client,
-                    chat_id,
-                    cards.notice_card("Already a DJ", f"<code>{target}</code> can already queue.", tone="info"),
-                    reply_to=message.id,
-                )
-                return
-            lineup.append(target)
-            await chatcfg.set(chat_id, "dj", lineup[-50:])
-            await rich.send(
-                client,
-                chat_id,
-                cards.notice_card(
-                    "DJ added",
-                    f"<code>{target}</code> can now play, skip and queue here.",
-                    icon="headphones",
-                    extra=[("Lineup", str(len(lineup)))],
-                ),
-                reply_to=message.id,
-            )
-            return
-
-        if target not in lineup:
-            await rich.send(
-                client,
-                chat_id,
-                cards.notice_card("Not a DJ", "That user is not on the lineup.", tone="warn"),
-                reply_to=message.id,
-            )
-            return
-        lineup.remove(target)
-        await chatcfg.set(chat_id, "dj", lineup)
-        await rich.send(
-            client,
-            chat_id,
-            cards.notice_card(
-                "DJ removed",
-                f"<code>{target}</code> is back to member controls.",
-                tone="info",
-            ),
-            reply_to=message.id,
-        )
 
     # ── fallback: reply to any unknown /group-style help ───────────────────
     @client.on_message(filters.command(["grouphelp", "adminhelp"]) & GROUP)

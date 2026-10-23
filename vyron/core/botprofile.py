@@ -69,7 +69,6 @@ ADMIN_COMMANDS = [
     ("purge", "bulk delete messages"),
     ("setwelcome", "set the welcome message"),
     ("captcha", "verify new members"),
-    ("dj", "who may control playback"),
     ("zombies", "find deleted accounts"),
     ("report", "flag a message to admins"),
 ]

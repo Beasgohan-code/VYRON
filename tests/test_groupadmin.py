@@ -462,39 +462,3 @@ def test_captcha_gate_mutes_then_verifies(store, sent):
     asyncio.run(groupadmin.verify_captcha(client, good, CHAT_ID, str(MEMBER_ID)))
     assert client.called("restrict_chat_member")[-1][2].can_send_messages is True
     assert "verified" in good.answers[-1][0].lower()
-
-
-# ── DJ lineup ───────────────────────────────────────────────────────────────
-def test_dj_lineup_grants_playback_control(store, sent):
-    from vyron.utils.helpers import can_control
-
-    client = _client_with_handlers()
-    admin = FakeUser(ADMIN_ID, "Admin")
-    dj = FakeUser(MEMBER_ID, "DJ")
-
-    # an admin adds a DJ by reply
-    reply = FakeMessage("hi", user=dj)
-    _run(client.handlers["_dj"], client, FakeMessage("/dj add", chat=FakeChat(), user=admin, reply=reply))
-    assert store[CHAT_ID]["dj"] == [MEMBER_ID]
-
-    # the lineup is public to read
-    _run(client.handlers["_dj"], client, FakeMessage("/dj", chat=FakeChat(), user=dj))
-    assert str(MEMBER_ID) in sent.last_text()
-
-    # and it is what makes can_control say yes for a non-admin
-    message = FakeMessage("x", chat=FakeChat(), user=dj)
-    assert asyncio.run(can_control(client, message)) is True
-
-    # an ordinary member still cannot control, nor edit the lineup
-    plain = FakeUser(555000, "Plain")
-    assert asyncio.run(can_control(client, FakeMessage("x", chat=FakeChat(), user=plain))) is False
-    _run(
-        client.handlers["_dj"],
-        client,
-        FakeMessage("/dj add @someone", chat=FakeChat(), user=plain),
-    )
-    assert store[CHAT_ID]["dj"] == [MEMBER_ID]
-
-    # removal works
-    _run(client.handlers["_dj"], client, FakeMessage("/dj del", chat=FakeChat(), user=admin, reply=reply))
-    assert store[CHAT_ID]["dj"] == []
