@@ -1,5 +1,6 @@
-import { AlertTriangle, Compass, Download, WifiOff } from "lucide-react";
+import { ArrowUpRight, Compass, Download, Lock, WifiOff } from "lucide-react";
 import { useEffect, useState } from "react";
+import { BootScreen } from "./components/BootScreen";
 import { Dock } from "./components/Dock";
 import { Rail, Tabs } from "./components/Nav";
 import { Sheet } from "./components/Sheet";
@@ -69,6 +70,7 @@ export default function App() {
 
   return (
     <div className={`app ${audio.track ? "with-dock" : ""}`}>
+      <BootScreen />
       <Rail />
 
       <main className="main">
@@ -93,14 +95,10 @@ export default function App() {
           </div>
         </header>
 
-        {(access === "locked" || access === "offline") && (
-          <div className={`notice ${access === "offline" ? "error" : "warn"}`}>
-            {access === "offline" ? <WifiOff size={15} /> : <AlertTriangle size={15} />}
-            <span>
-              {access === "offline"
-                ? "Cannot reach the VYRON server. Check the deployment, then retry."
-                : "This app needs a Telegram session. Open it from the bot to unlock playback."}
-            </span>
+        {access === "offline" && (
+          <div className="notice error">
+            <WifiOff size={15} />
+            <span>Cannot reach the VYRON server. Check the deployment, then retry.</span>
             <button
               type="button"
               className="btn btn-ghost sm"
@@ -116,9 +114,21 @@ export default function App() {
           </div>
         )}
 
-        <div className="view" key={view}>
-          {page}
-        </div>
+        {access === "locked" ? (
+          <LockedGate
+            bot={state?.bot ?? ""}
+            retrying={retrying}
+            onRetry={async () => {
+              setRetrying(true);
+              await refreshState();
+              setRetrying(false);
+            }}
+          />
+        ) : (
+          <div className="view" key={view}>
+            {page}
+          </div>
+        )}
 
         <footer className="foot">
           <span>VYRON v{state?.version ?? "1.2.0"}</span>
@@ -142,5 +152,61 @@ export default function App() {
         </div>
       )}
     </div>
+  );
+}
+
+
+/**
+ * Outside Telegram there is no identity to sign requests with, so the app
+ * explains exactly how to get in instead of showing empty shelves.
+ */
+function LockedGate({
+  bot,
+  retrying,
+  onRetry,
+}: {
+  bot: string;
+  retrying: boolean;
+  onRetry: () => Promise<void>;
+}) {
+  const handle = bot || "VyronMusicBot";
+  return (
+    <section className="gate">
+      <div className="gate-art" aria-hidden="true" />
+      <div className="gate-body">
+        <span className="gate-badge">
+          <Lock size={13} /> signed out
+        </span>
+        <h1>
+          Open VYRON
+          <em>inside Telegram</em>
+        </h1>
+        <p>
+          The Mini App signs every request with your Telegram session, so your queue,
+          likes and voice chat stay yours. Open the bot, then tap <b>Player</b>.
+        </p>
+
+        <div className="gate-actions">
+          <a className="btn btn-primary" href={`https://t.me/${handle}`} target="_blank" rel="noreferrer">
+            Open @{handle} <ArrowUpRight size={15} />
+          </a>
+          <button type="button" className="btn btn-ghost" disabled={retrying} onClick={() => void onRetry()}>
+            {retrying ? "Checking…" : "I opened it — retry"}
+          </button>
+        </div>
+
+        <ol className="gate-steps">
+          <li>
+            <b>1</b> Open <code>@{handle}</code> on Telegram
+          </li>
+          <li>
+            <b>2</b> Tap the <code>Player</code> button in the menu
+          </li>
+          <li>
+            <b>3</b> The app unlocks with your account
+          </li>
+        </ol>
+      </div>
+    </section>
   );
 }

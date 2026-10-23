@@ -1564,3 +1564,503 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
     transition-duration: 0.001ms !important;
   }
 }
+
+/* ==========================================================================
+   VYRON — Aurora (v2 skin)
+   The brand is teal light on charcoal, with violet as the second voice.
+   This layer sits on top of Nocturne and refines colour, depth and motion
+   without renaming a single class, so every view upgrades at once.
+   ========================================================================== */
+
+:root {
+  --bg: #05070a;
+  --bg-elev: #0a0e13;
+  --panel: rgba(255, 255, 255, 0.042);
+  --panel-2: rgba(255, 255, 255, 0.075);
+  --line: rgba(255, 255, 255, 0.09);
+  --line-strong: rgba(255, 255, 255, 0.18);
+  --text: #eef7f5;
+  --muted: #9fb3b0;
+  --dim: #6d817f;
+  --accent: #2de8c8;
+  --accent-2: #8b5cf6;
+  --accent-ink: #04120f;
+  --ok: #2de8c8;
+  --warn: #f7c65b;
+  --error: #ff7a8a;
+  --glow: 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent),
+    0 24px 60px -34px color-mix(in srgb, var(--accent) 70%, transparent);
+  --radius: 24px;
+  --radius-sm: 15px;
+}
+
+[data-accent="violet"] { --accent: #8b5cf6; --accent-2: #2de8c8; }
+[data-accent="blue"] { --accent: #4f8dff; --accent-2: #2de8c8; }
+[data-accent="cyan"] { --accent: #2de8c8; --accent-2: #8b5cf6; }
+[data-accent="green"] { --accent: #43e08b; --accent-2: #2de8c8; }
+[data-accent="pink"] { --accent: #fb7bb8; --accent-2: #8b5cf6; }
+[data-accent="amber"] { --accent: #f7c65b; --accent-2: #fb7bb8; }
+
+body {
+  background:
+    radial-gradient(80% 60% at 82% -12%, color-mix(in srgb, var(--accent) 13%, transparent), transparent 62%),
+    radial-gradient(70% 55% at 4% 4%, color-mix(in srgb, var(--accent-2) 12%, transparent), transparent 58%),
+    radial-gradient(120% 90% at 50% 120%, rgba(0, 0, 0, 0.9), transparent 60%),
+    var(--bg);
+  background-attachment: fixed;
+}
+
+/* a whisper of grain keeps large dark gradients from banding */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* ── boot ───────────────────────────────────────────────────────────────── */
+.boot-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  grid-template-rows: 1fr auto auto;
+  place-items: center;
+  overflow: hidden;
+  background: #05070a;
+  transition: opacity 0.62s var(--ease), transform 0.62s var(--ease);
+}
+.boot-screen.leaving { opacity: 0; transform: scale(1.03); pointer-events: none; }
+.boot-art {
+  position: absolute;
+  inset: -6%;
+  background: url("/brand/boot.jpg") center / cover no-repeat;
+  opacity: 0.5;
+  animation: boot-drift 10s ease-in-out infinite alternate;
+}
+.boot-veil {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(56% 42% at 50% 44%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 72%),
+    linear-gradient(180deg, rgba(5, 7, 10, 0.82), rgba(5, 7, 10, 0.28) 32%, rgba(5, 7, 10, 0.94));
+}
+@keyframes boot-drift {
+  from { transform: scale(1.02) translateY(-8px); }
+  to { transform: scale(1.08) translateY(8px); }
+}
+.boot-body {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  justify-items: center;
+  gap: 20px;
+  padding: 0 28px;
+  text-align: center;
+  grid-row: 2;
+}
+.boot-logo {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 88px;
+  height: 88px;
+  border-radius: 28px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  box-shadow: 0 30px 80px -34px color-mix(in srgb, var(--accent) 85%, transparent);
+  animation: boot-logo-in 0.9s var(--ease) both;
+}
+.boot-logo img { width: 100%; height: 100%; object-fit: cover; }
+.boot-logo span {
+  position: absolute;
+  inset: auto 0 0 0;
+  padding: 4px 0 5px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  background: linear-gradient(180deg, transparent, rgba(4, 8, 10, 0.92) 55%);
+}
+@keyframes boot-logo-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.92); }
+  to { opacity: 1; transform: none; }
+}
+.boot-title { display: grid; gap: 6px; }
+.boot-title h1 {
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  text-indent: 0.22em;
+  line-height: 1;
+}
+.boot-title p {
+  margin: 0;
+  font-size: 10.5px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.boot-track {
+  width: min(240px, 62vw);
+  height: 3px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.09);
+  overflow: hidden;
+}
+.boot-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent-2), var(--accent));
+  box-shadow: 0 0 16px color-mix(in srgb, var(--accent) 70%, transparent);
+  transition: width 0.55s var(--ease);
+}
+.boot-stages {
+  display: grid;
+  gap: 7px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 11.5px;
+  color: var(--dim);
+}
+.boot-stages li { display: flex; align-items: center; gap: 8px; }
+.boot-stages i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--line-strong);
+  transition: background 0.3s ease, box-shadow 0.3s ease;
+}
+.boot-stages li.done i {
+  background: var(--accent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 75%, transparent);
+}
+.boot-stages b { font-weight: 500; color: var(--muted); }
+.boot-stages li.done b { color: var(--text); }
+.boot-stages em { font-style: normal; color: var(--dim); }
+.boot-foot {
+  position: relative;
+  z-index: 2;
+  grid-row: 3;
+  margin: 0 0 26px;
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+/* ── locked gate ────────────────────────────────────────────────────────── */
+.gate {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  margin-top: 6px;
+  border-radius: 28px;
+  border: 1px solid var(--line);
+  overflow: hidden;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+  isolation: isolate;
+}
+.gate-art {
+  position: absolute;
+  inset: 0;
+  background: url("/brand/hero.jpg") right center / cover no-repeat;
+  opacity: 0.55;
+  z-index: -2;
+}
+.gate::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(100deg, rgba(5, 7, 10, 0.96) 12%, rgba(5, 7, 10, 0.72) 52%, rgba(5, 7, 10, 0.34));
+}
+.gate-body {
+  display: grid;
+  gap: 18px;
+  justify-items: start;
+  padding: clamp(26px, 5vw, 52px);
+  max-width: 640px;
+}
+.gate-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  border-radius: var(--pill);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.gate-body h1 {
+  font-family: var(--font-display);
+  font-size: clamp(32px, 5.4vw, 52px);
+  line-height: 0.98;
+  letter-spacing: -0.035em;
+  font-weight: 800;
+}
+.gate-body h1 em {
+  display: block;
+  font-style: normal;
+  background: linear-gradient(96deg, var(--accent), var(--accent-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.gate-body p { margin: 0; color: var(--muted); max-width: 46ch; font-size: 14.5px; }
+.gate-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.gate-actions .btn { text-decoration: none; }
+.gate-steps {
+  display: grid;
+  gap: 9px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  color: var(--muted);
+}
+.gate-steps li { display: flex; align-items: center; gap: 10px; }
+.gate-steps b {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 7px;
+  font-size: 11px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent);
+}
+.gate-steps code {
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+/* ── hero with real artwork ─────────────────────────────────────────────── */
+.hero {
+  padding: 40px;
+  border-radius: 32px;
+  border-color: color-mix(in srgb, var(--accent) 16%, var(--line));
+  background: var(--bg-elev);
+  isolation: isolate;
+}
+.hero-art {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  background: url("/brand/hero.jpg") center right / cover no-repeat;
+  transform: scale(1.02);
+  transition: transform 1.2s var(--ease);
+  animation: hero-breathe 18s ease-in-out infinite alternate;
+}
+.hero:hover .hero-art { transform: scale(1.05); }
+@keyframes hero-breathe {
+  from { filter: saturate(0.95) brightness(0.95); }
+  to { filter: saturate(1.12) brightness(1.06); }
+}
+.hero-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    linear-gradient(96deg, rgba(5, 7, 10, 0.97) 8%, rgba(5, 7, 10, 0.86) 40%, rgba(5, 7, 10, 0.25) 78%, transparent),
+    linear-gradient(180deg, transparent 55%, rgba(5, 7, 10, 0.75));
+}
+.hero-aurora { opacity: 0.28; mix-blend-mode: screen; }
+.eyebrow-pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 60%, transparent);
+  animation: pulse-ring 2.4s ease-out infinite;
+}
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent); }
+  70% { box-shadow: 0 0 0 9px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+.hero-title { text-wrap: balance; }
+.hero-title em {
+  background: linear-gradient(98deg, var(--accent), color-mix(in srgb, var(--accent) 55%, white) 45%, var(--accent-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.hero-sub { color: color-mix(in srgb, var(--text) 72%, transparent); }
+.hero-card {
+  border-radius: 22px;
+  border-color: rgba(255, 255, 255, 0.16);
+  box-shadow: 0 34px 70px -30px rgba(0, 0, 0, 0.95), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(2px);
+}
+.hero-stack-note {
+  background: rgba(5, 7, 10, 0.6);
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--line));
+  color: var(--text);
+}
+.hero-stack-note svg { color: var(--accent); }
+
+/* ── chrome: rail · topbar · dock ───────────────────────────────────────── */
+.rail {
+  background: linear-gradient(180deg, rgba(10, 14, 19, 0.86), rgba(5, 7, 10, 0.6));
+  border-right-color: var(--line);
+  backdrop-filter: blur(18px) saturate(1.2);
+}
+.rail-mark {
+  overflow: hidden;
+  padding: 0;
+  border-radius: 13px;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  box-shadow: 0 14px 34px -18px color-mix(in srgb, var(--accent) 90%, transparent);
+}
+.rail-mark img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.rail-word i { color: var(--dim); letter-spacing: 0.14em; }
+.rail-link { letter-spacing: 0.01em; }
+.rail-link.active {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent) 18%, transparent),
+    color-mix(in srgb, var(--accent-2) 8%, transparent)
+  );
+  color: var(--text);
+}
+.rail-link.active::before {
+  background: linear-gradient(180deg, var(--accent), var(--accent-2));
+  box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 80%, transparent);
+}
+.rail-link.active svg { color: var(--accent); }
+.rail-foot { color: var(--dim); }
+
+.topbar { border-bottom-color: color-mix(in srgb, var(--line) 70%, transparent); }
+.topbar-title h2 { letter-spacing: -0.02em; }
+.status-dot { background: var(--dim); }
+.status-dot.on {
+  background: var(--accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent),
+    0 0 16px color-mix(in srgb, var(--accent) 60%, transparent);
+}
+
+.dock {
+  background: linear-gradient(180deg, rgba(12, 17, 22, 0.92), rgba(6, 9, 12, 0.96));
+  border-color: color-mix(in srgb, var(--accent) 16%, var(--line));
+  box-shadow: 0 30px 70px -34px rgba(0, 0, 0, 1), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(22px) saturate(1.3);
+}
+.dock-progress span, .dock-progress i {
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+.dock-play {
+  background: linear-gradient(140deg, var(--accent), color-mix(in srgb, var(--accent) 60%, white));
+  color: var(--accent-ink);
+  box-shadow: 0 14px 32px -16px color-mix(in srgb, var(--accent) 95%, transparent);
+}
+
+/* ── surfaces: cards, tiles, covers, chips ──────────────────────────────── */
+.tile-art {
+  border-radius: 20px;
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: var(--shadow-sm);
+}
+.tile:hover .tile-art { box-shadow: 0 26px 50px -26px rgba(0, 0, 0, 0.95); }
+.cover-sheen {
+  background: linear-gradient(150deg, rgba(255, 255, 255, 0.22), transparent 42%, rgba(0, 0, 0, 0.28));
+}
+.chip.active {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 42%, transparent);
+  color: var(--text);
+}
+.chip.active i { color: var(--accent); }
+.seg-btn.active { color: var(--text); }
+.btn-primary {
+  background: linear-gradient(140deg, var(--accent), color-mix(in srgb, var(--accent) 62%, white));
+  color: var(--accent-ink);
+  box-shadow: 0 18px 40px -22px color-mix(in srgb, var(--accent) 95%, transparent);
+}
+.btn-primary:hover { box-shadow: 0 22px 46px -20px color-mix(in srgb, var(--accent) 100%, transparent); }
+.empty-icon {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+.room-card.live { border-color: color-mix(in srgb, var(--accent) 34%, transparent); }
+.live-dot {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent),
+    0 0 12px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+.field-go { color: var(--accent-ink); background: linear-gradient(140deg, var(--accent), color-mix(in srgb, var(--accent) 60%, white)); }
+.accent-dot.active { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--text); }
+.toast {
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--line));
+  background: rgba(10, 15, 20, 0.94);
+  backdrop-filter: blur(16px);
+}
+.quick:hover { border-color: color-mix(in srgb, var(--accent) 34%, transparent); }
+
+@media (max-width: 900px) {
+  .hero { padding: 26px; border-radius: 26px; }
+  .hero-scrim {
+    background:
+      linear-gradient(180deg, rgba(5, 7, 10, 0.82) 4%, rgba(5, 7, 10, 0.9) 46%, rgba(5, 7, 10, 0.97));
+  }
+  .boot-logo { width: 76px; height: 76px; border-radius: 24px; }
+  .gate { border-radius: 24px; }
+  .gate-body { padding: 24px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .boot-art, .hero-art, .eyebrow-pulse { animation: none; }
+  .boot-screen { transition: opacity 0.2s linear; }
+}
+
+/* ── screen headers with artwork ────────────────────────────────────────── */
+.screen-head.with-art {
+  position: relative;
+  isolation: isolate;
+  padding: 22px 24px;
+  border-radius: 24px;
+  border: 1px solid var(--line);
+  overflow: hidden;
+  background: var(--bg-elev);
+}
+.head-art {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  background: url("/brand/room.jpg") center 42% / cover no-repeat;
+  opacity: 0.6;
+}
+.screen-head.with-art::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(100deg, rgba(5, 7, 10, 0.94), rgba(5, 7, 10, 0.55) 60%, rgba(5, 7, 10, 0.2));
+}
+.screen-head.with-art h1 { font-size: clamp(26px, 3.6vw, 38px); }
+.screen-head.with-art p { color: color-mix(in srgb, var(--text) 70%, transparent); }
+
+.profile-logo {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+  display: block;
+}

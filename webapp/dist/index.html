@@ -1,52 +1,109 @@
 <!doctype html>
-<html lang="en" data-theme="beat" data-accent="violet">
+<html lang="en" data-theme="beat" data-accent="cyan">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
-    <meta name="theme-color" content="#08080e" />
+    <meta name="theme-color" content="#05070a" />
     <meta name="color-scheme" content="dark light" />
     <meta name="description" content="VYRON — stream, queue and download music with your Telegram group." />
     <title>VYRON — Music beyond limits</title>
+
+    <link rel="icon" type="image/png" href="/app/static/brand/avatar.png" />
+    <link rel="alternate icon" type="image/jpeg" href="/app/static/brand/avatar.jpg" />
+    <link rel="apple-touch-icon" href="/app/static/brand/avatar.png" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="VYRON — music beyond limits" />
+    <meta property="og:description" content="A Telegram voice-chat music bot with a Spotify-grade Mini App." />
+    <meta property="og:image" content="/app/static/brand/og.jpg" />
+    <meta name="twitter:card" content="summary_large_image" />
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Inter+Tight:wght@400;500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap"
     />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <script type="module" crossorigin src="/app/static/assets/index-BCgqETV6.js"></script>
-    <link rel="stylesheet" crossorigin href="/app/static/assets/index-BmKawlTU.css">
+
+    <style>
+      /* First paint — pure CSS, before React exists. Same visual language as
+         the React boot screen so the hand-off is invisible. */
+      html { background: #05070a; }
+      body { margin: 0; background: #05070a; }
+
+      .boot {
+        position: fixed; inset: 0; z-index: 90;
+        display: grid; grid-template-rows: 1fr auto 1fr;
+        justify-items: center; align-items: center;
+        overflow: hidden;
+        background: #05070a;
+        color: #eaf6f4;
+        font-family: "Inter Tight", system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      .boot::before {
+        content: ""; position: absolute; inset: -10%;
+        background: url("/app/static/brand/boot.jpg") center / cover no-repeat;
+        opacity: 0.55; transform: scale(1.04);
+        animation: boot-drift 9s ease-in-out infinite alternate;
+      }
+      .boot::after {
+        content: ""; position: absolute; inset: 0;
+        background:
+          radial-gradient(60% 45% at 50% 42%, rgba(45, 232, 200, 0.18), transparent 70%),
+          linear-gradient(180deg, rgba(5, 7, 10, 0.75), rgba(5, 7, 10, 0.2) 35%, rgba(5, 7, 10, 0.92));
+      }
+      .boot-inner {
+        position: relative; z-index: 2;
+        grid-row: 2;
+        display: grid; justify-items: center; gap: 18px;
+        padding: 0 32px;
+        text-align: center;
+      }
+      .boot-mark {
+        display: grid; place-items: center;
+        width: 76px; height: 76px; border-radius: 24px;
+        background: radial-gradient(120% 120% at 30% 20%, #0d2422, #06100f);
+        border: 1px solid rgba(45, 232, 200, 0.35);
+        box-shadow: 0 26px 70px -30px rgba(45, 232, 200, 0.75), inset 0 0 30px rgba(45, 232, 200, 0.12);
+        overflow: hidden;
+      }
+      .boot-mark img { width: 100%; height: 100%; object-fit: cover; }
+      .boot-word {
+        font-family: "Bricolage Grotesque", "Inter Tight", system-ui, sans-serif;
+        font-size: 26px; font-weight: 800; letter-spacing: 0.26em; text-indent: 0.26em;
+      }
+      .boot-tag {
+        font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase;
+        color: rgba(234, 246, 244, 0.5);
+      }
+      .boot-bar {
+        position: relative; width: min(220px, 60vw); height: 2px; border-radius: 2px;
+        background: rgba(255, 255, 255, 0.1); overflow: hidden;
+      }
+      .boot-bar span {
+        position: absolute; inset: 0 auto 0 0; width: 40%;
+        background: linear-gradient(90deg, transparent, #2de8c8, #8b5cf6, transparent);
+        animation: boot-sweep 1.25s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+      }
+      @keyframes boot-sweep { from { transform: translateX(-110%); } to { transform: translateX(300%); } }
+      @keyframes boot-drift { from { transform: scale(1.04) translateY(-6px); } to { transform: scale(1.09) translateY(6px); } }
+      @media (prefers-reduced-motion: reduce) {
+        .boot::before, .boot-bar span { animation: none; }
+      }
+    </style>
+    <script type="module" crossorigin src="/app/static/assets/index-dzE0cfRB.js"></script>
+    <link rel="stylesheet" crossorigin href="/app/static/assets/index-B89zhxON.css">
   </head>
   <body>
     <div id="root">
       <div class="boot" aria-hidden="true">
-        <span class="boot-mark">V</span>
-        <span class="boot-word">VYRON</span>
+        <div class="boot-inner">
+          <span class="boot-mark"><img src="/app/static/brand/avatar.jpg" alt="" /></span>
+          <span class="boot-word">VYRON</span>
+          <span class="boot-tag">music beyond limits</span>
+          <span class="boot-bar"><span></span></span>
+        </div>
       </div>
     </div>
-    <style>
-      html { background: #07070b; }
-      .boot {
-        position: fixed; inset: 0;
-        display: grid; place-content: center; justify-items: center; gap: 14px;
-        background: radial-gradient(70% 60% at 50% 30%, rgba(139, 92, 246, 0.28), transparent 70%), #07070b;
-        animation: boot-out 0.5s 0.9s ease both;
-      }
-      .boot-mark {
-        display: grid; place-items: center;
-        width: 60px; height: 60px; border-radius: 20px;
-        background: linear-gradient(140deg, #8b5cf6, #fb7185);
-        color: #0a0713; font: 800 30px/1 "Bricolage Grotesque", system-ui, sans-serif;
-        box-shadow: 0 20px 50px -20px rgba(139, 92, 246, 0.9);
-        animation: boot-pulse 1.6s ease-in-out infinite;
-      }
-      .boot-word {
-        font: 800 13px/1 "Inter Tight", system-ui, sans-serif;
-        letter-spacing: 0.32em; color: #a5a2b6; text-indent: 0.32em;
-      }
-      @keyframes boot-pulse { 50% { transform: scale(1.06); } }
-      @keyframes boot-out { to { opacity: 0; visibility: hidden; } }
-      @media (prefers-reduced-motion: reduce) { .boot, .boot-mark { animation: none; } }
-    </style>
   </body>
 </html>

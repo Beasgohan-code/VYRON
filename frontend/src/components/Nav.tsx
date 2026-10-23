@@ -33,7 +33,9 @@ export function Rail() {
   return (
     <nav className="rail" aria-label="Sections">
       <div className="rail-brand">
-        <span className="rail-mark">V</span>
+        <span className="rail-mark">
+          <img src="/brand/avatar.jpg" alt="" />
+        </span>
         <span className="rail-word">
           VYRON
           <i>music app</i>

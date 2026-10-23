@@ -199,6 +199,9 @@ async def _async_main() -> int:
     runtime.handlers_loaded = loaded
     await _set_commands(bot)
     await _setup_menu_button(bot)
+    from vyron.core import botprofile
+
+    await botprofile.install(bot)
     if settings.music_api:
         base = settings.api_base or f"http://0.0.0.0:{settings.port}"
         logger.info(

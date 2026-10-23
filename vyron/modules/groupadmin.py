@@ -679,8 +679,7 @@ def register(client: Client) -> None:
                 "They now skip locks and the flood limiter.",
                 extra=[("ID", f"<code>{target}</code>")],
                 actions=B.row(
-                    B.btn("Revoke", data="v:noop", style="danger"),
-                    B.btn("List", data="v:noop", style="link"),
+                    B.btn("See the list", data="v:grp:approved", style="link"),
                 ),
             ),
             reply_to=message.id,

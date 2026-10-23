@@ -109,7 +109,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [libraryFilter, setLibraryFilter] = useState<LibraryFilter>("liked");
   const [selectedPlaylist, setSelectedPlaylist] = useState<Playlist | null>(null);
   const [theme, setThemeState] = useState<ThemeName>(() => readLocal("vyron:theme", "beat") as ThemeName);
-  const [accent, setAccentState] = useState<AccentName>(() => readLocal("vyron:accent", "violet") as AccentName);
+  const [accent, setAccentState] = useState<AccentName>(() => readLocal("vyron:accent", "cyan") as AccentName);
   const [normalise, setNormaliseState] = useState(() => readLocal("vyron:normalise", "0") === "1");
   const [toastMessage, setToastMessage] = useState("");
   const [toastTone, setToastTone] = useState<"info" | "error" | "success">("info");

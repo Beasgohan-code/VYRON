@@ -97,6 +97,7 @@ class Settings:
     premium_emoji_file: str = field(default_factory=lambda: _env("PREMIUM_EMOJI_FILE"))
     premium_emoji_enabled: bool = field(default_factory=lambda: _flag("PREMIUM_EMOJI", True))
     rich_messages: bool = field(default_factory=lambda: _flag("RICH_MESSAGES", True))
+    bot_profile: bool = field(default_factory=lambda: _flag("BOT_PROFILE", True))
     ephemeral_cards: bool = field(default_factory=lambda: _flag("EPHEMERAL_CARDS", True))
     np_refresh_seconds: int = field(default_factory=lambda: max(5, _int("NP_REFRESH_SECONDS", 12)))
 

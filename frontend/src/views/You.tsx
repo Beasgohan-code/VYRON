@@ -36,7 +36,11 @@ export function You() {
     <div className="stage" ref={stage}>
       <section className="profile-card stage-block">
         <div className="profile-art">
-          <Cover track={{ title: user?.name || "VYRON" }} monogram />
+          {user?.name ? (
+            <Cover track={{ title: user.name }} monogram />
+          ) : (
+            <img className="profile-logo" src="/brand/avatar.jpg" alt="" />
+          )}
         </div>
         <div className="profile-main">
           <span className="eyebrow">

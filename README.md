@@ -420,6 +420,36 @@ id), so there are no bundled cover images to keep in sync.
 
 ---
 
+## 🎨 The Mini App look
+
+Every entry point opens the same single-page app, and the first thing anyone
+sees is a **real boot sequence** — not a spinner:
+
+1. **First paint** — `index.html` ships a pure-CSS splash (brand art, mark,
+   sweep bar) so there is no white flash before React exists.
+2. **React boot** — three honest stages: *Interface* (mounted), *Telegram
+   session* (`/api/state` answered) and *Your library* (`/api/home` synced).
+   A stage only ticks when the real call succeeds; a dead server shows
+   **offline** instead of a fake 100 %.
+3. **Hand-off** — the overlay fades and scales out, then unmounts.
+
+**Brand assets** live in `frontend/public/brand/` and are copied into
+`webapp/dist/brand/` at build time:
+
+| File | Used by |
+| --- | --- |
+| `hero.jpg` | home hero backdrop (scrimmed, parallax on hover) and the signed-out gate |
+| `boot.jpg` | pre-React splash + React boot background |
+| `avatar.png` / `avatar.jpg` | favicon, apple-touch-icon, rail mark, boot mark |
+| `room.jpg` | the Rooms header |
+| `og.jpg` | `og:image` / `twitter:image` previews |
+
+The palette is the brand pairing — **teal `#2de8c8`** as the default accent with
+**violet `#8b5cf6`** as the second voice — and every accent in *You →
+Appearance* reads against the same charcoal glass surfaces. Signed out, the app
+shows a **gate** (art, three steps, a direct `t.me` link) instead of empty
+shelves; the boot and gate both respect `prefers-reduced-motion`.
+
 ## 🎨 Premium emoji
 
 VYRON ships a full unicode fallback set, so it looks good with **zero setup**.
@@ -554,6 +584,7 @@ The interesting optional ones:
 | `MONGO_URL` | – | persistence (JSON file otherwise) |
 | `PREMIUM_EMOJI_FILE` | `./emoji.json` | custom emoji pack |
 | `RICH_MESSAGES` | `true` | rich cards (set `false` for plain HTML) |
+| `BOT_PROFILE` | `true` | on boot, set the bot's name/bio and scope the command menus (users · group admins · owner) |
 | `KEEPALIVE_MINUTES` | `10` | ping our own `/health` + `/app/` so free hosts don't sleep (`0` = off) |
 | `KEEPALIVE_URL` | `RENDER_EXTERNAL_URL` | public URL to ping on Koyeb/Railway |
 | `WATCHDOG_SECONDS` | `60` | reconnect the bot/assistant if the socket drops (`0` = off) |

@@ -35,9 +35,12 @@ export function Home() {
   return (
     <div className="stage" ref={stage}>
       <section className="hero stage-block">
+        <div className="hero-art" aria-hidden="true" />
+        <div className="hero-scrim" aria-hidden="true" />
         <Aurora className="hero-aurora" tone="violet" />
         <div className="hero-copy">
           <span className="eyebrow">
+            <span className="eyebrow-pulse" />
             <Sparkles size={13} />
             {state?.chat?.title ? `in ${state.chat.title}` : "your listening room"}
           </span>
@@ -109,6 +112,11 @@ export function Home() {
           {stack.length > 0 && (
             <span className="hero-stack-note">
               <Radio size={13} /> {trending.length} tracks trending now
+            </span>
+          )}
+          {stack.length === 0 && (
+            <span className="hero-stack-note">
+              <Radio size={13} /> {state?.streaming ? "voice chat ready" : "file mode"}
             </span>
           )}
         </div>

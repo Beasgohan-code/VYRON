@@ -82,6 +82,57 @@ def register(client: Client) -> None:
             await verify_captcha(client, cq, chat.id, arg)
             return
 
+        # ── group manager panel (admins only) ──────────────────────────────
+        if action == "grp":
+            from vyron.core import chatcfg
+            from vyron.modules.locks import locks_panel
+
+            actor = cq.from_user.id if cq.from_user else 0
+            if not actor or not (is_owner(actor) or await is_chat_admin(client, chat.id, actor)):
+                await cq.answer("Admins only.", show_alert=True)
+                return
+
+            if arg == "locks" or arg == "flood":
+                locks_cfg = await chatcfg.get(chat.id, "locks", {})
+                flood_cfg = await chatcfg.get(chat.id, "flood", {})
+                if arg == "flood":
+                    flood_cfg["enabled"] = not flood_cfg.get("enabled", True)
+                    await chatcfg.set(chat.id, "flood", flood_cfg)
+                    await cq.answer("Anti-flood " + ("on" if flood_cfg["enabled"] else "off"))
+                else:
+                    await cq.answer()
+                await _show(client, cq, locks_panel(locks_cfg, flood_cfg))
+                return
+
+            if arg == "rules":
+                admins = 0
+                try:
+                    admins = (await client.get_chat(chat.id)).admins_count or 0
+                except Exception:
+                    admins = 0
+                await _show(
+                    client,
+                    cq,
+                    cards.rules_card(
+                        chat.title or "this chat",
+                        await chatcfg.get(chat.id, "rules", "") or "",
+                        admins=admins,
+                        can_edit=True,
+                    ),
+                )
+                await cq.answer()
+                return
+
+            if arg == "approved":
+                ids = await chatcfg.get(chat.id, "approved", []) or []
+                entries = [(f"user {index + 1}", str(uid)) for index, uid in enumerate(ids)]
+                await _show(client, cq, cards.approved_card(entries))
+                await cq.answer()
+                return
+
+            await cq.answer("This tool needs a group.", show_alert=True)
+            return
+
         player = runtime.player
         if player is None:
             await cq.answer("Player is still starting up…")

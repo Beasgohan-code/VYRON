@@ -12,7 +12,8 @@ export function Rooms() {
 
   return (
     <div className="stage" ref={stage}>
-      <header className="screen-head">
+      <header className="screen-head with-art">
+        <div className="head-art" aria-hidden="true" />
         <h1>Rooms</h1>
         <p>
           {rooms.length === 0

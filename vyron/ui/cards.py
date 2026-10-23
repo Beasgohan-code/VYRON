@@ -1213,7 +1213,7 @@ def rules_card(title: str, rules: str, *, admins: int = 0, can_edit: bool = Fals
     )
     if can_edit:
         body += B.row(
-            B.btn(f"{E('tools')} Edit", data="v:noop", style="link"),
+            B.btn(f"{E('note')} read the rules", data="v:grp:rules", style="link"),
             B.btn(f"{E('check')} Got it", data="v:close", style="success"),
         )
     else:
@@ -1349,8 +1349,12 @@ def group_admin_card(
         + B.divider()
         + sections
         + B.row(
-            B.btn(f"{E('shield')} Locks", data="v:lock:panel", style="primary"),
-            B.btn(f"{E('wave')} Anti-flood", data="v:lock:flood", style="success"),
+            B.btn(f"{E('shield')} Locks", data="v:grp:locks", style="primary"),
+            B.btn(f"{E('wave')} Anti-flood", data="v:grp:flood", style="success"),
+        )
+        + B.row(
+            B.btn(f"{E('note')} Rules", data="v:grp:rules"),
+            B.btn(f"{E('user')} Approved", data="v:grp:approved"),
             B.btn(f"{E('close')} Close", data="v:close", style="danger"),
         )
         + B.footer(f"{E('info')} admins only {BULLET} owners bypass every check")
@@ -1374,9 +1378,9 @@ def zombies_card(found: list[tuple[str, str]], *, scanned: int, kicked: int = 0,
     if kicked:
         body += B.note(f"{E('shield')} kicked <b>{kicked}</b> of them")
     if found:
-        body += B.row(
-            B.btn(f"{E('bolt')} Kick all", data="v:noop", style="danger"),
-            B.btn(f"{E('check')} Keep", data="v:close", style="success"),
+        body += B.row(B.btn(f"{E('check')} Keep them", data="v:close", style="success"))
+        body += B.footer(
+            f"{E('info')} run <code>/zombies kick</code> to remove them in one pass"
         )
     if capped:
         body += B.footer(f"{E('info')} scanned the first {scanned} members — Telegram caps the listing")
