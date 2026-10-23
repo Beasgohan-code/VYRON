@@ -3,6 +3,7 @@ import {
   Heart,
   ListMusic,
   Mic2,
+  Radio,
   Pause,
   Play,
   Repeat,
@@ -28,7 +29,7 @@ interface LyricLine {
 
 /** Full-screen, Spotify-style player with a live lyrics panel. */
 export function PlayerView() {
-  const { audio, state, openModal, toast } = useApp();
+  const { audio, state, cast, openModal, toast } = useApp();
   const [lyrics, setLyrics] = useState<{ lines: LyricLine[]; text: string } | null>(null);
   const [showLyrics, setShowLyrics] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -202,6 +203,14 @@ export function PlayerView() {
             <button type="button" className="chip" onClick={() => openModal({ type: "add-to-playlist", track })}>
               <ListMusic size={15} />
               Playlist
+            </button>
+            <button
+              type="button"
+              className="chip"
+              onClick={() => void cast(track, "play_now").then(() => toast("Sent to the voice chat", "success"))}
+            >
+              <Radio size={15} />
+              Voice chat
             </button>
             <label className="pv-volume">
               <VolumeIcon size={16} />

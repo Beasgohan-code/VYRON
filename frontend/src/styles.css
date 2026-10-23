@@ -1304,3 +1304,6 @@ input[type="range"]:disabled { opacity: .5; }
 @media (max-width: 860px) {
   .continue-card { min-width: 210px; }
 }
+
+.skeleton-card.tall { height: 168px; border-radius: var(--radius); }
+.api-view .api-grid + .api-grid { margin-top: 14px; }

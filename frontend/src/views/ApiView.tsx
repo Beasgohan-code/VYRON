@@ -53,6 +53,7 @@ export function ApiView() {
   const [busy, setBusy] = useState(false);
   const [created, setCreated] = useState<ApiKey | null>(null);
   const [copied, setCopied] = useState("");
+  const [ping, setPing] = useState<number | null>(null);
   const [tab, setTab] = useState<"curl" | "python" | "node">("curl");
 
   const load = async () => {
@@ -150,6 +151,18 @@ await fs.writeFile("track.mp3", file);`,
     [base, created]
   );
 
+  const measure = async () => {
+    const started = performance.now();
+    try {
+      await api.apiHealth();
+      setPing(Math.round(performance.now() - started));
+      toast("API answered", "success");
+    } catch {
+      setPing(-1);
+      toast("API did not answer", "error");
+    }
+  };
+
   const keys = payload?.keys ?? [];
   const stats = payload?.stats;
   const live = health?.status === "ok";
@@ -168,13 +181,23 @@ await fs.writeFile("track.mp3", file);`,
             <i />
             {live ? "live" : health ? "degraded" : "offline"}
           </span>
+          <button type="button" className="pill-btn ghost" onClick={() => void measure()} title="Time one /v1/health request">
+            <Activity size={14} /> {ping === null ? "Test" : ping < 0 ? "down" : `${ping} ms`}
+          </button>
           <button type="button" className="pill-btn ghost" onClick={() => void load()} disabled={busy}>
             <RefreshCw size={14} className={busy ? "spin" : undefined} /> Refresh
           </button>
         </div>
       </div>
 
-      <div className="api-grid">
+      {!payload && (
+        <div className="api-grid">
+          <div className="skeleton-card tall" aria-hidden="true" />
+          <div className="skeleton-card tall" aria-hidden="true" />
+        </div>
+      )}
+
+      <div className="api-grid" aria-busy={!payload}>
         <article className="panel api-hero">
           <div className="panel-head">
             <h3>

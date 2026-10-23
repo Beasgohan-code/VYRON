@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 import sys
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 __author__ = "Beasgohan-code"
 __repo__ = "https://github.com/Beasgohan-code/VYRON"
 
