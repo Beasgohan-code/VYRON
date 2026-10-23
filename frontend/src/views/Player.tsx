@@ -2,6 +2,7 @@ import {
   AlertTriangle,
   ChevronDown,
   Download,
+  Gauge,
   Heart,
   ListMusic,
   Mic2,
@@ -37,6 +38,7 @@ interface LyricLine {
 }
 
 const SLEEP_STEPS = [0, 15, 30, 60];
+const SPEEDS = [0.75, 1, 1.25, 1.5];
 
 export function Player() {
   const { audio, state, cast, act, openModal, toast } = useApp();
@@ -329,6 +331,21 @@ export function Player() {
               </button>
             ))}
             {sleepLeft > 0 && <b className="sleep-left">{fmtDuration(sleepLeft)}</b>}
+          </div>
+
+          <div className="sleep">
+            <Gauge size={14} />
+            <span>speed</span>
+            {SPEEDS.map((speed) => (
+              <button
+                key={speed}
+                type="button"
+                className={`chip tiny ${Math.abs(audio.rate - speed) < 0.01 ? "active" : ""}`}
+                onClick={() => audio.setRate(speed)}
+              >
+                {speed}×
+              </button>
+            ))}
           </div>
         </div>
 

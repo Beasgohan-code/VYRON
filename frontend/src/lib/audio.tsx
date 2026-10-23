@@ -18,6 +18,8 @@ export interface AudioEngine {
   repeat: Repeat;
   shuffle: boolean;
   expanded: boolean;
+  /** Playback speed, 0.5×–2×. Persisted per device. */
+  rate: number;
   /* actions */
   play: (track: Track, list?: Track[]) => void;
   toggle: () => void;
@@ -26,6 +28,7 @@ export interface AudioEngine {
   seek: (seconds: number) => void;
   seekBy: (delta: number) => void;
   setVolume: (value: number) => void;
+  setRate: (value: number) => void;
   toggleMute: () => void;
   cycleRepeat: () => void;
   toggleShuffle: () => void;
@@ -97,6 +100,10 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
   const [duration, setDuration] = useState(0);
   const [volume, setVolumeState] = useState(() => Number(read("vyron:volume", "0.9")));
   const [muted, setMuted] = useState(() => read("vyron:muted", "0") === "1");
+  const [rate, setRateState] = useState(() => {
+    const stored = Number(read("vyron:rate", "1"));
+    return Number.isFinite(stored) && stored >= 0.5 && stored <= 2 ? stored : 1;
+  });
   const [repeat, setRepeat] = useState<Repeat>(() => read("vyron:repeat", "off") as Repeat);
   const [shuffle, setShuffle] = useState(() => read("vyron:shuffle", "0") === "1");
   const [expanded, setExpanded] = useState(false);
@@ -107,8 +114,8 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
   const loadSeq = useRef(0);
 
   /* keep the latest values available to the <audio> event handlers */
-  const latest = useRef({ queue, track, repeat, shuffle, volume, muted });
-  latest.current = { queue, track, repeat, shuffle, volume, muted };
+  const latest = useRef({ queue, track, repeat, shuffle, volume, muted, rate });
+  latest.current = { queue, track, repeat, shuffle, volume, muted, rate };
 
   const el = useCallback((): HTMLAudioElement => {
     if (!element.current) {
@@ -117,10 +124,11 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
       audio.setAttribute("playsinline", "");
       audio.volume = volume;
       audio.muted = muted;
+      audio.playbackRate = rate;
       element.current = audio;
     }
     return element.current;
-  }, [volume, muted]);
+  }, [volume, muted, rate]);
 
   /* ── audio analyser (lazy: only the 3D visualiser asks for it) ────────── */
   const analyser = useCallback((): AnalyserNode | null => {
@@ -465,6 +473,14 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
     setMuted(value <= 0);
   }, []);
 
+  const setRate = useCallback((value: number) => {
+    const next = Math.min(2, Math.max(0.5, Math.round(value * 100) / 100));
+    setRateState(next);
+    write("vyron:rate", String(next));
+    const audio = element.current;
+    if (audio) audio.playbackRate = next;
+  }, []);
+
   const cycleRepeat = useCallback(() => {
     setRepeat((mode) => (mode === "off" ? "all" : mode === "all" ? "one" : "off"));
   }, []);
@@ -480,6 +496,7 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
       duration,
       volume,
       muted,
+      rate,
       repeat,
       shuffle,
       expanded,
@@ -490,6 +507,7 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
       seek,
       seekBy,
       setVolume,
+      setRate,
       toggleMute: () => setMuted((value) => !value),
       cycleRepeat,
       toggleShuffle: () => setShuffle((value) => !value),
@@ -502,8 +520,8 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
       analyser,
     }),
     [
-      track, queue, playing, loading, error, position, duration, volume, muted, repeat,
-      shuffle, expanded, play, toggle, advance, prev, seek, seekBy, setVolume, cycleRepeat,
+      track, queue, playing, loading, error, position, duration, volume, muted, rate, repeat,
+      shuffle, expanded, play, toggle, advance, prev, seek, seekBy, setVolume, setRate, cycleRepeat,
       enqueue, removeAt, jumpTo, clear, analyser,
     ]
   );
