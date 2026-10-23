@@ -49,10 +49,13 @@ def _too_long_text(track: Track) -> str:
 
 
 async def _thinking(client: Client, message: Message, text: str):
+    # Editable (classic HTML) lane, so no rich-only tags here — an expandable
+    # blockquote keeps the card compact and collapses to one tidy line.
     return await rich.send(
         client,
         message.chat.id,
-        f"{E('clock')} <b>{text}</b>",
+        f"{E('clock')} <b>{text}</b>\n"
+        f"<blockquote>{E('spark')} <i>give it a moment — VYRON is on it</i></blockquote>",
         reply_to=message.id,
         editable=True,
     )

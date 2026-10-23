@@ -81,3 +81,41 @@ def test_search_and_webapp_cards():
 
     webapp = cards.webapp_card("https://example.com/app/?t=abc")
     assert "https://example.com/app/?t=abc" in webapp and "<tg-button" in webapp
+
+
+def test_webapp_and_start_cards_document_the_player(monkeypatch):
+    import dataclasses
+
+    from vyron.config import settings as real_settings
+
+    web = cards.webapp_card("https://example.com/app/?t=abc", "Chill Squad")
+    assert "<details>" in web and "device" in web.lower()
+    assert "voice chat" in web.lower() and "lyrics" in web.lower()
+    assert 'url="https://example.com/app/?t=abc"' in web
+
+    # the start card only advertises the player when the deployment has one
+    plain = cards.start_card("Bob", {"chats": 1, "tracks": 2})
+    assert "open the player" not in plain.lower()
+    monkeypatch.setattr(
+        cards,
+        "settings",
+        dataclasses.replace(real_settings, webapp=True, webapp_url="https://vyron.example"),
+    )
+    with_app = cards.start_card("Bob", {"chats": 1, "tracks": 2})
+    assert 'url="https://vyron.example/app/"' in with_app
+    assert "web player" in with_app.lower()
+
+
+def test_lyrics_card_previews_synced_lines():
+    from vyron.core.lyrics import LyricsResult
+    from vyron.core.queue import Track
+
+    result = LyricsResult(
+        title="Song",
+        artist="Artist",
+        plain="line one\nline two",
+        synced="[00:10.00] line one\n[00:22.50] line two",
+    )
+    markup = cards.lyrics_card(Track(id="x", title="Song", duration=180), result)
+    assert "<table" in markup and "0:10" in markup and "0:22" in markup
+    assert "Full lyrics" in markup and "synced" in markup

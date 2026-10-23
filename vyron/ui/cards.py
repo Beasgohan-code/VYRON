@@ -67,6 +67,7 @@ def start_card(name: str, stats: dict, *, streaming: bool = True) -> str:
             (f"{E('search')} Smart search", "top results, one tap to stream"),
             (f"{E('download')} Downloads", "MP3 &amp; MP4 with covers"),
             (f"{E('lyrics')} Lyrics", "synced via LRCLIB"),
+            (f"{E('globe')} Web player", "queue, lyrics &amp; cast from a browser"),
             (f"{E('shield')} Admin-first", "only admins steer playback"),
         ]
     )
@@ -82,8 +83,14 @@ def start_card(name: str, stats: dict, *, streaming: bool = True) -> str:
         ),
         open=True,
     )
+    open_app = ""
+    if settings.webapp_ready:
+        open_app = B.row(
+            B.btn(f"{E('globe')} Open the player", url=f"{settings.webapp_url}/app/", style="primary")
+        )
     buttons = (
         B.row(B.btn(f"{E('rocket')} Add to group", url=f"https://t.me/{settings.bot_username}?startgroup=true", style="primary"))
+        + open_app
         + B.row(
             B.btn(f"{E('queue')} Commands", data="v:help:main", style="success"),
             B.btn(f"{E('info')} About", data="v:about"),
@@ -533,13 +540,30 @@ def lyrics_card(track: Track, lyrics: LyricsResult | None) -> str:
             f"{E('lyrics')} <b>No lyrics found</b>\n"
             f"<blockquote>{esc(truncate(getattr(track, 'title', ''), 60))}</blockquote>"
         )
-    body = esc(lyrics.as_text(3000))
     synced = "synced" if lyrics.has_sync else "plain"
+    preview = ""
+    if lyrics.has_sync:
+        from vyron.core.lyrics import parse_lrc
+
+        lines = parse_lrc(lyrics.synced)[:8]
+        if lines:
+            preview = B.table(
+                [f"{E('clock')} Time", "Line"],
+                [
+                    (f"<code>{int(line['time']) // 60}:{int(line['time']) % 60:02d}</code>",
+                     esc(truncate(line["text"], 48)))
+                    for line in lines
+                ],
+            )
     return (
         B.heading(f"{E('lyrics')} {esc(truncate(lyrics.title, 48))}", 3)
-        + B.note(f"{esc(truncate(lyrics.artist, 40))} {BULLET} {synced}")
-        + B.note(body, expandable=True)
-        + B.footer("lyrics by LRCLIB")
+        + B.note(f"{esc(truncate(lyrics.artist, 40))} {BULLET} {synced} {BULLET} LRCLIB")
+        + preview
+        + B.details(
+            f"{E('note')} <b>Full lyrics</b>",
+            f"<blockquote>{esc(lyrics.as_text(3000))}</blockquote>",
+        )
+        + B.footer(f"open /app for lyrics that scroll with the song {BULLET} {BRAND}")
     )
 
 
@@ -596,18 +620,34 @@ def webapp_card(url: str, chat_title: str = "") -> str:
     return (
         B.heading(f"{E('globe')} {BRAND} {small_caps('player')}", 2)
         + B.note(
-            f"{SPARK} A full player in your pocket — now playing, queue, search, "
-            f"volume and settings, all in one screen."
+            f"{SPARK} A full player in your pocket — play on <b>this device</b> or "
+            f"push the track into this chat's <b>voice chat</b>, from one screen."
         )
         + B.kv(
             [
-                (f"{E('headphone')} Now playing", "live progress"),
-                (f"{E('queue')} Queue", "reorder, jump, clear"),
-                (f"{E('search')} Search", "stream without leaving the app"),
+                (f"{E('headphone')} Now playing", "live progress, seek, volume"),
+                (f"{E('queue')} Queue", "device &amp; voice-chat tabs"),
+                (f"{E('lyrics')} Lyrics", "synced, follows the song"),
+                (f"{E('search')} Search", "play without leaving the app"),
+                (f"{E('spark')} Extras", "shuffle, repeat, media keys"),
             ]
+        )
+        + B.details(
+            f"{E('info')} <b>How it works</b>",
+            B.bullets(
+                [
+                    "Tap the <b>▶</b> button on any row to play it in the browser",
+                    "Tap <b>📻</b> to cast the same track into the voice chat",
+                    "The dock keeps playing while you browse other views",
+                ]
+            ),
         )
         + B.divider()
         + B.row(B.btn(f"{E('rocket')} Open player", url=url, style="primary"))
+        + B.row(
+            B.btn(f"{E('queue')} Commands", data="v:help:main", style="success"),
+            B.btn(f"{E('chat')} Support", url=settings.support_chat, style="link"),
+        )
         + B.footer(f"{esc(truncate(chat_title, 34) or 'VYRON')} {BULLET} works on mobile &amp; desktop")
     )
 
