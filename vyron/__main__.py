@@ -78,8 +78,10 @@ async def _set_commands(bot) -> None:
 
 async def _setup_menu_button(bot) -> None:
     """Point the bot's menu button at the Mini App when WEBAPP_URL is set."""
-    url = settings.webapp_url
-    if not (settings.webapp and url):
+    from vyron.ui.keyboards import app_url
+
+    url = app_url()
+    if not url:
         return
     try:
         from pyrogram.types import MenuButtonWebApp, WebAppInfo
@@ -87,10 +89,10 @@ async def _setup_menu_button(bot) -> None:
         await bot.set_chat_menu_button(
             menu_button=MenuButtonWebApp(
                 text=settings.webapp_title[:14] or "Player",
-                web_app=WebAppInfo(url=f"{url}/app/"),
+                web_app=WebAppInfo(url=url),
             )
         )
-        logger.info("menu button → %s/app/", url)
+        logger.info("menu button → the Mini App entry")
     except Exception as exc:
         logger.debug("could not set the menu button: %s", exc)
 

@@ -30,18 +30,12 @@ def register(client: Client) -> None:
         links: dict[str, str] = {}
         sender = message.from_user.id if message.from_user else 0
         if sender and sender in settings.owners:
-            from vyron.web.auth import make_owner_token
-
             root = (settings.api_base or settings.keepalive_url or settings.webapp_url or "").rstrip("/")
             if root:
                 links["api"] = f"{root}/v1/docs"
-            if settings.webapp_ready and settings.bot_token:
-                owner_token = (
-                    make_owner_token(settings.bot_token, sender)
-                    if is_private_chat(message.chat)
-                    else ""
-                )
-                links["app"] = cards.app_entry_url(settings.webapp_url, owner_token=owner_token)
+            if settings.webapp_ready and is_private_chat(message.chat):
+                # Presence only: the button itself carries no URL.
+                links["player"] = "1"
         markup = cards.stats_card(
             uptime=runtime.uptime,
             chats=chats,

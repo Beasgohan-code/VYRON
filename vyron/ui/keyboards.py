@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from pyrogram.types import InlineKeyboardButton as B
 from pyrogram.types import InlineKeyboardMarkup as KM
+from pyrogram.types import WebAppInfo
 
 from vyron.config import settings
 from vyron.core.queue import ChatState
@@ -19,6 +20,47 @@ def _btn(text: str, data: str) -> B:
 
 def _url(text: str, url: str) -> B:
     return B(text, url=url)
+
+
+def app_url() -> str:
+    """The Mini App entry point, normalised, or "" when it is not configured."""
+    raw = (settings.webapp_url or "").strip()
+    if not raw or not settings.webapp:
+        return ""
+    from vyron.ui.cards import _app_root
+
+    return _app_root(raw)
+
+
+def app_button(text: str = "▶️ Player") -> B | None:
+    """A Mini App button — Telegram opens this *inside* the client.
+
+    A plain https:// link would be handed to the browser, which is exactly what
+    we do not want. ``web_app`` buttons are only legal in private chats, so the
+    caller decides: DM → this button, group → :func:`dm_hint_markup`.
+    """
+    url = app_url()
+    if not url:
+        return None
+    return B(text, web_app=WebAppInfo(url=url))
+
+
+def app_markup(*, with_close: bool = False) -> KM | None:
+    button = app_button()
+    if button is None:
+        return None
+    rows = [[button, _btn(f"{G('queue')} Queue", "v:queue:0")]]
+    if with_close:
+        rows.append([_btn(f"{G('back')} Close", "v:close")])
+    return KM(rows)
+
+
+def dm_markup() -> KM | None:
+    """Group fallback: point at the private chat (t.me opens in Telegram)."""
+    username = (settings.bot_username or "").lstrip("@")
+    if not username:
+        return None
+    return KM([[B("👤 Open in DM", url=f"https://t.me/{username}"), _btn("Queue", "v:queue:0")]])
 
 
 def now_playing(state: ChatState, *, is_fav: bool = False) -> KM:
@@ -117,20 +159,25 @@ def settings_panel(cfg: dict) -> KM:
     )
 
 
-def start_panel() -> KM:
-    return KM(
+def start_panel(player: bool = False) -> KM:
+    """``player=True`` adds the Mini App button — private chats only."""
+    rows: list[list[B]] = []
+    if player:
+        button = app_button()
+        if button is not None:
+            rows.append([button])
+    rows += [
         [
-            [
-                _url(f"{G('rocket')} Add to group", f"https://t.me/{settings.bot_username}?startgroup=true"),
-                _btn(f"{G('queue')} Commands", "v:help:main"),
-            ],
-            [
-                _url(f"{G('chat')} Support", settings.support_chat),
-                _url(f"{G('star')} Updates", settings.updates_channel),
-            ],
-            [_btn(f"{G('info')} About VYRON", "v:about")],
-        ]
-    )
+            _url(f"{G('rocket')} Add to group", f"https://t.me/{settings.bot_username}?startgroup=true"),
+            _btn(f"{G('queue')} Commands", "v:help:main"),
+        ],
+        [
+            _url(f"{G('chat')} Support", settings.support_chat),
+            _url(f"{G('star')} Updates", settings.updates_channel),
+        ],
+        [_btn(f"{G('info')} About VYRON", "v:about")],
+    ]
+    return KM(rows)
 
 
 def help_nav(section: str = "main") -> KM:
@@ -179,6 +226,10 @@ def admin_panel() -> KM:
 
 
 __all__ = [
+    "app_button",
+    "app_markup",
+    "app_url",
+    "dm_markup",
     "admin_panel",
     "back_close",
     "download_choice",

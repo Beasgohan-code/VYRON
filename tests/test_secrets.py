@@ -61,24 +61,38 @@ class FakeClient:
 def webapp_configured(monkeypatch):
     """Both the module and the card layer read the settings singleton."""
     from vyron.modules import start
-    from vyron.ui import cards
+    from vyron.ui import cards, keyboards
 
-    patched = dataclasses.replace(settings, webapp_url="https://vyron.test", webapp=True)
+    patched = dataclasses.replace(
+        settings,
+        webapp_url="https://vyron.test",
+        webapp=True,
+        bot_username="VyronMusicBot",
+    )
     assert patched.webapp_ready
-    monkeypatch.setattr(start, "settings", patched)
-    monkeypatch.setattr(cards, "settings", patched)
+    for module in (start, cards, keyboards):
+        monkeypatch.setattr(module, "settings", patched)
     return patched
+
+
+class Sent(list):
+    """Captured cards, plus the keyboards that travelled with them."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.keyboards: list[object] = []
 
 
 @pytest.fixture()
 def sent(monkeypatch):
-    """Capture cards instead of talking to Telegram."""
+    """Capture cards (and keyboards) instead of talking to Telegram."""
     from vyron.modules import start
 
-    captured: list[str] = []
+    captured = Sent()
 
-    async def fake_send(_client, _chat_id, markup, **_kwargs):
+    async def fake_send(_client, _chat_id, markup, **kwargs):
         captured.append(markup)
+        captured.keyboards.append(kwargs.get("markup_keyboard") or kwargs.get("reply_markup"))
         return None
 
     monkeypatch.setattr(start.rich, "send", fake_send)
@@ -115,7 +129,8 @@ def test_start_in_a_group_never_carries_an_owner_token(webapp_configured, sent):
     assert "Owner" not in card or "owner console" not in card.lower()
 
 
-def test_start_in_a_dm_does_carry_the_owner_console(webapp_configured, sent):
+def test_start_never_embeds_a_token_or_a_browser_link(webapp_configured, sent):
+    """/start is public: no credential, and no URL that would open Chrome."""
     from vyron.modules import start
 
     client = FakeClient()
@@ -124,12 +139,14 @@ def test_start_in_a_dm_does_carry_the_owner_console(webapp_configured, sent):
     _run(client.handlers["_start"], message)
 
     card = sent[-1]
-    assert "vown_" in card
-    assert "Owner" in card
+    assert "vown_" not in card
+    assert "/app" not in card
+    assert "vyron.test" not in card
 
 
 # ── /app ────────────────────────────────────────────────────────────────────
-def test_app_command_hides_the_token_in_groups(webapp_configured, sent):
+def test_app_command_in_a_group_points_at_the_dm(webapp_configured, sent):
+    """Telegram only allows web_app buttons in private chats."""
     from vyron.modules import start
 
     client = FakeClient()
@@ -137,10 +154,19 @@ def test_app_command_hides_the_token_in_groups(webapp_configured, sent):
     message = FakeMessage(FakeChat(ChatType.GROUP, -4242), FakeUser(424242))
     _run(client.handlers["_webapp"], message)
 
-    assert sent and "vown_" not in sent[-1]
+    card = sent[-1]
+    assert "vown_" not in card
+    assert "/app" not in card and "vyron.test" not in card
+    assert "private chat" in card.lower()
+
+    keyboard = sent.keyboards[-1]
+    buttons = [button for row in keyboard.inline_keyboard for button in row]
+    assert not any(getattr(button, "web_app", None) for button in buttons)
+    assert any((button.url or "").startswith("https://t.me/") for button in buttons)
 
 
-def test_app_command_hands_the_owner_a_token_in_a_dm(webapp_configured, sent):
+def test_app_command_in_a_dm_sends_a_web_app_button(webapp_configured, sent):
+    """A Mini App button opens in Telegram; a URL button opens Chrome."""
     from vyron.modules import start
 
     client = FakeClient()
@@ -148,7 +174,15 @@ def test_app_command_hands_the_owner_a_token_in_a_dm(webapp_configured, sent):
     message = FakeMessage(FakeChat(ChatType.PRIVATE, 424242), FakeUser(424242))
     _run(client.handlers["_webapp"], message)
 
-    assert "vown_" in sent[-1]
+    card = sent[-1]
+    assert "vown_" not in card and "/app" not in card
+    assert "inside Telegram" in card
+
+    keyboard = sent.keyboards[-1]
+    buttons = [button for row in keyboard.inline_keyboard for button in row]
+    webapp_buttons = [button for button in buttons if getattr(button, "web_app", None)]
+    assert webapp_buttons, "the DM must carry a web_app button"
+    assert webapp_buttons[0].web_app.url == "https://vyron.test/app"
 
 
 # ── ordinary users never get one ─────────────────────────────────────────────

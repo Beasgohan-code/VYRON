@@ -102,15 +102,7 @@ def register(client: Client) -> None:
         stats = await api.stats()
         compact = bool(getattr(message.chat, "type", None) and message.chat.type.name != "PRIVATE")
         sender = message.from_user.id if message.from_user else 0
-        owner = bool(sender and sender in settings.owners)
-        owner_link = ""
-        if owner and settings.bot_token and settings.webapp_ready and is_private_chat(message.chat):
-            from vyron.web.auth import make_owner_token
-
-            owner_link = cards.app_entry_url(
-                settings.webapp_url,
-                owner_token=make_owner_token(settings.bot_token, sender),
-            )
+        owner = bool(sender and sender in settings.owners and is_private_chat(message.chat))
         await _reply(
             client,
             message,
@@ -120,7 +112,6 @@ def register(client: Client) -> None:
                 compact=compact,
                 metrics=METRICS.snapshot(),
                 owner=owner,
-                owner_link=owner_link,
             ),
         )
 
@@ -262,7 +253,6 @@ def register(client: Client) -> None:
             cards.owner_access_card(
                 token,
                 _base() or "",
-                settings.webapp_url or _base() or "",
                 owner_id=message.from_user.id,
                 ttl_days=OWNER_TOKEN_TTL // 86400,
             ),

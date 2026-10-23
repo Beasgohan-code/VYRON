@@ -50,16 +50,17 @@ def _watch_link(track: Track) -> str:
 
 
 def progress_block(state: ChatState, track: Track) -> str:
+    """Two monospace lines: the bar, then the clock. Same width every time."""
     elapsed = state.elapsed()
     total = track.duration or 0
-    bar = progress_bar(elapsed, total, length=14)
-    if total:
-        return (
-            f"<code>{bar}</code>\n"
-            f"<code>{fmt_duration(elapsed)}</code> {DASH} <code>{fmt_duration(total)}</code>"
-            f"  ({percentage(elapsed, total)}%)"
-        )
-    return f"<code>{bar}</code>\n<code>live {DASH} {fmt_duration(elapsed)}</code>"
+    bar = progress_bar(elapsed, total, length=16)
+    if not total:
+        return f"<code>{bar}</code>\n<code>{fmt_duration(elapsed)} · live</code>"
+    return (
+        f"<code>{bar}</code>\n"
+        f"<code>{fmt_duration(elapsed)}</code> · {percentage(elapsed, total)}% · "
+        f"<code>{fmt_duration(total)}</code>"
+    )
 
 
 # ── start ───────────────────────────────────────────────────────────────────
@@ -68,57 +69,43 @@ def start_card(
     stats: dict,
     *,
     streaming: bool = True,
-    owner_token: str = "",
 ) -> str:
+    """The first card anyone sees: what this bot does, and how to start."""
     served = stats.get("chats", 0)
     tracks = stats.get("tracks", 0)
+    mode = "Streaming ready" if streaming else "File mode"
+    detail = (
+        "voice chats and files"
+        if streaming
+        else "no assistant session yet — <code>/play</code> sends the file"
+    )
     features = B.bullets(
         [
-            f"<b>Play anything</b> {DASH} a link, a reply or <code>/play believer</code>",
-            f"<b>Search that ranks</b> {DASH} the best match first, not the loudest",
-            f"<b>Downloads</b> {DASH} MP3 &amp; MP4 with covers and tags",
-            f"<b>Web player</b> {DASH} queue, lyrics and cast from a browser",
-            f"<b>Music API</b> {DASH} drop-in <code>/v1</code> for other bots",
+            "<b>Play</b> — a link, a reply, or <code>/play believer</code>",
+            "<b>Search</b> — the best match first, pick it with one tap",
+            "<b>Download</b> — MP3 320 or MP4 720p with cover art",
+            "<b>API</b> — drop-in <code>/v1</code> for other bots",
         ]
     )
     guide = B.details(
-        f"{E('rocket')} <b>Get started in 3 steps</b>",
+        f"{E('rocket')} <b>Set up in three steps</b>",
         B.bullets(
             [
-                "Add me to a group (and the assistant account)",
-                "Give me <b>manage voice chats</b> + <b>delete messages</b>",
+                "Add the bot and the assistant account to a group",
+                "Give it <b>manage voice chats</b> and <b>delete messages</b>",
                 "Start a voice chat, then send <code>/play believer</code>",
             ],
             ordered=True,
         ),
         open=False,
     )
-    open_app = ""
-    if settings.webapp_ready:
-        open_app = B.row(
-            B.btn(f"{E('globe')} Open the player", url=f"{settings.webapp_url}/app/", style="primary")
-        )
-    owner_row = ""
-    if owner_token and settings.webapp_ready:
-        owner_row = B.row(
-            B.btn(
-                f"{E('crown')} Owner console",
-                url=_with_owner_token(_app_root(settings.webapp_url), owner_token),
-                style="success",
-            )
-        )
-    api_row = ""
-    if settings.music_api and settings.api_base:
-        api_row = B.row(
-            B.btn(f"{E('code')} Music API docs", url=f"{settings.api_base}/v1/docs", style="link")
-        )
     buttons = (
-        B.row(B.btn(f"{E('rocket')} Add to group", url=f"https://t.me/{settings.bot_username}?startgroup=true", style="primary"))
-        + open_app
-        + owner_row
-        + api_row
+        B.row(
+            B.btn(f"{E('play')} Player", data="v:app", style="primary"),
+            B.btn(f"{E('queue')} Commands", data="v:help:main"),
+        )
         + B.row(
-            B.btn(f"{E('queue')} Commands", data="v:help:main", style="success"),
+            B.btn(f"{E('rocket')} Add to group", url=f"https://t.me/{settings.bot_username}?startgroup=true"),
             B.btn(f"{E('info')} About", data="v:about"),
         )
         + B.row(
@@ -126,22 +113,17 @@ def start_card(
             B.btn(f"{E('star')} Updates", url=settings.updates_channel, style="link"),
         )
     )
-    mode = (
-        f"{E('bolt')} <b>Streaming ready</b> {DASH} voice chats and files"
-        if streaming
-        else f"{E('info')} <b>File mode</b> {DASH} no assistant session yet, so "
-        "<code>/play</code> sends the track as a file"
-    )
     return (
-        B.heading(f"{E('brand')} {BRAND} {DASH} {small_caps('music for groups')}", 2)
-        + B.note(f"Hi <b>{esc(truncate(name, 40))}</b> {SPARK} {mode}")
+        B.heading(f"{E('brand')} {esc(BRAND)}", 2)
+        + B.note(
+            f"<b>{esc(truncate(name, 40))}</b> · {mode}\n{detail}"
+        )
         + features
         + guide
         + B.divider()
         + buttons
         + B.footer(
-            f"{E('chat')} {served} chats {BULLET} {E('note')} {tracks} tracks played "
-            f"{BULLET} v{_version()}"
+            f"{served} chats · {tracks} tracks played · v{_version()}"
         )
     )
 
@@ -291,56 +273,63 @@ def help_card(section: str = "main") -> str:
 
 # ── now playing (live, editable) ────────────────────────────────────────────
 def now_playing_card(state: ChatState, track: Track | None = None) -> str:
+    """The live card — classic HTML only, because it is edited in place."""
     track = track or state.current
     if not track:
-        return f"{E('moon')} <b>Nothing is playing</b>\n<blockquote>Use /play to start the session.</blockquote>"
+        return (
+            f"{E('moon')} <b>Nothing is playing</b>\n"
+            "<blockquote>Send <code>/play</code> with a song name, a link or a reply.</blockquote>"
+        )
 
+    status = "paused" if state.paused else "streaming"
+    glyph = E("pause") if state.paused else E("live")
     requester = _requester(track)
-    requested = f"\n{E('user')} {requester}" if requester else ""
-    status = f"{E('pause')} Paused" if state.paused else f"{E('play')} Streaming"
-    quality = small_caps(settings.audio_quality)
-
-    extras = []
-    if state.autoplay:
-        extras.append("autoplay")
-    if state.always_on:
-        extras.append("24/7")
-
-    muted = f"{E('volume')} {state.volume}%"
-    footer_bits = [muted, f"{E('loop')} {state.loop.label}", f"{E('queue')} {len(state.queue)}"]
-    upcoming = state.queue[0] if state.queue else None
-    next_line = (
-        f"\n{E('skip')} <i>up next</i> {esc(truncate(upcoming.title, 40))}"
-        f" {DOT} {fmt_duration(upcoming.duration)}"
-        if upcoming
-        else ""
+    meta = (
+        f"{esc(truncate(track.uploader, 32) or 'unknown artist')}"
+        f" · {fmt_duration(track.duration)} · {_source_badge(track)}"
     )
-    if extras:
-        footer_bits.append(f"{E('spark')} {', '.join(extras)}")
+    if requester:
+        meta += f" · {requester}"
+
+    upcoming = state.queue[0] if state.queue else None
+    next_line = ""
+    if upcoming:
+        next_line = (
+            f"\n<i>up next</i>  {esc(truncate(upcoming.title, 40))}"
+            f" · {fmt_duration(upcoming.duration)}"
+        )
+
+    flags = []
+    if state.autoplay:
+        flags.append("autoplay")
+    if state.always_on:
+        flags.append("24/7")
+    footer = f"{state.volume}% volume · {state.loop.label} loop · {len(state.queue)} queued"
+    if flags:
+        footer += f" · {', '.join(flags)}"
 
     return (
-        f"{E('headphone')} <b>{small_caps('now playing')}</b>  {BULLET}  {status}\n\n"
-        f"<blockquote>{E('note')} <b>{_watch_link(track)}</b>\n"
-        f"{E('microphone')} {esc(truncate(track.uploader, 34) or 'unknown artist')}  {BULLET}  "
-        f"{E('clock')} {fmt_duration(track.duration)}  {BULLET}  {_source_badge(track)}{requested}</blockquote>\n\n"
-        f"{progress_block(state, track)}{next_line}\n\n"
-        f"<code>{'  '.join(footer_bits)}</code>  {BULLET}  <i>{quality} audio</i>"
+        f"{glyph} <b>NOW PLAYING</b> · {status}\n\n"
+        f"<blockquote><b>{_watch_link(track)}</b>\n{meta}</blockquote>\n"
+        f"{progress_block(state, track)}{next_line}\n"
+        f"<i>{footer}</i>"
     )
 
 
 def queued_card(track: Track, position: int) -> str:
     return (
         f"{E('check')} <b>Added to queue</b>\n"
-        f"<blockquote>{E('note')} {esc(truncate(track.title, 60))}\n"
-        f"{E('clock')} {fmt_duration(track.duration)} {BULLET} position <b>#{position}</b></blockquote>"
+        f"<blockquote>{esc(truncate(track.title, 60))}\n"
+        f"#{position} · {fmt_duration(track.duration)} · {esc(truncate(track.uploader, 30) or 'unknown')}"
+        f"</blockquote>"
     )
 
 
 def started_card(track: Track) -> str:
     return (
         f"{E('play')} <b>Now streaming</b>\n"
-        f"<blockquote>{E('note')} {esc(truncate(track.title, 60))}\n"
-        f"{E('clock')} {fmt_duration(track.duration)} {BULLET} {esc(truncate(track.uploader, 30))}</blockquote>"
+        f"<blockquote>{esc(truncate(track.title, 60))}\n"
+        f"{fmt_duration(track.duration)} · {esc(truncate(track.uploader, 30) or 'unknown')}</blockquote>"
     )
 
 
@@ -351,14 +340,9 @@ def queue_card(state: ChatState, page: int = 0, per_page: int = 8) -> tuple[str,
     page = max(0, min(page, pages - 1))
     window = tracks[page * per_page : (page + 1) * per_page]
 
-    header = (
-        f"{E('queue')} {small_caps('queue')} {DASH} {len(tracks)} tracks "
-        f"{BULLET} {fmt_duration(sum(t.duration for t in tracks))}"
-    )
-
     if tracks:
         body = B.table(
-            ["#", "Title", "Time"],
+            ["#", "title", "time"],
             [
                 (
                     f"<b>{page * per_page + index + 1}</b>",
@@ -374,35 +358,37 @@ def queue_card(state: ChatState, page: int = 0, per_page: int = 8) -> tuple[str,
     now = ""
     if state.current:
         now = B.note(
-            f"{E('headphone')} <b>Playing</b> {BULLET} {esc(truncate(state.current.title, 44))}"
+            f"{E('live')} <b>playing</b> · {esc(truncate(state.current.title, 44))}"
         )
 
     nav = ""
     if page > 0:
-        nav += B.btn("‹ Prev", data=f"v:queue:{page - 1}")
+        nav += B.btn("‹ prev", data=f"v:queue:{page - 1}")
     nav += B.btn(f"{page + 1} / {pages}", data="v:noop", style="primary")
     if page + 1 < pages:
-        nav += B.btn("Next ›", data=f"v:queue:{page + 1}")
+        nav += B.btn("next ›", data=f"v:queue:{page + 1}")
 
-    actions = B.row(
-        B.btn(f"{E('shuffle')} Shuffle", data="v:shuffle", style="success"),
-        B.btn(f"{E('stop')} Clear", data="v:clearqueue", style="danger"),
-        B.btn(f"{E('now')} Playing", data="v:np"),
-    )
-    footer = B.footer(
-        f"page {page + 1}/{pages} {BULLET} {state.loop.label} loop {BULLET} {state.volume}% "
-        f"{BULLET} autoplay {'on' if state.autoplay else 'off'}"
-    )
-    markup = (
-        B.heading(header, 2)
+    return (
+        B.heading(
+            f"{E('queue')} queue · {len(tracks)} tracks · "
+            f"{fmt_duration(sum(t.duration for t in tracks))}",
+            2,
+        )
         + now
         + body
         + B.divider()
-        + actions
+        + B.row(
+            B.btn(f"{E('shuffle')} Shuffle", data="v:shuffle", style="success"),
+            B.btn(f"{E('now')} Playing", data="v:np"),
+            B.btn(f"{E('stop')} Clear", data="v:clearqueue", style="danger"),
+        )
         + B.row(nav)
-        + footer
+        + B.footer(
+            f"{state.loop.label} loop · {state.volume}% volume · "
+            f"autoplay {'on' if state.autoplay else 'off'}"
+        ),
+        pages,
     )
-    return markup, pages
 
 
 # ── search & downloads ──────────────────────────────────────────────────────
@@ -418,16 +404,13 @@ def _meta_line(track: Track) -> str:
 
 
 def search_card(query: str, tracks: Iterable[Track], *, mode: str = "play") -> str:
-    """Search results as a ranked list, not a wall of buttons.
-
-    The top hit is marked and carries the artwork; every row keeps its channel,
-    length and reach so the choice is possible without opening six links.
-    """
+    """Results as a ranked list: the top hit is marked and carries the artwork."""
     tracks = list(tracks)
+    verb = "play" if mode == "play" else "download"
     if not tracks:
         return (
             f"{E('search')} <b>No results</b>\n"
-            f"<blockquote>Nothing came back for <b>{esc(truncate(query, 48))}</b>. "
+            f"<blockquote>Nothing came back for <b>{esc(truncate(query, 48))}</b>.\n"
             f"Try the artist name, or paste a link.</blockquote>"
         )
 
@@ -437,13 +420,11 @@ def search_card(query: str, tracks: Iterable[Track], *, mode: str = "play") -> s
         if index == 0:
             title = f"<mark>{title}</mark>"
         items.append(f"{title}\n<i>{_meta_line(track)}</i>")
-    body = B.bullets(items, ordered=True)
 
-    art = B.image(tracks[0].thumbnail)
     buttons = B.grid(
         [
             B.btn(
-                f"{index + 1} {DASH} {fmt_duration(track.duration)}",
+                f"{index + 1} · {fmt_duration(track.duration)}",
                 data=f"v:{'pick' if mode == 'play' else 'dl'}:{index}",
                 style="primary" if index == 0 else None,
             )
@@ -451,29 +432,18 @@ def search_card(query: str, tracks: Iterable[Track], *, mode: str = "play") -> s
         ],
         columns=3,
     )
-    top = tracks[0]
     actions = B.row(
-        B.btn(
-            f"{E('play')} {'Play' if mode == 'play' else 'Download'} top result",
-            data=f"v:{'pick' if mode == 'play' else 'dl'}:0",
-            style="success",
-        ),
-        B.btn(f"{E('globe')} Open on YouTube", url=top.watch_url, style="link")
-        if top.watch_url
-        else "",
+        B.btn(f"{E('play')} {verb} top result", data=f"v:{'pick' if mode == 'play' else 'dl'}:0", style="success"),
+        B.btn(f"{E('close')} Cancel", data="v:close", style="danger"),
     )
     return (
-        B.heading(f"{E('search')} {small_caps('search')} {DASH} {esc(truncate(query, 40))}", 2)
-        + art
-        + body
+        B.heading(f"{E('search')} results · {esc(truncate(query, 40))}", 2)
+        + B.image(tracks[0].thumbnail)
+        + B.bullets(items, ordered=True)
         + B.divider()
         + buttons
         + actions
-        + B.row(B.btn(f"{E('close')} Cancel", data="v:close", style="danger"))
-        + B.footer(
-            f"{E('info')} Ranked by match, length and reach {BULLET} "
-            f"tap a number below to {'stream' if mode == 'play' else 'download'}"
-        )
+        + B.footer(f"{len(tracks)} matches · ranked by relevance, length and reach")
     )
 
 
@@ -547,28 +517,22 @@ def settings_card(cfg: dict, chat_title: str = "") -> str:
     always = cfg.get("always_on", False)
     body = B.kv(
         [
-            (f"{E('volume')} Volume", f"<b>{volume}%</b>"),
-            (f"{E('loop')} Loop", f"<b>{loop}</b>"),
-            (f"{E('spark')} Autoplay", f"<b>{'On' if autoplay else 'Off'}</b>"),
-            (f"{E('clock')} 24/7 mode", f"<b>{'On' if always else 'Off'}</b>"),
+            ("volume", f"<b>{volume}%</b>"),
+            ("loop", f"<b>{loop}</b>"),
+            ("autoplay", f"<b>{'on' if autoplay else 'off'}</b>"),
+            ("24/7 mode", f"<b>{'on' if always else 'off'}</b>"),
         ]
     )
-    buttons = (
-        B.row(
-            B.btn(f"{E('loop')} Loop", data="v:set:loop", style="primary"),
-            B.btn(f"{E('spark')} Autoplay", data="v:set:autoplay", style="success"),
-        )
-        + B.row(
-            B.btn(f"{E('clock')} 24/7", data="v:set:always", style="primary"),
-            B.btn(f"{E('close')} Close", data="v:close", style="danger"),
-        )
-    )
     return (
-        B.heading(f"{E('settings')} {small_caps('settings')}", 2)
+        B.heading(f"{E('settings')} settings", 2)
         + body
         + B.divider()
-        + buttons
-        + B.footer(f"{esc(truncate(chat_title, 40) or 'this chat')} {BULLET} changes apply instantly")
+        + B.row(
+            B.btn(f"{E('loop')} Loop", data="v:set:loop", style="primary"),
+            B.btn(f"{E('spark')} Autoplay", data="v:set:autoplay", style="success"),
+            B.btn(f"{E('clock')} 24/7", data="v:set:always"),
+        )
+        + B.footer(f"{esc(truncate(chat_title, 40) or 'this chat')} · changes apply instantly")
     )
 
 
@@ -609,8 +573,8 @@ def stats_card(
     owner_row = ""
     if links:
         buttons = []
-        if links.get("app"):
-            buttons.append(B.btn(f"{E('crown')} Owner console", url=links["app"], style="primary"))
+        if links.get("player"):
+            buttons.append(B.btn(f"{E('crown')} Owner console", data="v:app", style="primary"))
         if links.get("api"):
             buttons.append(B.btn(f"{E('code')} API docs", url=links["api"], style="success"))
         if links.get("token"):
@@ -705,7 +669,6 @@ def music_api_card(
     compact: bool = False,
     metrics: dict | None = None,
     owner: bool = False,
-    owner_link: str = "",
 ) -> str:
     """Card for /api — the professional music API served by this deployment."""
     root = (base or "").rstrip("/")
@@ -806,10 +769,10 @@ def music_api_card(
         )
         + (
             B.row(
-                B.btn(f"{E('crown')} Owner console", url=owner_link, style="primary"),
+                B.btn(f"{E('crown')} Owner console", data="v:app", style="primary"),
                 B.btn(f"{E('shield')} Owner help", data="v:help:power", style="link"),
             )
-            if owner and owner_link
+            if owner
             else ""
         )
         + B.footer(
@@ -1012,28 +975,24 @@ def error_card(text: str) -> str:
 def owner_access_card(
     token: str,
     base: str,
-    app_url: str,
     *,
     owner_id: int = 0,
     ttl_days: int = 30,
 ) -> str:
-    """One card that hands the owner browser + API access."""
-    root = (base or "").rstrip("/")
-    app_root = _app_root(app_url) or f"{root}/app/"
-    link = _with_owner_token(app_root, token)
+    """The owner's API credential — the Mini App needs no token at all."""
+    root = (base or "").rstrip("/") or "WEBAPP_URL"
     return (
-        B.heading(f"{E('crown')} {small_caps('owner access')}", 2)
+        B.heading(f"{E('crown')} {small_caps('owner token')}", 2)
         + B.note(
-            f"{SPARK} One signed token unlocks the <b>web player</b> and the "
-            f"<b>music API</b> from any browser — no Telegram session needed."
+            f"{SPARK} For the <b>API</b> and for scripts. The Mini App already knows "
+            f"you from Telegram — just tap <b>Player</b>."
         )
         + B.note(f"{E('key')} <code>{esc(token)}</code>")
         + B.kv(
             [
                 (f"{E('user')} Owner", f"<code>{owner_id or '—'}</code>"),
                 (f"{E('clock')} Valid for", f"<b>{ttl_days} days</b> {BULLET} rotate with <code>/apitoken</code>"),
-                (f"{E('globe')} Web app", f"<code>{esc(link)}</code>"),
-                (f"{E('code')} API", f"<code>X-Owner-Token: …</code> on {esc(root or 'WEBAPP_URL')}/v1"),
+                (f"{E('globe')} Header", "<code>X-Owner-Token: …</code>"),
             ]
         )
         + B.details(
@@ -1047,11 +1006,11 @@ def owner_access_card(
             open=True,
         )
         + B.divider()
-        + B.row(B.btn(f"{E('rocket')} Open owner console", url=link, style="primary"))
         + B.row(
-            B.btn(f"{E('code')} API docs", url=f"{root}/v1/docs" if root else settings.git_repo, style="success"),
-            B.btn(f"{E('close')} Close", data="v:close", style="danger"),
+            B.btn(f"{E('play')} Open player", data="v:app", style="primary"),
+            B.btn(f"{E('code')} API docs", url=f"{root}/v1/docs", style="success"),
         )
+        + B.row(B.btn(f"{E('close')} Close", data="v:close", style="danger"))
         + B.footer(
             f"{E('shield')} keep it private {DASH} it grants every API scope {BULLET} "
             f"expires automatically; changing <code>BOT_TOKEN</code> revokes it instantly"
@@ -1095,85 +1054,35 @@ def _with_owner_token(url: str, token: str) -> str:
 
 
 def webapp_card(url: str, chat_title: str = "", owner_token: str = "") -> str:
-    root = _app_root(url)
-    owner_row = (
-        B.row(
-            B.btn(
-                f"{E('crown')} Owner console",
-                url=_with_owner_token(root, owner_token),
-                style="success",
-            )
-        )
-        if owner_token
-        else ""
-    )
+    """Shown in DM: the keyboard around this card carries the web_app button."""
     return (
-        B.heading(f"{E('globe')} {BRAND} {small_caps('player')}", 2)
+        B.heading(f"{E('play')} player", 2)
         + B.note(
-            f"{SPARK} A full player in your pocket — play on <b>this device</b> or "
-            f"push the track into this chat's <b>voice chat</b>, from one screen."
+            "<b>Opens inside Telegram.</b>\n"
+            "No browser tab, no login — the same chat, the same queue."
         )
-        + B.kv(
+        + B.bullets(
             [
-                (f"{E('headphone')} Now playing", "live progress, seek, volume"),
-                (f"{E('queue')} Queue", "device &amp; voice-chat tabs"),
-                (f"{E('lyrics')} Lyrics", "synced, follows the song"),
-                (f"{E('search')} Search", "play without leaving the app"),
-                (f"{E('spark')} Extras", "shuffle, repeat, media keys"),
+                "<b>Play here</b> or <b>cast</b> the same track into the voice chat",
+                "Queue, lyrics, shuffle and repeat on one screen",
+                "Works on mobile and desktop Telegram",
             ]
         )
-        + B.details(
-            f"{E('info')} <b>How it works</b>",
-            B.bullets(
-                [
-                    "Tap the <b>▶</b> button on any row to play it in the browser",
-                    "Tap <b>📻</b> to cast the same track into the voice chat",
-                    "The dock keeps playing while you browse other views",
-                ]
-            ),
-        )
-        + B.divider()
-        + B.row(B.btn(f"{E('rocket')} Open player", url=root, style="primary"))
-        + owner_row
-        + B.row(
-            B.btn(f"{E('queue')} Commands", data="v:help:main", style="success"),
-            B.btn(f"{E('chat')} Support", url=settings.support_chat, style="link"),
-        )
-        + B.footer(
-            f"{esc(truncate(chat_title, 34) or 'VYRON')} {BULLET} works on mobile &amp; desktop"
-            + (" · owner tools unlocked" if owner_token else "")
-        )
+        + B.footer("tap the button below · or long-press the menu button")
     )
 
 
-__all__ = [
-    "about_card",
-    "app_entry_url",
-    "api_key_card",
-    "api_keys_card",
-    "api_usage_card",
-    "music_api_card",
-    "download_card",
-    "download_choice_card",
-    "error_card",
-    "favorites_card",
-    "help_card",
-    "history_card",
-    "lyrics_card",
-    "now_playing_card",
-    "owner_access_card",
-    "ok_card",
-    "ping_card",
-    "queue_card",
-    "queued_card",
-    "search_card",
-    "settings_card",
-    "start_card",
-    "started_card",
-    "stats_card",
-    "warn_card",
-    "webapp_card",
-]
+def webapp_group_card(bot_username: str) -> str:
+    """Groups cannot host a Mini App button, so point at the DM instead."""
+    return (
+        B.heading(f"{E('play')} player", 2)
+        + B.note(
+            "<b>Telegram only opens the player in a private chat.</b>\n"
+            f"Open <a href=\"https://t.me/{esc(bot_username)}\">@{esc(bot_username)}</a>, "
+            "tap <b>Player</b>, and it opens inside Telegram."
+        )
+        + B.footer("the voice chat here keeps playing while you browse")
+    )
 
 
 # ── owner journal ───────────────────────────────────────────────────────────

@@ -20,28 +20,18 @@ def register(client: Client) -> None:
     async def _start(_: Client, message: Message) -> None:
         stats = await runtime.storage.counters() if runtime.storage else {}
         name = (message.from_user.first_name if message.from_user else "there") or "there"
-        # A signed owner token is a credential: it only ever goes to a DM.
-        owner_token = ""
-        if (
-            message.from_user
-            and message.from_user.id in settings.owners
-            and settings.bot_token
-            and is_private_chat(message.chat)
-        ):
-            from vyron.web.auth import make_owner_token
-
-            owner_token = make_owner_token(settings.bot_token, message.from_user.id)
         markup = cards.start_card(
             name,
             {"chats": stats.get("chats", 0), "tracks": stats.get("tracks", 0)},
             streaming=runtime.streaming_ready,
-            owner_token=owner_token,
         )
+        # No credential and no URL in the card: the Mini App identifies the
+        # owner from Telegram's own initData, and its button is DM-only.
         await rich.send(
             message._client,
             message.chat.id,
             markup,
-            markup_keyboard=keyboards.start_panel(),
+            markup_keyboard=keyboards.start_panel(player=is_private_chat(message.chat)),
             reply_to=message.id,
         )
         if runtime.storage:
@@ -71,8 +61,8 @@ def register(client: Client) -> None:
 
     @client.on_message(filters.command(["app", "player", "webapp", "web"]))
     async def _webapp(_: Client, message: Message) -> None:
-        url = settings.webapp_url
-        if not url:
+        """Open the Mini App *inside Telegram* — never as a browser link."""
+        if not keyboards.app_url():
             await rich.send(
                 message._client,
                 message.chat.id,
@@ -84,23 +74,23 @@ def register(client: Client) -> None:
                 reply_to=message.id,
             )
             return
-        owner_token = ""
-        sender = message.from_user.id if message.from_user else 0
-        if (
-            sender
-            and sender in settings.owners
-            and settings.bot_token
-            and is_private_chat(message.chat)
-        ):
-            from vyron.web.auth import make_owner_token
 
-            owner_token = make_owner_token(settings.bot_token, sender)
-        await rich.send(
-            message._client,
-            message.chat.id,
-            cards.webapp_card(url, message.chat.title or "", owner_token=owner_token),
-            reply_to=message.id,
-        )
+        if is_private_chat(message.chat):
+            await rich.send(
+                message._client,
+                message.chat.id,
+                cards.webapp_card(settings.webapp_url or ""),
+                markup_keyboard=keyboards.app_markup(with_close=True),
+                reply_to=message.id,
+            )
+        else:
+            await rich.send(
+                message._client,
+                message.chat.id,
+                cards.webapp_group_card(settings.bot_username),
+                markup_keyboard=keyboards.dm_markup(),
+                reply_to=message.id,
+            )
 
     @client.on_message(filters.command("ping"))
     async def _ping(_: Client, message: Message) -> None:

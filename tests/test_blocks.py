@@ -82,31 +82,31 @@ def test_search_and_webapp_cards():
     download_card = cards.search_card("query", tracks, mode="download")
     assert "v:dl:0" in download_card
 
+    # Results read like results: the best match is marked, not tabulated.
+    assert "<mark>" in play_card and "Result 0" in play_card
+    assert "<table" not in play_card
+
+    # The player card never prints the web app URL: the keyboard carries the
+    # Mini App button, and a URL in text would open Chrome instead.
     webapp = cards.webapp_card("https://example.com/app/?t=abc")
-    assert "https://example.com/app/?t=abc" in webapp and "<tg-button" in webapp
+    assert "example.com" not in webapp and "http" not in webapp
+    assert "inside Telegram" in webapp
 
 
-def test_webapp_and_start_cards_document_the_player(monkeypatch):
-    import dataclasses
-
-    from vyron.config import settings as real_settings
-
+def test_webapp_and_start_cards_document_the_player():
     web = cards.webapp_card("https://example.com/app/?t=abc", "Chill Squad")
-    assert "<details>" in web and "device" in web.lower()
-    assert "voice chat" in web.lower() and "lyrics" in web.lower()
-    assert 'url="https://example.com/app/?t=abc"' in web
+    assert "voice chat" in web.lower()
+    assert "play here" in web.lower()
+    assert "browser tab" in web.lower()
 
-    # the start card only advertises the player when the deployment has one
-    plain = cards.start_card("Bob", {"chats": 1, "tracks": 2})
-    assert "open the player" not in plain.lower()
-    monkeypatch.setattr(
-        cards,
-        "settings",
-        dataclasses.replace(real_settings, webapp=True, webapp_url="https://vyron.example"),
-    )
-    with_app = cards.start_card("Bob", {"chats": 1, "tracks": 2})
-    assert 'url="https://vyron.example/app/"' in with_app
-    assert "web player" in with_app.lower()
+    group = cards.webapp_group_card("VyronMusicBot")
+    assert "private chat" in group.lower()
+    assert "https://t.me/VyronMusicBot" in group
+
+    # the start card advertises the player through a callback button only
+    start = cards.start_card("Bob", {"chats": 1, "tracks": 2})
+    assert 'data="v:app"' in start
+    assert "/app" not in start
 
 
 def test_lyrics_card_previews_synced_lines():
@@ -170,26 +170,17 @@ def test_music_api_cards():
     assert "5.0 MB" in usage and "41" in usage
 
 
-def test_owner_access_is_surfaced_in_the_ui(monkeypatch):
-    import dataclasses
+def test_owner_access_is_surfaced_without_leaking_it_into_the_ui():
+    token_card = cards.owner_access_card("vown_abc.def", "https://vyron.example", owner_id=424242)
 
-    from vyron.config import settings as real_settings
-
-    live = dataclasses.replace(real_settings, webapp_url="https://vyron.example", webapp=True)
-    monkeypatch.setattr(cards, "settings", live)
-
-    start = cards.start_card("A", {}, owner_token="vown_tok")
-    assert "Owner console" in start and "ot=vown_tok" in start
-    assert "Owner console" not in cards.start_card("A", {})
-
-    token_card = cards.owner_access_card(
-        "vown_abc.def", "https://vyron.example", "https://vyron.example", owner_id=424242
-    )
+    # the credential is the point of *this* card — and it stays in the DM
     assert "X-Owner-Token: vown_abc.def" in token_card
-    assert "https://vyron.example/app/?ot=vown_abc.def" in token_card
-    assert "424242" in token_card and "hashed at rest" not in token_card
+    assert "424242" in token_card
+    # but no browser link: the Mini App is reached with the keyboard button
+    assert "/app" not in token_card and "ot=" not in token_card
+    assert 'data="v:app"' in token_card
 
-    web = cards.webapp_card("https://vyron.example", "chat", owner_token="vown_tok")
-    assert 'url="https://vyron.example/app/"' in web
-    assert "ot=vown_tok" in web
-    assert "owner tools unlocked" in web
+    # /start is public: no token, no URL, ever
+    start = cards.start_card("A", {})
+    assert "vown_" not in start
+    assert "/app" not in start

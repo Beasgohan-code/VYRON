@@ -333,8 +333,20 @@ A real frontend, not a static page: **React 18 + TypeScript + Vite**, built to
 
 ```bash
 WEBAPP_URL=https://your-deployment        # Render/Koyeb URL
-# then: /app in chat, or tap the bot's menu button
+# then: /app in a DM, or tap the bot's menu button
 ```
+
+- **In-Telegram entry only** — every entry point (`/app`, the welcome card, the
+  owner console, the menu button) opens the Mini App *inside* Telegram through a
+  `web_app` keyboard button. The bot never prints the web app URL: a bare link
+  would be handed to Chrome instead of the Telegram Mini App view. Telegram only
+  allows `web_app` buttons in private chats, so a group gets a one-tap
+  *Open in DM* button instead.
+- **Owner access needs no token** — the app already knows who you are from
+  Telegram's signed `initData`, so `/start` never carries a credential. A signed
+  `vown_…` owner token exists for **scripts and the music API**
+  (`/apitoken` in the DM); it also works as `?ot=` on the app URL if you need a
+  browser session.
 
 - **Frontend** — `frontend/` (React + TS, `lucide-react` icons, hand-written
   design system in `src/styles.css`). Seven routed views: Home, Search, Library,
