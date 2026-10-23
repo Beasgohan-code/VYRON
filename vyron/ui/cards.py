@@ -58,7 +58,7 @@ def progress_block(state: ChatState, track: Track) -> str:
 
 
 # ── start ───────────────────────────────────────────────────────────────────
-def start_card(name: str, stats: dict) -> str:
+def start_card(name: str, stats: dict, *, streaming: bool = True) -> str:
     served = stats.get("chats", 0)
     tracks = stats.get("tracks", 0)
     features = B.kv(
@@ -101,6 +101,15 @@ def start_card(name: str, stats: dict) -> str:
         )
         + features
         + guide
+        + (
+            ""
+            if streaming
+            else B.note(
+                f"{E('info')} <b>File mode</b> — no assistant session yet, so "
+                "<code>/play</code> sends the track as a file. Add "
+                "<code>STRING_SESSION</code> to stream into voice chats."
+            )
+        )
         + B.divider()
         + buttons
         + B.footer(
@@ -175,10 +184,12 @@ _HELP: dict[str, tuple[str, list[tuple[str, str]]]] = {
         [
             ("/voteskip set 3", "require votes before a skip"),
             ("/vskip", "cast your vote"),
+            ("/cplayset <id>", "stream into a specific channel"),
             ("/suggest", "tracks like the one playing"),
             ("/next <song>", "insert a track up front"),
             ("/savepl [name]", "save the queue to a playlist"),
             ("/playlists · /pl <name>", "list and queue your playlists"),
+            ("/song · /vsong", "get an MP3 or MP4 in the chat"),
             ("/locks · /antiflood", "content locks and flood control"),
         ],
     ),
@@ -191,6 +202,9 @@ _HELP: dict[str, tuple[str, list[tuple[str, str]]]] = {
             ("/speedtest", "latency, throughput, VC health"),
             ("/sudoers", "who can operate the bot"),
             ("/clearcache", "wipe downloads and temp files"),
+            ("/dbcleanup 30", "drop history older than N days"),
+            ("/addsudo · /delsudo", "grant or revoke bot access"),
+            ("/sudolist", "who can operate the bot"),
             ("/stats · /activevc", "usage and live sessions"),
             ("/assistant · /setname", "rebrand the voice-chat account"),
             ("/setbio · /setpfp", "bio and profile picture"),

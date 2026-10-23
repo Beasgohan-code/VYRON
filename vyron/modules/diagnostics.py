@@ -64,7 +64,7 @@ async def _throughput() -> tuple[float, float] | None:
 
 def register(client: Client) -> None:
     # ── /speedtest ─────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["speedtest", "speed"]))
+    @client.on_message(filters.command(["speedtest", "speed", "spt"]))
     async def _speedtest(_: Client, message: Message) -> None:
         started = time.perf_counter()
         status = await rich.send(

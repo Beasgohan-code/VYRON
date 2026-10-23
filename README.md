@@ -148,14 +148,20 @@ Health check → <http://localhost:8080/health> · Mini App → <http://localhos
 ### Tools
 
 `/lyrics` · `/fav` · `/favs` · `/history` · `/settings` · `/247` · `/stats` · `/ping` · `/id` · `/emojis`
-`/whoami`
+`/whoami` · `/song` · `/vsong` · `/repo`
+
+Videl/Fallen aliases are accepted everywhere they make sense: `/music` (`/start`),
+`/listpl`, `/loadpl`, `/rmplaylist`, `/deleteplaylist`, `/delpl`, `/spt`,
+`/reboot`, `/gblock`, `/gunblock`, `/ublock`, `/uunblock`.
 
 ### Groups & voting
 
 | Command | What it does |
 |---|---|
 | `/voteskip set <n>` | require *n* votes before a skip (admins; `0` disables) |
-| `/vskip` | cast your vote for the current track (admins skip instantly) |
+| `/vskip` · `/skipvotes` | cast your vote — or tap the **Vote to skip** button (admins skip instantly) |
+| `/setvoteskip` | show the current threshold |
+| `/cplayset <id\|@name>` | bind a channel for `/cplay` (`off` reverts to the linked chat) |
 | `/suggest [query]` | tracks similar to what's playing — tap to queue |
 | `/savepl [name]` | save the current track / queue into a playlist |
 
@@ -181,6 +187,9 @@ feeds the Library view of the web app. (YouTube imports stay on `/playlist`.)
 | `/vars` | configuration snapshot — secrets masked, DM'd in groups |
 | `/dbstats` | storage backend, chats, counters, cache size, uptime |
 | `/clearcache` | wipe downloads and temp files, report space freed |
+| `/dbcleanup 30` | prune history and favourites older than N days |
+| `/addsudo` · `/delsudo` | grant or revoke bot access (persisted across restarts) |
+| `/sudolist` | owner, env sudoers and runtime grants |
 | `/assistant` | profile card of the account that joins voice chats |
 | `/setname <first> [last]` | rename the assistant account |
 | `/setbio <text>` | change its bio (70 chars) |
@@ -341,6 +350,7 @@ VYRON/
 │   │   ├── lyrics.py           # LRCLIB client
 │   │   ├── charts.py           # trending / mixes / moods (TTL-cached)
 │   │   ├── votes.py            # group vote-skip tallies
+│   │   ├── acl.py              # runtime sudo roster (/addsudo)
 │   │   ├── playlists.py        # per-user saved playlists
 │   │   └── pending.py          # short-lived picker state
 │   ├── ui/
@@ -358,7 +368,7 @@ VYRON/
 │   └── tools/                  # session generator, emoji pack builder, cover generator, preview
 ├── frontend/                   # React + TS + Vite Mini App (src/views · src/components · src/lib)
 ├── webapp/dist/                # built bundle served at /app (regenerate with npm run build)
-└── tests/                      # 103 offline tests
+└── tests/                      # 119 offline tests
 ```
 
 **Design rules**
@@ -407,7 +417,7 @@ Full list with comments: [`.env.example`](.env.example).
 
 ```bash
 pip install pytest pytest-asyncio
-python -m pytest tests -q      # 103 passed
+python -m pytest tests -q      # 119 passed
 
 cd frontend && npm test        # 5 component tests (vitest + jsdom)
 ```

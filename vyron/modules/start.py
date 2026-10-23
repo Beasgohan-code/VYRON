@@ -19,7 +19,11 @@ def register(client: Client) -> None:
     async def _start(_: Client, message: Message) -> None:
         stats = await runtime.storage.counters() if runtime.storage else {}
         name = (message.from_user.first_name if message.from_user else "there") or "there"
-        markup = cards.start_card(name, {"chats": stats.get("chats", 0), "tracks": stats.get("tracks", 0)})
+        markup = cards.start_card(
+            name,
+            {"chats": stats.get("chats", 0), "tracks": stats.get("tracks", 0)},
+            streaming=runtime.streaming_ready,
+        )
         await rich.send(
             message._client,
             message.chat.id,

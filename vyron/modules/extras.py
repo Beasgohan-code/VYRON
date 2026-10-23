@@ -17,10 +17,10 @@ from pyrogram.types import Message
 from vyron.runtime import runtime
 from vyron.ui import blocks as B
 from vyron.ui import rich
-from vyron.ui.progress import human_size, human_time
+from vyron.ui.progress import human_size, human_time, truncate
 from vyron.ui.theme import E
 from vyron.utils.filters import owner
-from vyron.utils.helpers import command_args, is_owner
+from vyron.utils.helpers import command_args, display_name, is_owner
 
 logger = logging.getLogger(__name__)
 
@@ -75,13 +75,55 @@ def register(client: Client) -> None:
     async def _blocklist(_: Client, message: Message) -> None:
         if not is_owner(message.from_user.id):
             return
-        rows = [(f"<code>{uid}</code>", "user") for uid in sorted(BLOCKED_USERS)[:40]]
-        rows += [(f"<code>{cid}</code>", "chat") for cid in sorted(BLOCKED_CHATS)[:10]]
+        users = sorted(BLOCKED_USERS)
+        chats = sorted(BLOCKED_CHATS)
+        if not users and not chats:
+            await rich.send(
+                client,
+                message.chat.id,
+                B.heading(f"{E('shield')} blocklist", 3)
+                + B.note(
+                    f"{E('check')} Nobody is blocked.\n"
+                    f"{E('info')} Use <code>/block</code> (reply or id) to add someone."
+                ),
+                reply_to=message.id,
+            )
+            return
+        rows = []
+        for uid in users[:20]:
+            label = str(uid)
+            try:
+                user = await client.get_users(uid)
+                label = f"{rich.esc(display_name(user))} · <code>{uid}</code>"
+            except Exception:
+                label = f"<code>{uid}</code>"
+            rows.append((label, "user"))
+        for cid in chats[:10]:
+            label = f"<code>{cid}</code>"
+            try:
+                peer = await client.get_chat(cid)
+                label = f"{rich.esc(truncate(peer.title or 'chat', 26))} · <code>{cid}</code>"
+            except Exception:
+                pass
+            rows.append((label, "chat"))
+        buttons = B.row(
+            *[
+                B.btn(f"{E('cross')} {uid}", data=f"v:unblock:{uid}", style="danger")
+                for uid in users[:4]
+            ]
+        )
         await rich.send(
             client,
             message.chat.id,
             B.heading(f"{E('shield')} blocklist", 3)
-            + (B.table(["id", "type"], rows) if rows else B.note("nothing blocked")),
+            + B.table(["who", "type"], rows)
+            + B.note(
+                f"{E('info')} {len(users)} user{'s' if len(users) != 1 else ''} · "
+                f"{len(chats)} chat{'s' if len(chats) != 1 else ''} — "
+                "tap to lift a block, or <code>/unblock &lt;id&gt;</code>."
+            )
+            + (buttons if users else ""),
+            reply_to=message.id,
         )
 
     # ── active voice chats ─────────────────────────────────────────────────
@@ -148,7 +190,7 @@ def register(client: Client) -> None:
         await rich.send(client, message.chat.id, B.heading(f"{E('stats')} system", 3) + body)
 
     # ── leave every voice chat ─────────────────────────────────────────────
-    @client.on_message(filters.command(["leaveall", "leavevc"]) & owner)
+    @client.on_message(filters.command(["leavevc"]) & owner)
     async def _leaveall(_: Client, message: Message) -> None:
         if not runtime.player:
             return
@@ -194,7 +236,7 @@ def register(client: Client) -> None:
         )
 
     # ── restart hint ───────────────────────────────────────────────────────
-    @client.on_message(filters.command(["restart"]) & owner)
+    @client.on_message(filters.command(["restart", "reboot"]) & owner)
     async def _restart(_: Client, message: Message) -> None:
         await rich.send(
             client,
@@ -206,6 +248,26 @@ def register(client: Client) -> None:
         )
         await asyncio.sleep(2)
         os.execv(sys.executable, [sys.executable, "-m", "vyron"])
+
+    @client.on_callback_query(filters.regex(r"^v:unblock:"))
+    async def _unblock_cb(_: Client, cq) -> None:
+        if not is_owner(cq.from_user.id):
+            await cq.answer("Owner only.", show_alert=True)
+            return
+        try:
+            target = int((cq.data or "").rsplit(":", 1)[-1])
+        except ValueError:
+            await cq.answer("Bad id.")
+            return
+        BLOCKED_USERS.discard(target)
+        await runtime.storage.set_chat_setting(0, "blocked_users", sorted(BLOCKED_USERS))
+        await cq.answer(f"{target} unblocked")
+        try:
+            await cq.message.edit_text(
+                B.note(f"{E('check')} <code>{target}</code> is no longer blocked.")
+            )
+        except Exception:
+            pass
 
     # ── block enforcement ─────────────────────────────────────────────────
     @client.on_message(filters.all, group=-3)

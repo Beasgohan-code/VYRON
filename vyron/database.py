@@ -57,6 +57,11 @@ class Storage:
     async def counters(self) -> dict[str, int]:
         return {}
 
+    # maintenance -------------------------------------------------------
+    async def prune(self, days: int = 30) -> dict[str, int]:
+        """Drop history/favourite rows older than *days*."""
+        return {"history": 0, "favorites": 0}
+
     async def all_chat_ids(self) -> list[int]:
         return []
 
@@ -171,6 +176,28 @@ class JsonStorage(Storage):
             if changed:
                 await self._flush()
             return changed
+
+    async def prune(self, days: int = 30) -> dict[str, int]:
+        cutoff = time.time() - max(0, int(days)) * 86400
+        removed = {"history": 0, "favorites": 0}
+        async with self._lock:
+            for bucket, stamp in (("history", "played_at"), ("favorites", "saved_at")):
+                store = self._data.get(bucket, {})
+                for user_id in list(store):
+                    items = store[user_id] or []
+                    kept = [
+                        item
+                        for item in items
+                        if not item.get(stamp) or int(item.get(stamp, 0)) >= cutoff
+                    ]
+                    removed[bucket] += len(items) - len(kept)
+                    if kept:
+                        store[user_id] = kept
+                    else:
+                        store.pop(user_id, None)
+            if any(removed.values()):
+                await self._flush()
+        return removed
 
     async def bump(self, key: str, amount: int = 1) -> None:
         async with self._lock:
@@ -320,6 +347,24 @@ class MongoStorage(Storage):
             {"$pull": {"items": {"id": playlist_id}}},
         )
         return bool(result.modified_count)
+
+    async def prune(self, days: int = 30) -> dict[str, int]:
+        cutoff = int(time.time() - max(0, int(days)) * 86400)
+
+        def _prune():
+            removed = {"history": 0, "favorites": 0}
+            for collection, stamp in (
+                (self._db.history, "played_at"),
+                (self._db.favorites, "saved_at"),
+            ):
+                result = collection.update_many(
+                    {},
+                    {"$pull": {"items": {stamp: {"$lt": cutoff}}}},
+                )
+                removed[collection.name] = int(result.modified_count)
+            return removed
+
+        return await asyncio.to_thread(_prune)
 
     async def bump(self, key: str, amount: int = 1) -> None:
         await asyncio.to_thread(

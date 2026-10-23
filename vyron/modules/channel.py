@@ -11,20 +11,24 @@ from pyrogram import Client, filters
 from pyrogram.enums import ChatType
 from pyrogram.types import Message
 
+from vyron.core import chatcfg
 from vyron.core.search import MediaError, looks_like_url
 from vyron.runtime import runtime
 from vyron.ui import blocks as B
 from vyron.ui import rich
 from vyron.ui.progress import truncate
 from vyron.ui.theme import E
-from vyron.utils.helpers import command_args, display_name
+from vyron.utils.helpers import command_args, display_name, is_chat_admin
 
 logger = logging.getLogger(__name__)
 
 
 async def _target_chat(client: Client, message: Message) -> int | None:
-    """Channel VC lives on the linked chat of the current chat."""
+    """Explicit `/cplayset` binding wins, otherwise the linked chat."""
     chat = message.chat
+    bound = await chatcfg.get(chat.id, "channel", 0)
+    if bound:
+        return int(bound)
     linked = getattr(chat, "linked_chat_id", None)
     if linked:
         return int(linked)
@@ -101,6 +105,69 @@ def register(client: Client) -> None:
 
         if status:
             await rich.edit(client, message.chat.id, status.id, markup)
+
+    # ── /cplayset — pin the channel a group should stream into ────────────
+    @client.on_message(filters.command(["cplayset", "setchannel"]))
+    async def _cplayset(_: Client, message: Message) -> None:
+        chat_id = message.chat.id
+        user = message.from_user
+        if user and not await is_chat_admin(client, chat_id, user.id):
+            await rich.send(
+                client,
+                chat_id,
+                B.row(B.btn(f"{E('shield')} Admins only", data="v:noop", style="danger")),
+                reply_to=message.id,
+            )
+            return
+        arg = command_args(message).strip()
+        if not arg:
+            bound = await chatcfg.get(chat_id, "channel", 0)
+            await rich.send(
+                client,
+                chat_id,
+                B.note(
+                    f"{E('globe')} Channel playback is bound to <code>{bound}</code>.\n"
+                    "<code>/cplayset -1001234567890</code> to change it, "
+                    "<code>/cplayset off</code> to use the linked chat."
+                    if bound
+                    else f"{E('info')} No channel bound — <code>/cplayset &lt;id|@name&gt;</code>"
+                ),
+                reply_to=message.id,
+            )
+            return
+        if arg.lower() in {"off", "none", "clear", "0"}:
+            await chatcfg.set(chat_id, "channel", 0)
+            await rich.send(
+                client,
+                chat_id,
+                B.note(f"{E('check')} Cleared — channel playback follows the linked chat again."),
+                reply_to=message.id,
+            )
+            return
+        try:
+            peer = await client.get_chat(arg if arg.startswith("@") else int(arg))
+        except Exception as exc:
+            await rich.send(
+                client,
+                chat_id,
+                B.note(f"{E('warn')} Could not resolve that channel: {rich.esc(truncate(str(exc), 90))}"),
+                reply_to=message.id,
+            )
+            return
+        await chatcfg.set(chat_id, "channel", int(peer.id))
+        await rich.send(
+            client,
+            chat_id,
+            B.heading(f"{E('check')} channel bound", 3)
+            + B.kv(
+                [
+                    (f"{E('globe')} title", f"<b>{rich.esc(truncate(peer.title or '—', 40))}</b>"),
+                    (f"{E('id')} id", f"<code>{peer.id}</code>"),
+                ]
+            )
+            + B.note(f"{E('bolt')} <code>/cplay &lt;song&gt;</code> now streams there."),
+            reply_to=message.id,
+        )
 
     @client.on_message(filters.command(["cstop", "cend"]))
     async def _cstop(_: Client, message: Message) -> None:

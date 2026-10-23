@@ -10,7 +10,6 @@ from pyrogram.types import Message
 
 from vyron.runtime import runtime
 from vyron.ui import cards, rich
-from vyron.ui.progress import human_size
 from vyron.ui.theme import E, reload_pack
 from vyron.utils.helpers import command_args
 from vyron.utils.filters import owner
@@ -95,7 +94,7 @@ def register(client: Client) -> None:
                 cards.ok_card(f"<b>Broadcast finished</b> — {sent} sent, {failed} failed."),
             )
 
-    @client.on_message(filters.command("leaveall") & owner)
+    @client.on_message(filters.command(["leaveall", "assleaveall"]) & owner)
     async def _leaveall(_: Client, message: Message) -> None:
         if not runtime.player:
             return
@@ -106,21 +105,6 @@ def register(client: Client) -> None:
             client,
             message.chat.id,
             cards.ok_card(f"<b>Left {len(chats)} voice chats</b>"),
-            reply_to=message.id,
-        )
-
-    @client.on_message(filters.command(["cleanup", "purge"]) & owner)
-    async def _cleanup(_: Client, message: Message) -> None:
-        if not runtime.downloader:
-            return
-        removed = runtime.downloader.cleanup()
-        await rich.send(
-            client,
-            message.chat.id,
-            cards.ok_card(
-                f"<b>Cache cleaned</b> — {removed} files removed "
-                f"({human_size(runtime.downloader.cache_size())} left)"
-            ),
             reply_to=message.id,
         )
 

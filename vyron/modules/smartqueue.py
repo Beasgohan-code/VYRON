@@ -127,7 +127,7 @@ def register(client: Client) -> None:
         await rich.edit(client, message.chat.id, status.id, markup)
 
     # ── /next <query> ──────────────────────────────────────────────────────
-    @client.on_message(filters.command(["playnext", "next"]) & filters.regex(r"^/\w+\s+\S"))
+    @client.on_message(filters.command(["playnext", "insert"]) & filters.regex(r"^/\w+\s+\S"))
     async def _play_next(_: Client, message: Message) -> None:
         if not runtime.player or not runtime.youtube:
             return

@@ -62,6 +62,9 @@ class Runtime:
         self.downloader = Downloader(self.settings)
         self.lyrics = LyricsClient()
         self.storage = await make_storage(self.settings)
+        from vyron.core import acl
+
+        await acl.load(self.storage)
         self.player = Player(
             bot=self.bot,
             calls=self.calls,

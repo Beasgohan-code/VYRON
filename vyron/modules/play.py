@@ -65,7 +65,7 @@ async def _edit(client: Client, chat_id: int, message_id: int | None, markup: st
 
 def register(client: Client) -> None:
     # ── /play /vplay ───────────────────────────────────────────────────────
-    @client.on_message(filters.command(["play", "p", "vplay", "vp"]))
+    @client.on_message(filters.command(["play", "p", "vplay", "vp", "music"]))
     async def _play_cmd(_: Client, message: Message) -> None:
         if not runtime.player:
             return
@@ -183,10 +183,14 @@ def register(client: Client) -> None:
         )
 
     # ── /song /video ───────────────────────────────────────────────────────
-    @client.on_message(filters.command(["song", "audio", "mp3", "video", "mp4", "dl", "download"]))
+    @client.on_message(
+        filters.command(
+            ["song", "audio", "mp3", "vsong", "video", "mp4", "dl", "download"]
+        )
+    )
     async def _download_cmd(_: Client, message: Message) -> None:
         command = message.command[0].lower()
-        want_video = command in {"video", "mp4"}
+        want_video = command in {"video", "mp4", "vsong"}
         query = command_args(message)
         chat_id = message.chat.id
         if not query:

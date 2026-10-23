@@ -11,7 +11,7 @@ from vyron.ui import cards, keyboards, rich
 
 
 def register(client: Client) -> None:
-    @client.on_message(filters.command(["settings", "config", "panel"]))
+    @client.on_message(filters.command(["settings", "panel", "prefs"]))
     async def _settings(_: Client, message: Message) -> None:
         if not runtime.player:
             return

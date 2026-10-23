@@ -28,6 +28,7 @@ DEFAULTS: dict[str, Any] = {
     "goodbye": "",
     "effects": [],
     "voteskip": 0,
+    "channel": 0,
     "thumbnail": "",
 }
 

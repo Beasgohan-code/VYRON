@@ -147,6 +147,26 @@ def register(client: Client) -> None:
             await cq.answer()
             return
 
+        if action == "vote":
+            from vyron.modules.power import cast_vote
+
+            if cq.from_user is None:
+                await cq.answer()
+                return
+            outcome, tally, needed, _state = await cast_vote(chat.id, cq.from_user.id)
+            if outcome == "disabled":
+                await cq.answer("Vote-skip is off — an admin can enable it.", show_alert=True)
+                return
+            if outcome == "duplicate":
+                await cq.answer(f"You already voted · {tally.remaining} more needed")
+                return
+            if outcome == "passed":
+                skipped = await player.skip(chat.id, count=1)
+                await cq.answer("Skipped by vote!" if skipped else "Queue is empty")
+                return
+            await cq.answer(f"Vote counted · {tally.count}/{needed}")
+            return
+
         if action == "np":
             if not state or not state.current:
                 await cq.answer("Nothing is playing.", show_alert=True)

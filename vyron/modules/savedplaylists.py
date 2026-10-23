@@ -33,7 +33,7 @@ def _uid(message: Message) -> int:
 
 def register(client: Client) -> None:
     # ── /playlists ─────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["playlists", "pls", "mylists"]))
+    @client.on_message(filters.command(["playlists", "pls", "mylists", "listpl"]))
     async def _playlists(_: Client, message: Message) -> None:
         items = await store.list_playlists(_uid(message))
         if not items:
@@ -117,7 +117,7 @@ def register(client: Client) -> None:
         )
 
     # ── /pl <name>──────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["pl", "playlistplay", "plplay"]))
+    @client.on_message(filters.command(["pl", "playlistplay", "plplay", "loadpl", "loadplaylist"]))
     async def _play_saved(_: Client, message: Message) -> None:
         name = command_args(message)
         if not name:
@@ -160,7 +160,7 @@ def register(client: Client) -> None:
         )
 
     # ── /pldel ─────────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["pldel", "plremove", "playlistdelete"]))
+    @client.on_message(filters.command(["pldel", "plremove", "playlistdelete", "rmplaylist", "delpl", "deleteplaylist"]))
     async def _delete(_: Client, message: Message) -> None:
         name = command_args(message)
         playlist = await store.find(_uid(message), name) if name else None

@@ -12,6 +12,7 @@ from pyrogram.errors import RPCError
 from pyrogram.types import CallbackQuery, InlineKeyboardMarkup, Message, User
 
 from vyron.config import settings
+from vyron.core import acl
 from vyron.core.queue import Track
 
 _ADMIN_STATES = {
@@ -77,7 +78,12 @@ def mention(user: User | None) -> str:
 
 
 def is_owner(user_id: int) -> bool:
-    return int(user_id) in settings.owners
+    """Owner, SUDO_USERS, or someone granted trust with /addsudo."""
+    try:
+        uid = int(user_id)
+    except (TypeError, ValueError):
+        return False
+    return uid in settings.owners or acl.is_sudo(uid)
 
 
 async def is_chat_admin(client, chat_id: int, user_id: int) -> bool:
