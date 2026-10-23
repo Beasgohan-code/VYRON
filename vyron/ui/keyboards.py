@@ -72,9 +72,9 @@ def now_playing(state: ChatState, *, is_fav: bool = False) -> KM:
     rows = [
         [play_pause, _btn(f"{G('skip')} Skip", "v:skip"), _btn(f"{G('stop')} Stop", "v:stop")],
         [
-            _btn(f"{G('volume')} −", "v:vol:-10"),
-            _btn(f"{state.volume}%", "v:vol:show"),
-            _btn(f"{G('volume')} +", "v:vol:10"),
+            _btn("⏪ 15s", "v:seek:-15"),
+            _btn(f"{G('volume')} {state.volume}%", "v:vol:show"),
+            _btn("⏩ 15s", "v:seek:15"),
         ],
         [
             _btn(f"{G('loop')} {state.loop.label}", "v:loop"),

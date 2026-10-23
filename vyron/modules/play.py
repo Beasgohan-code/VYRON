@@ -18,7 +18,13 @@ from vyron.ui import blocks as B
 from vyron.ui import cards, keyboards, rich
 from vyron.ui.progress import truncate
 from vyron.ui.theme import E
-from vyron.utils.helpers import command_args, display_name, track_from_message
+from vyron.utils.helpers import (
+    command_args,
+    display_name,
+    is_chat_admin,
+    is_owner,
+    track_from_message,
+)
 from vyron.utils.net import fetch_bytes
 
 logger = logging.getLogger(__name__)
@@ -183,6 +189,84 @@ def register(client: Client) -> None:
             status.id if status else None,
             cards.search_card(query, tracks),
             keyboards.search_results(tracks),
+        )
+
+    # ── /playforce /vplayforce ─────────────────────────────────────────────
+    @client.on_message(filters.command(["playforce", "pf", "vplayforce", "vpf"]))
+    async def _playforce_cmd(_: Client, message: Message) -> None:
+        """Skip the queue and start this request now.
+
+        Plain /play never interrupts what is playing — that is the right
+        default, but a DJ needs a way to cut in. Admins and the owner only.
+        """
+        if not runtime.player:
+            return
+        command = message.command[0].lower()
+        video = command in {"vplayforce", "vpf"}
+        chat_id = message.chat.id
+        query = command_args(message)
+        if not query:
+            await rich.send(
+                client,
+                chat_id,
+                cards.warn_card(
+                    "<b>Give me something to play</b>\n"
+                    "<blockquote><code>/playforce believer</code> or a link</blockquote>"
+                ),
+                reply_to=message.id,
+            )
+            return
+
+        user = message.from_user
+        allowed = is_owner(user.id if user else 0) or (
+            message.chat.type.name == "PRIVATE"
+            or await is_chat_admin(client, chat_id, user.id if user else 0)
+        )
+        if not allowed:
+            await rich.send(
+                client,
+                chat_id,
+                cards.warn_card("<b>Admins only</b>\n<blockquote>Ask an admin to force a track.</blockquote>"),
+                reply_to=message.id,
+            )
+            return
+
+        requester = (user.id if user else 0, display_name(user))
+        status = await _thinking(client, message, "Clearing the queue…")
+        try:
+            if looks_like_url(query):
+                track = await runtime.youtube.resolve(query, requester=requester)
+            else:
+                results = await runtime.youtube.search(query, requester=requester)
+                if not results:
+                    raise MediaError("No results for that.")
+                track = results[0]
+            if _too_long(track):
+                await _edit(client, chat_id, status.id if status else None, _too_long_text(track))
+                return
+            await runtime.player.force_play(chat_id, track, video=video)
+        except MediaError as exc:
+            await _edit(
+                client,
+                chat_id,
+                status.id if status else None,
+                cards.error_card(f"<b>Nothing playable there</b>\n<blockquote>{truncate(str(exc), 160)}</blockquote>"),
+            )
+            return
+        except StreamError as exc:
+            await _edit(
+                client,
+                chat_id,
+                status.id if status else None,
+                cards.error_card(f"<b>Could not start</b>\n<blockquote>{truncate(str(exc), 160)}</blockquote>"),
+            )
+            return
+        await _edit(
+            client,
+            chat_id,
+            status.id if status else None,
+            cards.started_card(track)
+            + f"\n<footer>{E('bolt')} queue cleared by an admin</footer>",
         )
 
     # ── /song /video ───────────────────────────────────────────────────────

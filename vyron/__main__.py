@@ -27,6 +27,7 @@ COMMANDS = [
     ("start", "home screen"),
     ("play", "stream audio in voice chat"),
     ("vplay", "stream video"),
+    ("playforce", "clear the queue and play now"),
     ("song", "download an MP3"),
     ("video", "download an MP4"),
     ("vsong", "download a video file"),
@@ -194,6 +195,17 @@ async def _async_main() -> int:
     if runtime.player and calls is not None:
         runtime.player.calls = calls
         runtime.player.register_handlers()
+
+    if runtime.player:
+        # A restart should not lose what people queued, and 24/7 chats should
+        # pick up where they left off once the voice engine is running.
+        restored = await runtime.player.restore_queues()
+        if restored:
+            logger.info("restored %d queue(s)", restored)
+        if calls is not None:
+            resumed = await runtime.player.resume_always_on()
+            if resumed:
+                logger.info("resumed %d 24/7 chat(s)", resumed)
 
     loaded = register_all(bot)
     runtime.handlers_loaded = loaded

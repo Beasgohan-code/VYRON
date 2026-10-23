@@ -134,6 +134,9 @@ class ChatState:
     last_activity: float = field(default_factory=time.monotonic)
     total_played: int = 0
 
+    # the next autoplay suggestion, resolved while the current track plays
+    prefetched: Track | None = None
+
     # stream-end de-duplication (audio and video streams both report "ended")
     ended_track: str = ""
     ended_at: float = 0.0

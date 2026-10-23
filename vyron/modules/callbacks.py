@@ -13,7 +13,7 @@ from vyron.core import pending
 from vyron.config import settings
 from vyron.runtime import runtime
 from vyron.ui import cards, keyboards, rich
-from vyron.ui.progress import truncate
+from vyron.ui.progress import fmt_duration, truncate
 from vyron.ui.theme import E
 from vyron.utils.helpers import is_chat_admin, is_owner, is_private_chat
 
@@ -425,6 +425,21 @@ def register(client: Client) -> None:
                 await cq.message.delete()
             except Exception:
                 pass
+            return
+
+        if action == "seek":
+            current = state.current
+            if current is None:
+                await cq.answer("Nothing is playing")
+                return
+            step = int(arg) if arg.lstrip("+-").isdigit() else 15
+            target = max(0, int(state.elapsed()) + step)
+            if current.duration:
+                target = min(current.duration - 1, target)
+            if await player.seek(chat.id, target):
+                await cq.answer(f"⏩ {fmt_duration(target)}" if step > 0 else f"⏪ {fmt_duration(target)}")
+            else:
+                await cq.answer("Could not seek")
             return
 
         if action == "loop":
