@@ -775,6 +775,12 @@ The interesting optional ones:
 | `STREAM_FALLBACK` | `on` | ask Invidious/Piped for a direct URL when every yt-dlp client fails |
 | `STREAM_FALLBACK_HOSTS` | built-in list | comma-separated mirrors to use instead of the defaults |
 | `STREAM_FALLBACK_TIMEOUT` | `9` | seconds per mirror before moving on |
+| `PLAY_FROM_DISK` | `on` | download the track first and stream the local file (falls back to the URL on failure) |
+| `VYRON_API` | `on` | mount the download API at `/vyron` |
+| `YT_DLP_FORMAT` / `YT_DLP_RETRIES` / `YT_DLP_SOCKET_TIMEOUT` | `bestaudio/best` / `3` / `20` | download engine tuning |
+| `YOUTUBE_PROXY` / `YOUTUBE_PROXY_FILE` | – | proxy for the engine (falls back to `PROXY`) |
+| `YOUTUBE_COOKIES` / `YOUTUBE_COOKIES_FILE` | – | cookies for the engine (falls back to `COOKIES_FILE`) |
+| `DOWNLOAD_CLEANUP_SECONDS` | `900` | how long a temp download folder may live |
 | `MONGO_URL` | – | persistence (JSON file otherwise) |
 | `PREMIUM_EMOJI_FILE` | `./emoji.json` | custom emoji pack |
 | `RICH_MESSAGES` | `true` | rich cards (set `false` for plain HTML) |

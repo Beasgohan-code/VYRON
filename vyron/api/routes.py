@@ -199,6 +199,7 @@ async def index(request: web.Request) -> web.Response:
                 "me": "GET /v1/me",
                 "admin": "GET /v1/admin/keys",
                 "metrics": "GET /v1/metrics",
+                "download_api": "POST /vyron/v1/track/by-video-id · by-query",
             },
         }
     )
@@ -229,6 +230,7 @@ async def health(request: web.Request) -> web.Response:
                 "/v1/tracks/{video_id}/stream",
                 "/v1/downloads",
                 "/v1/search",
+                "/vyron/v1/track/by-video-id",
                 "/v1/lyrics",
                 "/v1/me",
                 "/v1/metrics",
