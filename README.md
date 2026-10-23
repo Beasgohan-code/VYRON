@@ -277,6 +277,10 @@ curl -X POST "$WEBAPP_URL/v1/track/by-video-id" \
   the check for local development only.
 - **Docs** — a branded page at `/v1/docs` with copy-paste cURL/Python examples,
   plus `/v1/openapi.json` for generated clients.
+- **Bring your old keys** — keys live in the `api_keys` collection, exactly like
+  the upstream project, so pointing `MONGO_DB=eldian_music` at an existing
+  Eldian database keeps every key already handed out working (prefix-less
+  tokens included).
 
 ```bash
 MUSIC_API=true       # serve /v1 on this deployment (default on)
