@@ -1,4 +1,4 @@
-import { Check, Gauge, Headphones, LogOut, Maximize2, Moon, Palette, Send, SunMedium, Wand2 } from "lucide-react";
+import { ArrowRight, Check, Code2, Gauge, Headphones, Keyboard, LogOut, Maximize2, Moon, Palette, Send, SunMedium, Wand2 } from "lucide-react";
 import { useApp } from "../lib/store";
 import type { AccentName, ThemeName } from "../lib/store";
 import { initials } from "../lib/format";
@@ -36,6 +36,7 @@ export function ProfileView() {
     toast,
     openModal,
     rooms,
+    setView,
   } = useApp();
 
   const user = state?.user ?? {};
@@ -225,6 +226,42 @@ export function ProfileView() {
               <b>{state?.version ?? "—"}</b>
             </li>
           </ul>
+        </article>
+
+        <article className="panel">
+          <div className="panel-head">
+            <h3>
+              <Keyboard size={14} /> Shortcuts
+            </h3>
+            <span className="tag">press ?</span>
+          </div>
+          <ul className="shortcut-list">
+            <li><span>Command palette</span><span><kbd>⌘</kbd><kbd>K</kbd></span></li>
+            <li><span>Focus search</span><span><kbd>/</kbd></span></li>
+            <li><span>Play / pause</span><span><kbd>space</kbd></span></li>
+            <li><span>Seek ±5s</span><span><kbd>←</kbd><kbd>→</kbd></span></li>
+            <li><span>Next track · mute</span><span><kbd>n</kbd><kbd>m</kbd></span></li>
+            <li><span>Close player</span><span><kbd>esc</kbd></span></li>
+          </ul>
+          <button type="button" className="pill-btn ghost wide" onClick={() => window.dispatchEvent(new CustomEvent("vyron:palette"))}>
+            Open command palette
+          </button>
+        </article>
+
+        <article className="panel">
+          <div className="panel-head">
+            <h3>
+              <Code2 size={14} /> Developers
+            </h3>
+            <span className="tag">/v1</span>
+          </div>
+          <p className="muted small">
+            A drop-in music API for other bots and apps, served from this same URL.
+            Mint keys, read the docs and copy ready-made snippets.
+          </p>
+          <button type="button" className="pill-btn accent wide" onClick={() => setView("api")}>
+            Music API console <ArrowRight size={14} />
+          </button>
         </article>
 
         <article className="panel">

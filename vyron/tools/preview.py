@@ -22,6 +22,7 @@ os.environ.setdefault("BOT_TOKEN", "0:preview")
 os.environ.setdefault("API_ID", "1")
 os.environ.setdefault("API_HASH", "preview")
 os.environ.setdefault("OWNER_ID", "1")
+os.environ.setdefault("MUSIC_API_OPEN", "true")  # docs + health are clickable in preview
 
 from aiohttp import web
 

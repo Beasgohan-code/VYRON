@@ -1,4 +1,4 @@
-export type View = "home" | "search" | "library" | "queue" | "playlists" | "rooms" | "profile";
+export type View = "home" | "search" | "library" | "queue" | "playlists" | "rooms" | "api" | "profile";
 
 export type LoopMode = "off" | "one" | "all";
 
@@ -53,6 +53,52 @@ export interface Room {
   track: Track | null;
   volume?: number;
   effects?: string[];
+}
+
+export interface ApiKey {
+  key: string;
+  masked?: string;
+  label?: string;
+  owner_id?: number;
+  active?: boolean;
+  uses?: number;
+  bytes?: number;
+  created_at?: number;
+  last_used_at?: number | null;
+}
+
+export interface ApiKeyPayload {
+  ok: boolean;
+  preview?: boolean;
+  base: string;
+  docs: string;
+  is_owner: boolean;
+  keys: ApiKey[];
+  stats: {
+    enabled: boolean;
+    open: boolean;
+    keys: number;
+    keys_total?: number;
+    requests: number;
+    bytes: number;
+    rate_limit: number;
+    storage: string;
+  };
+  created?: ApiKey;
+  revoked?: boolean;
+}
+
+export interface ApiHealth {
+  status: string;
+  ok: boolean;
+  service: string;
+  version: string;
+  uptime: number;
+  ready: boolean;
+  auth_required: boolean;
+  rate_limit: number;
+  keys: number;
+  endpoints: string[];
 }
 
 export interface AppState {

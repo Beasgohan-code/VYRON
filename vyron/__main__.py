@@ -44,6 +44,7 @@ COMMANDS = [
     ("lyrics", "find lyrics"),
     ("settings", "per-chat settings"),
     ("app", "open the player web app"),
+    ("api", "music API for other bots"),
     ("effects", "audio effects panel"),
     ("locks", "content locks & anti-flood"),
     ("warn", "warn a member"),

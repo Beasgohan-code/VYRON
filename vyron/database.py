@@ -65,6 +65,18 @@ class Storage:
     async def all_chat_ids(self) -> list[int]:
         return []
 
+    # music-API keys ---------------------------------------------------
+    async def api_keys(self, owner_id: int | None = None) -> list[dict]:
+        return []
+
+    async def add_api_key(self, record: dict) -> None: ...
+
+    async def update_api_key(self, key: str, patch: dict) -> bool:
+        return False
+
+    async def bump_api_key(self, key: str, *, uses: int = 1, size: int = 0, stamp: float | None = None) -> None:
+        return None
+
     # playlists --------------------------------------------------------
     async def playlists(self, user_id: int) -> list[dict]:
         return []
@@ -87,6 +99,7 @@ class JsonStorage(Storage):
             "history": {},
             "counters": {},
             "playlists": {},
+            "api_keys": {},
         }
         self._lock = asyncio.Lock()
 
@@ -177,6 +190,37 @@ class JsonStorage(Storage):
                 await self._flush()
             return changed
 
+    async def api_keys(self, owner_id: int | None = None) -> list[dict]:
+        keys = [dict(item) for item in self._data.get("api_keys", {}).values()]
+        if owner_id is not None:
+            keys = [item for item in keys if int(item.get("owner_id", 0)) == int(owner_id)]
+        return sorted(keys, key=lambda item: item.get("created_at") or 0, reverse=True)
+
+    async def add_api_key(self, record: dict) -> None:
+        async with self._lock:
+            self._data.setdefault("api_keys", {})[str(record["key"])] = dict(record)
+            await self._flush()
+
+    async def update_api_key(self, key: str, patch: dict) -> bool:
+        async with self._lock:
+            bucket = self._data.setdefault("api_keys", {})
+            record = bucket.get(str(key))
+            if record is None:
+                return False
+            record.update(patch)
+            await self._flush()
+            return True
+
+    async def bump_api_key(self, key: str, *, uses: int = 1, size: int = 0, stamp: float | None = None) -> None:
+        async with self._lock:
+            record = self._data.setdefault("api_keys", {}).get(str(key))
+            if record is None:
+                return
+            record["uses"] = int(record.get("uses") or 0) + int(uses)
+            record["bytes"] = int(record.get("bytes") or 0) + max(0, int(size))
+            record["last_used_at"] = stamp or time.time()
+            await self._flush()
+
     async def prune(self, days: int = 30) -> dict[str, int]:
         cutoff = time.time() - max(0, int(days)) * 86400
         removed = {"history": 0, "favorites": 0}
@@ -251,6 +295,7 @@ class MongoStorage(Storage):
         self._db.favorites.create_index([("user_id", 1)])
         self._db.history.create_index([("user_id", 1)])
         self._db.playlists.create_index([("user_id", 1)])
+        self._db.api_keys.create_index("key", unique=True)
 
     async def close(self) -> None:
         if self._client is not None:

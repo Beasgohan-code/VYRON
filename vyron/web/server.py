@@ -20,6 +20,7 @@ from vyron.core import playlists as pl
 from vyron.core.lyrics import parse_lrc
 from vyron.core.queue import LoopMode, Track
 from vyron.runtime import runtime
+from vyron.core.musicapi import get_music_api, mask_key
 from vyron.web import stream as audio
 from vyron.web.auth import WebUser, make_token, resolve_user
 
@@ -454,6 +455,113 @@ async def lyrics(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, **payload})
 
 
+_DEMO_KEYS = [
+    {
+        "key": "vyrn_previewKEYdemo0000000000000000000000",
+        "masked": "vyrn_pre…0000",
+        "label": "preview-bot",
+        "owner_id": 0,
+        "active": True,
+        "uses": 128,
+        "bytes": 734003200,
+        "created_at": 1750000000.0,
+        "last_used_at": 1759999999.0,
+    }
+]
+
+
+async def api_keys(request: web.Request) -> web.Response:
+    """Music-API key management for the Mini App (owner-only, initData auth)."""
+    user = await _identify(request)
+    denied = _denied(user)
+    if denied:
+        return denied
+
+    api = get_music_api()
+    base = settings.api_base or _public_base(request)
+
+    if _is_preview(user):
+        payload = {
+            "ok": True,
+            "preview": True,
+            "base": base,
+            "docs": f"{base}/v1/docs" if base else "/v1/docs",
+            "is_owner": True,
+            "keys": _DEMO_KEYS,
+            "stats": {
+                "enabled": True,
+                "open": True,
+                "keys": 1,
+                "requests": 128,
+                "bytes": 734003200,
+                "rate_limit": settings.music_api_rate,
+                "storage": "demo",
+            },
+        }
+        if request.method == "GET":
+            return web.json_response(payload)
+        body = await _read_json(request)
+        action = str(body.get("action") or "create")
+        if action == "create":
+            record = {
+                "key": "vyrn_" + "demo" * 10,
+                "masked": "vyrn_dem…demo",
+                "label": str(body.get("label") or "web")[:40],
+                "owner_id": 0,
+                "active": True,
+                "uses": 0,
+                "bytes": 0,
+                "created_at": time.time(),
+            }
+            return web.json_response({**payload, "ok": True, "created": record})
+        return web.json_response({**payload, "ok": True, "revoked": True})
+
+    is_owner = user.user_id in settings.owners
+    if request.method == "GET":
+        keys = await api.keys(user.user_id if not is_owner else None, reveal=is_owner)
+        stats = await api.stats()
+        return web.json_response(
+            {
+                "ok": True,
+                "base": base,
+                "docs": f"{base}/v1/docs" if base else "/v1/docs",
+                "is_owner": is_owner,
+                "keys": keys if is_owner else [],
+                "stats": stats,
+            }
+        )
+
+    if not is_owner:
+        return web.json_response(
+            {"ok": False, "error": "only the bot owner can manage API keys"}, status=403
+        )
+
+    body = await _read_json(request)
+    action = str(body.get("action") or "create")
+    if action == "create":
+        record, error = await api.issue(user.user_id, str(body.get("label") or "web"))
+        if record is None:
+            return web.json_response({"ok": False, "error": error or "could not create key"}, status=400)
+        logger.info("music api key issued to %s (%s)", user.user_id, record["label"])
+        record = {**record, "masked": mask_key(str(record["key"]))}
+        return web.json_response({"ok": True, "created": record})
+
+    if action == "revoke":
+        key = str(body.get("key") or "").strip()
+        if not key:
+            return web.json_response({"ok": False, "error": "key is required"}, status=400)
+        revoked = await api.revoke(None, key, force=True)
+        return web.json_response({"ok": revoked, "revoked": revoked, **({"error": "key not found"} if not revoked else {})})
+
+    return web.json_response({"ok": False, "error": f"unknown action {action!r}"}, status=400)
+
+
+def _public_base(request: web.Request) -> str:
+    proto = request.headers.get("X-Forwarded-Proto") or request.scheme
+    host = request.headers.get("X-Forwarded-Host") or request.host
+    return f"{proto}://{host}"
+
+
 async def mix(request: web.Request) -> web.Response:
     user = await _identify(request)
     denied = _denied(user)
@@ -738,7 +846,7 @@ async def action(request: web.Request) -> web.Response:
 
 
 # ── misc ────────────────────────────────────────────────────────────────────
-async def info(_: web.Request) -> web.Response:
+async def info(request: web.Request) -> web.Response:
     return web.json_response(
         {
             "ok": True,
@@ -747,6 +855,12 @@ async def info(_: web.Request) -> web.Response:
             "version": runtime.version,
             "auth_required": not settings.webapp_allow_anon,
             "streaming": runtime.streaming_ready,
+            "music_api": {
+                "enabled": bool(settings.music_api),
+                "open": bool(settings.music_api_open),
+                "base": settings.api_base or _public_base(request) if settings.music_api else "",
+                "docs": f"{settings.api_base or _public_base(request)}/v1/docs" if settings.music_api else "",
+            },
         }
     )
 
@@ -787,6 +901,8 @@ def register(app: web.Application) -> None:
     app.router.add_post("/api/action", action)
     app.router.add_post("/api/auth", authenticate)
     app.router.add_post("/api/lyrics", lyrics)
+    app.router.add_get("/api/keys", api_keys)
+    app.router.add_post("/api/keys", api_keys)
     audio.register(app)
     logger.info("web app mounted from %s", WEB_DIR)
 

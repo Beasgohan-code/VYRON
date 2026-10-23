@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { CommandPalette } from "./components/CommandPalette";
 import { MobileTabBar, MiniPlayer } from "./components/MobileChrome";
 import { PlayBar } from "./components/PlayBar";
 import { Modal } from "./components/Modal";
@@ -6,6 +7,7 @@ import { NowPlayingRail } from "./components/NowPlayingRail";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { useApp } from "./lib/store";
+import { ApiView } from "./views/ApiView";
 import { HomeView } from "./views/HomeView";
 import { LibraryView } from "./views/LibraryView";
 import { PlaylistsView } from "./views/PlaylistsView";
@@ -54,6 +56,7 @@ export default function App() {
         {view === "queue" && <QueueView />}
         {view === "playlists" && <PlaylistsView />}
         {view === "rooms" && <RoomsView />}
+        {view === "api" && <ApiView />}
         {view === "profile" && <ProfileView />}
         <footer className="app-footer">
           <span>VYRON · music beyond limits</span>
@@ -70,6 +73,7 @@ export default function App() {
       <MobileTabBar />
       {audio.expanded && <PlayerView />}
       <Modal />
+      <CommandPalette />
 
       <div className={`toast ${toastMessage ? "show" : ""} ${toastTone}`} role="status" aria-live="polite">
         {toastMessage}

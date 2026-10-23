@@ -9,6 +9,7 @@ from pyrogram import Client, filters
 from pyrogram.types import Message
 
 from vyron.runtime import runtime
+from vyron.core.musicapi import get_music_api
 from vyron.ui import cards, rich
 from vyron.ui.theme import E, reload_pack
 from vyron.utils.helpers import command_args
@@ -24,6 +25,7 @@ def register(client: Client) -> None:
         chats = len(await runtime.storage.all_chat_ids())
         active = len(runtime.player.active_chats()) if runtime.player else 0
         cache = runtime.downloader.cache_size() if runtime.downloader else 0
+        api_stats = await get_music_api().stats()
         markup = cards.stats_card(
             uptime=runtime.uptime,
             chats=chats,
@@ -33,6 +35,7 @@ def register(client: Client) -> None:
             cache_bytes=cache,
             backend=runtime.storage.backend,
             version=runtime.version,
+            api=api_stats,
         )
         await rich.send(client, message.chat.id, markup, reply_to=message.id)
 

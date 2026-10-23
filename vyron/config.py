@@ -114,6 +114,11 @@ class Settings:
     webapp_title: str = field(default_factory=lambda: _env("WEBAPP_TITLE", "VYRON Player"))
     webapp_dir: Path = field(default_factory=lambda: Path(_env("WEBAPP_DIR", str(ROOT / "webapp"))))
 
+    # ── Music API (Eldian-compatible, served on the same URL) ─────────────
+    music_api: bool = field(default_factory=lambda: _flag("MUSIC_API", True))
+    music_api_open: bool = field(default_factory=lambda: _flag("MUSIC_API_OPEN", False))
+    music_api_rate: int = field(default_factory=lambda: max(1, _int("MUSIC_API_RATE", 30)))
+
     # ── Runtime ─────────────────────────────────────────────────────────────
     port: int = field(default_factory=lambda: _int("PORT", 8080))
     log_level: str = field(default_factory=lambda: _env("LOG_LEVEL", "INFO").upper())
@@ -187,6 +192,11 @@ class Settings:
             )
         if self.webapp and not self.webapp_url:
             notes.append("WEBAPP=true but WEBAPP_URL is empty — the Mini App button stays hidden.")
+        if self.music_api_open:
+            notes.append(
+                "MUSIC_API_OPEN=true — /v1 accepts requests without an API key. "
+                "Only do this on a private deployment."
+            )
         return notes
 
     @property
@@ -197,6 +207,11 @@ class Settings:
     @property
     def webapp_ready(self) -> bool:
         return bool(self.webapp and self.webapp_url)
+
+    @property
+    def api_base(self) -> str:
+        """Public base URL for the music API (same host as the Mini App)."""
+        return self.webapp_url or self.render_external_url
 
     def ensure_dirs(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)

@@ -39,6 +39,10 @@ services:
         value: "true"
       - key: RICH_MESSAGES
         value: "true"
+      - key: MUSIC_API
+        value: "true"
+      - key: MUSIC_API_RATE
+        value: "30"
       - key: LOG_LEVEL
         value: INFO
       - key: KEEPALIVE_MINUTES

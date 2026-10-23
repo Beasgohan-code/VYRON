@@ -1,4 +1,4 @@
-import type { ActionResult, AppState, HomePayload, Playlist, Room, Track } from "./types";
+import type { ActionResult, ApiHealth, ApiKeyPayload, AppState, HomePayload, Playlist, Room, Track } from "./types";
 
 declare global {
   interface Window {
@@ -95,6 +95,21 @@ export const api = {
 
   action: <T = ActionResult>(action: string, value?: unknown) =>
     request<T & ActionResult>("/api/action", { action, value }),
+
+  /* ── music API (Eldian-compatible, same origin) ─────────────────────── */
+  keys: () => request<ApiKeyPayload>("/api/keys"),
+
+  createKey: (label = "web") =>
+    request<ApiKeyPayload>("/api/keys", { action: "create", label }),
+
+  revokeKey: (key: string) =>
+    request<ApiKeyPayload & { error?: string }>("/api/keys", { action: "revoke", key }),
+
+  apiHealth: async (): Promise<ApiHealth> => {
+    const response = await fetch("/v1/health", { credentials: "same-origin" });
+    if (!response.ok) throw new ApiError(`music api unavailable (${response.status})`, response.status);
+    return (await response.json()) as ApiHealth;
+  },
 };
 
 export function haptic(style: "light" | "medium" | "heavy" | "soft" = "light"): void {

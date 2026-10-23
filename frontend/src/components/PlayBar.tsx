@@ -16,6 +16,7 @@ import { useState } from "react";
 import { fmtDuration } from "../lib/format";
 import { useApp } from "../lib/store";
 import { Cover } from "./Cover";
+import { Equalizer } from "./Equalizer";
 
 /** Desktop dock — always-on "now playing" strip, like a music app's footer. */
 export function PlayBar() {
@@ -40,7 +41,9 @@ export function PlayBar() {
         <Cover track={track} className="pb-cover" />
         <span className="pb-meta">
           <b title={track.title}>{track.title}</b>
-          <span>{track.uploader || "unknown artist"}</span>
+          <span>
+            <Equalizer playing={audio.playing} bars={3} /> {track.uploader || "unknown artist"}
+          </span>
         </span>
       </button>
 

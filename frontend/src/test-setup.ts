@@ -78,6 +78,31 @@ export const demoHome = {
   ],
 };
 
+export const demoKeys = {
+  ok: true,
+  preview: true,
+  base: "http://localhost:8099",
+  docs: "http://localhost:8099/v1/docs",
+  is_owner: true,
+  keys: [
+    { key: "vyrn_demo0000000000000000000000", masked: "vyrn_dem…0000", label: "demo-bot", active: true, uses: 12, bytes: 5200000, last_used_at: 1759999999 },
+  ],
+  stats: { enabled: true, open: true, keys: 1, keys_total: 1, requests: 12, bytes: 5200000, rate_limit: 30, storage: "demo" },
+};
+
+export const demoApiHealth = {
+  status: "ok",
+  ok: true,
+  service: "vyron-music-api",
+  version: "preview",
+  uptime: 12,
+  ready: true,
+  auth_required: false,
+  rate_limit: 30,
+  keys: 1,
+  endpoints: ["/v1/health", "/v1/search"],
+};
+
 export const json = (payload: unknown) =>
   Promise.resolve({
     ok: true,
@@ -95,6 +120,8 @@ export function stubApi(overrides: Record<string, unknown> = {}) {
     if (url.includes("/api/playlists")) return json({ ok: true, playlists: demoState.playlists });
     if (url.includes("/api/search")) return json({ ok: true, results: demoHome.trending });
     if (url.includes("/api/action")) return json({ ok: true });
+    if (url.includes("/api/keys")) return json(demoKeys);
+    if (url.includes("/v1/health")) return json(demoApiHealth);
     return json(state);
   }));
 }

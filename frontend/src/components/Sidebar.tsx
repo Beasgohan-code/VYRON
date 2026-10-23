@@ -1,4 +1,6 @@
 import {
+  Code2,
+  Command,
   Disc3,
   Headphones,
   Home,
@@ -20,6 +22,7 @@ const NAV: { view: View; label: string; icon: typeof Home; badge?: string }[] = 
   { view: "queue", label: "Queue", icon: ListMusic },
   { view: "playlists", label: "Playlists", icon: Disc3 },
   { view: "rooms", label: "Rooms", icon: Users, badge: "live" },
+  { view: "api", label: "Music API", icon: Code2 },
   { view: "profile", label: "Settings", icon: Settings },
 ];
 
@@ -56,6 +59,17 @@ export function Sidebar() {
           </button>
         ))}
       </nav>
+
+      <button
+        type="button"
+        className="palette-trigger"
+        onClick={() => window.dispatchEvent(new CustomEvent("vyron:palette"))}
+        aria-label="Open command palette"
+      >
+        <Command size={14} />
+        <span>Quick actions</span>
+        <kbd>⌘K</kbd>
+      </button>
 
       <div className="side-card">
         <div className="side-card-head">

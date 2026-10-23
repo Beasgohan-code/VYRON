@@ -131,6 +131,32 @@ describe("VYRON Player", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Player" })).toBeNull());
   });
 
+  it("opens the command palette with ⌘K and jumps to the API console", async () => {
+    const user = userEvent.setup();
+    mount();
+
+    await user.keyboard("{Meta>}k{/Meta}");
+    const palette = await screen.findByRole("dialog", { name: "Command palette" });
+    expect(within(palette).getByPlaceholderText(/Jump to a view/i)).toBeInTheDocument();
+
+    await user.type(within(palette).getByPlaceholderText(/Jump to a view/i), "api");
+    await user.click(within(palette).getByText("Music API"));
+
+    expect(await screen.findByText("Eldian-compatible API for other bots — served from this exact deployment, no second service.")).toBeInTheDocument();
+    expect(await screen.findByText("vyrn_dem…0000")).toBeInTheDocument();
+    expect(document.querySelector(".api-status.on")).not.toBeNull();
+  });
+
+  it("shows API endpoints and a copyable base URL", async () => {
+    const user = userEvent.setup();
+    mount();
+
+    await user.click(nav("Music API"));
+    expect(await screen.findByText("/v1/track/by-video-id")).toBeInTheDocument();
+    expect(screen.getByText("http://localhost:8099")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Create key/i })).toBeInTheDocument();
+  });
+
   it("opens the download modal from the rail", async () => {
     const user = userEvent.setup();
     mount();

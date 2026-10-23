@@ -1,4 +1,4 @@
-import { Bell, Search } from "lucide-react";
+import { Bell, Command, Search } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { initials } from "../lib/format";
 import { useApp } from "../lib/store";
@@ -41,6 +41,17 @@ export function Topbar() {
       </form>
 
       <div className="topbar-actions">
+        <button
+          type="button"
+          className="topbar-palette"
+          aria-label="Open command palette"
+          title="Command palette (⌘K)"
+          onClick={() => window.dispatchEvent(new CustomEvent("vyron:palette"))}
+        >
+          <Command size={14} />
+          <span>Quick actions</span>
+          <kbd>⌘K</kbd>
+        </button>
         <button
           type="button"
           className="icon-btn"

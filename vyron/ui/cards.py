@@ -68,6 +68,7 @@ def start_card(name: str, stats: dict, *, streaming: bool = True) -> str:
             (f"{E('download')} Downloads", "MP3 &amp; MP4 with covers"),
             (f"{E('lyrics')} Lyrics", "synced via LRCLIB"),
             (f"{E('globe')} Web player", "queue, lyrics &amp; cast from a browser"),
+            (f"{E('code')} Music API", "drop-in <code>/v1</code> API for other bots"),
             (f"{E('shield')} Admin-first", "only admins steer playback"),
         ]
     )
@@ -88,9 +89,15 @@ def start_card(name: str, stats: dict, *, streaming: bool = True) -> str:
         open_app = B.row(
             B.btn(f"{E('globe')} Open the player", url=f"{settings.webapp_url}/app/", style="primary")
         )
+    api_row = ""
+    if settings.music_api and settings.api_base:
+        api_row = B.row(
+            B.btn(f"{E('code')} Music API docs", url=f"{settings.api_base}/v1/docs", style="link")
+        )
     buttons = (
         B.row(B.btn(f"{E('rocket')} Add to group", url=f"https://t.me/{settings.bot_username}?startgroup=true", style="primary"))
         + open_app
+        + api_row
         + B.row(
             B.btn(f"{E('queue')} Commands", data="v:help:main", style="success"),
             B.btn(f"{E('info')} About", data="v:about"),
@@ -183,6 +190,7 @@ _HELP: dict[str, tuple[str, list[tuple[str, str]]]] = {
             ("/247", "toggle 24/7 mode"),
             ("/emojis", "premium emoji pack status"),
             ("/app", "open the player web app"),
+            ("/api", "the music API (keys, docs)"),
             ("/exportpl <name>", "playlist → JSON file"),
             ("/importpl", "reply to that file to restore it"),
             ("/whoami", "your id, role and chat"),
@@ -215,6 +223,10 @@ _HELP: dict[str, tuple[str, list[tuple[str, str]]]] = {
             ("/addsudo · /delsudo", "grant or revoke bot access"),
             ("/sudolist", "who can operate the bot"),
             ("/stats · /activevc", "usage and live sessions"),
+            ("/api", "music API card, docs and endpoints"),
+            ("/getapi [label]", "mint an API key (owner)"),
+            ("/listkey · /revoke", "manage API keys (owner)"),
+            ("/apiusage", "API traffic per key (owner)"),
             ("/assistant · /setname", "rebrand the voice-chat account"),
             ("/setbio · /setpfp", "bio and profile picture"),
         ],
@@ -511,6 +523,7 @@ def stats_card(
     cache_bytes: int,
     backend: str,
     version: str,
+    api: dict | None = None,
 ) -> str:
     body = B.kv(
         [
@@ -523,9 +536,19 @@ def stats_card(
             (f"{E('code')} Storage", f"<b>{backend}</b>"),
         ]
     )
+    api_block = ""
+    if api and api.get("enabled"):
+        api_block = B.kv(
+            [
+                (f"{E('code')} API keys", f"<b>{int(api.get('keys') or 0)}</b>"),
+                (f"{E('download')} API requests", f"<b>{int(api.get('requests') or 0)}</b>"),
+                (f"{E('cloud')} API traffic", f"<b>{human_size(int(api.get('bytes') or 0))}</b>"),
+            ]
+        )
     return (
         B.heading(f"{E('stats')} {small_caps('statistics')}", 2)
         + body
+        + api_block
         + B.row(
             B.btn(f"{E('live')} Active", data="v:admin:active", style="primary"),
             B.btn(f"{E('check')} Refresh", data="v:admin:stats", style="success"),
@@ -567,6 +590,199 @@ def lyrics_card(track: Track, lyrics: LyricsResult | None) -> str:
     )
 
 
+# ── music API ───────────────────────────────────────────────────────────────
+def _ago(stamp: float | int | None) -> str:
+    import time as _time
+
+    if not stamp:
+        return "never"
+    delta = max(0, int(_time.time() - float(stamp)))
+    if delta < 60:
+        return f"{delta}s ago"
+    if delta < 3600:
+        return f"{delta // 60}m ago"
+    if delta < 86400:
+        return f"{delta // 3600}h ago"
+    return f"{delta // 86400}d ago"
+
+
+def music_api_card(base: str, stats: dict, *, compact: bool = False) -> str:
+    """Card for /api — the Eldian-compatible music API on this deployment."""
+    root = (base or "").rstrip("/")
+    docs = f"{root}/v1/docs" if root else "/v1/docs"
+    enabled = bool(stats.get("enabled", True))
+    status = (
+        f"{E('check')} live" if enabled else f"{E('cross')} disabled"
+    )
+    key_row = (
+        f"{E('warn')} open mode — no key required"
+        if stats.get("open")
+        else f"{E('shield')} <code>X-API-Key</code> required"
+    )
+    body = B.kv(
+        [
+            (f"{E('globe')} Base URL", f"<code>{esc(root or 'set WEBAPP_URL')}</code>"),
+            (f"{E('bolt')} Status", f"<b>{status}</b> {BULLET} {key_row}"),
+            (f"{E('clock')} Rate limit", f"<b>{int(stats.get('rate_limit') or 0)}</b> req/min per key"),
+            (f"{E('key')} Active keys", f"<b>{int(stats.get('keys') or 0)}</b>"),
+            (f"{E('download')} Served", f"<b>{int(stats.get('requests') or 0)}</b> requests "
+                                        f"{BULLET} {human_size(int(stats.get('bytes') or 0))}"),
+            (f"{E('cloud')} Storage", f"<b>{esc(str(stats.get('storage') or 'json'))}</b>"),
+        ]
+    )
+    endpoints = B.details(
+        f"{E('code')} <b>Endpoints</b>",
+        B.table(
+            ["Method", "Path"],
+            [
+                ("<b>POST</b>", "/v1/track/by-video-id"),
+                ("<b>POST</b>", "/v1/track/by-query"),
+                ("<b>POST</b>", "/v1/search"),
+                ("<b>GET</b>", "/v1/info/by-video-id"),
+                ("<b>GET</b>", "/v1/lyrics"),
+                ("<b>GET</b>", "/v1/key"),
+                ("<b>GET</b>", "/v1/health"),
+            ],
+        ),
+        open=not compact,
+    )
+    snippet = (
+        f"curl -X POST {docs.rsplit('/v1/docs', 1)[0]}/v1/track/by-video-id \\\n"
+        f'  -H "X-API-Key: vyrn_…" -H "Content-Type: application/json" \\\n'
+        f"  -d '{{\"video_id\":\"dQw4w9WgXcQ\"}}' --output track.mp3"
+    )
+    usage = (
+        B.note(f"{E('code')} <b>Quick start</b>\n<pre>{esc(snippet)}</pre>")
+        if not compact
+        else ""
+    )
+    return (
+        B.heading(f"{E('globe')} {small_caps('music api')} {DASH} VYRON", 2)
+        + B.note(
+            f"{SPARK} A drop-in music API for other bots and apps — same URL as this "
+            f"bot and its Mini App, no second deployment."
+        )
+        + body
+        + endpoints
+        + usage
+        + B.divider()
+        + B.row(
+            B.btn(f"{E('code')} Docs", url=docs, style="primary"),
+            B.btn(f"{E('globe')} Open app", url=f"{root}/app/" if root else settings.git_repo, style="link"),
+        )
+        + B.row(
+            B.btn(f"{E('queue')} Commands", data="v:help:main", style="success"),
+            B.btn(f"{E('close')} Close", data="v:close", style="danger"),
+        )
+        + B.footer(
+            f"{E('info')} keys: owner-only <code>/getapi</code> {BULLET} "
+            f"Mini App → API tab {BULLET} docs at <code>/v1/docs</code>"
+        )
+    )
+
+
+def api_key_card(key: str, label: str, base: str, rate: int) -> str:
+    root = (base or "").rstrip("/")
+    return (
+        B.heading(f"{E('key')} {small_caps('api key')} {DASH} ready", 2)
+        + B.note(
+            f"{E('warn')} <b>Copy it now</b> — this is the only time the full key is shown."
+        )
+        + B.note(f"{E('key')} <code>{esc(key)}</code>")
+        + B.kv(
+            [
+                (f"{E('note')} Label", f"<b>{esc(label)}</b>"),
+                (f"{E('clock')} Rate limit", f"<b>{rate}</b> req/min"),
+                (f"{E('globe')} Base URL", f"<code>{esc(root or 'set WEBAPP_URL')}</code>"),
+            ]
+        )
+        + B.details(
+            f"{E('code')} <b>Try it</b>",
+            "<pre>" + esc(f'curl {root}/v1/key -H "X-API-Key: {key}"') + "</pre>",
+            open=True,
+        )
+        + B.divider()
+        + B.row(
+            B.btn(f"{E('code')} Docs", url=f"{root}/v1/docs" if root else settings.git_repo, style="primary"),
+            B.btn(f"{E('queue')} List keys", data="v:noop", style="link"),
+        )
+        + B.footer(
+            f"{E('info')} revoke with <code>/revoke {key[:10]}…</code> {BULLET} "
+            f"keep it in an env var, never in a public repo"
+        )
+    )
+
+
+def api_keys_card(keys: list[dict], base: str) -> str:
+    if not keys:
+        return (
+            B.heading(f"{E('key')} {small_caps('api keys')}", 2)
+            + B.note(f"{E('moon')} No keys yet — mint one with <code>/getapi label</code>.")
+            + B.row(B.btn(f"{E('code')} Docs", url=f"{(base or '').rstrip('/')}/v1/docs", style="primary"))
+        )
+    rows = [
+        (
+            f"<b>{esc(str(item.get('label') or 'key'))[:18]}</b>",
+            f"<code>{esc(str(item.get('masked') or mask_ish(item)))}</code>",
+            f"{int(item.get('uses') or 0)}",
+            _ago(item.get("last_used_at")),
+            f"{E('check')} on" if item.get("active", True) else f"{E('cross')} off",
+        )
+        for item in keys
+    ]
+    return (
+        B.heading(f"{E('key')} {small_caps('api keys')} {DASH} {len(keys)}", 2)
+        + B.table(["Label", "Key", "Uses", "Last used", "State"], rows)
+        + B.note(
+            f"{E('shield')} Full keys are only shown when minted. Store them in your "
+            f"client's environment, never in a public repo."
+        )
+        + B.row(
+            B.btn(f"{E('code')} Docs", url=f"{(base or '').rstrip('/')}/v1/docs", style="primary"),
+            B.btn(f"{E('bolt')} Usage", data="v:noop", style="link"),
+        )
+        + B.footer(f"revoke with <code>/revoke &lt;key&gt;</code> {BULLET} {BRAND}")
+    )
+
+
+def api_usage_card(stats: dict, keys: list[dict], base: str, *, sudo: bool = False) -> str:
+    totals = B.kv(
+        [
+            (f"{E('key')} Active keys", f"<b>{int(stats.get('keys') or 0)}</b> / {int(stats.get('keys_total') or 0)}"),
+            (f"{E('download')} Requests", f"<b>{int(stats.get('requests') or 0)}</b>"),
+            (f"{E('cloud')} Bytes served", f"<b>{human_size(int(stats.get('bytes') or 0))}</b>"),
+            (f"{E('clock')} Rate limit", f"<b>{int(stats.get('rate_limit') or 0)}</b> req/min"),
+            (f"{E('globe')} Mode", "open" if stats.get("open") else "keyed"),
+        ]
+    )
+    by_key = ""
+    if keys and sudo:
+        by_key = B.table(
+            ["Label", "Uses", "Bytes", "Last used"],
+            [
+                (
+                    f"<b>{esc(str(item.get('label') or 'key'))[:16]}</b>",
+                    str(int(item.get("uses") or 0)),
+                    human_size(int(item.get("bytes") or 0)),
+                    _ago(item.get("last_used_at")),
+                )
+                for item in keys[:12]
+            ],
+        )
+    return (
+        B.heading(f"{E('stats')} {small_caps('api usage')}", 2)
+        + totals
+        + by_key
+        + B.row(B.btn(f"{E('code')} Docs", url=f"{(base or '').rstrip('/')}/v1/docs", style="primary"))
+        + B.footer(f"{E('spark')} every request is metered per key {BULLET} {BRAND}")
+    )
+
+
+def mask_ish(item: dict) -> str:
+    key = str(item.get("key") or "")
+    return f"{key[:8]}…{key[-4:]}" if len(key) > 12 else key
+
+
 def about_card() -> str:
     body = B.kv(
         [
@@ -574,6 +790,7 @@ def about_card() -> str:
             (f"{E('bolt')} UI", "Bot API 10.3 rich messages"),
             (f"{E('cloud')} Deploy", "Docker · Render · Koyeb · VPS"),
             (f"{E('spark')} Extras", "lyrics · downloads · web app"),
+            (f"{E('code')} Music API", "Eldian-compatible <code>/v1</code>, same URL"),
         ]
     )
     return (
@@ -654,6 +871,10 @@ def webapp_card(url: str, chat_title: str = "") -> str:
 
 __all__ = [
     "about_card",
+    "api_key_card",
+    "api_keys_card",
+    "api_usage_card",
+    "music_api_card",
     "download_card",
     "download_choice_card",
     "error_card",

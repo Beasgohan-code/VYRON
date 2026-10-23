@@ -20,6 +20,7 @@ from vyron.modules import (
     inline,
     locks,
     moderation,
+    musicapi_cmd,
     play,
     power,
     queue_cmd,
@@ -53,6 +54,7 @@ MODULES = (
     power,
     assistant_tools,
     convenience,
+    musicapi_cmd,
 )
 
 

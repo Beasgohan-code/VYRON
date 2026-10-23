@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Cover } from "../components/Cover";
+import { Equalizer } from "../components/Equalizer";
 import { api } from "../lib/api";
 import { fmtDuration } from "../lib/format";
 import { useApp } from "../lib/store";
@@ -116,7 +117,9 @@ export function PlayerView() {
         <div className="pv-details">
           <div className="pv-titles">
             <h1>{track.title}</h1>
-            <p>{track.uploader || "unknown artist"}</p>
+            <p>
+              <Equalizer playing={audio.playing} bars={4} /> {track.uploader || "unknown artist"}
+            </p>
           </div>
 
           <div className="pv-seek">

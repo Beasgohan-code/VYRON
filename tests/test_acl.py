@@ -221,6 +221,7 @@ def test_mongo_connect_does_not_await_create_index(monkeypatch):
             self.history = FakeCollection("history")
             self.playlists = FakeCollection("playlists")
             self.counters = FakeCollection("counters")
+            self.api_keys = FakeCollection("api_keys")
 
     class FakeAdmin:
         def command(self, name):

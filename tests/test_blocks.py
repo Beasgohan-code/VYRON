@@ -119,3 +119,49 @@ def test_lyrics_card_previews_synced_lines():
     markup = cards.lyrics_card(Track(id="x", title="Song", duration=180), result)
     assert "<table" in markup and "0:10" in markup and "0:22" in markup
     assert "Full lyrics" in markup and "synced" in markup
+
+
+def test_music_api_cards():
+    stats = {
+        "enabled": True,
+        "open": False,
+        "keys": 2,
+        "keys_total": 3,
+        "requests": 41,
+        "bytes": 5 * 1024 * 1024,
+        "rate_limit": 30,
+        "storage": "mongo",
+    }
+    markup = cards.music_api_card("https://vyron.example", stats)
+    assert "/v1/track/by-video-id" in markup and "/v1/search" in markup
+    assert 'url="https://vyron.example/v1/docs"' in markup
+    assert "41" in markup and "30" in markup
+
+    compact = cards.music_api_card("https://vyron.example", stats, compact=True)
+    assert "<details open>" not in compact and len(compact) < len(markup)
+
+    key_card = cards.api_key_card("vyrn_abcdefghijkl", "my-bot", "https://vyron.example", 30)
+    assert "Copy it now" in key_card and "vyrn_abcdefghijkl" in key_card
+
+    listing = cards.api_keys_card(
+        [
+            {
+                "key": "vyrn_abcdefghijklmnop",
+                "label": "my-bot",
+                "active": True,
+                "uses": 7,
+                "bytes": 1024,
+                "last_used_at": None,
+            }
+        ],
+        "https://vyron.example",
+    )
+    assert "<table" in listing and "…" in listing and "never" in listing
+
+    usage = cards.api_usage_card(
+        stats,
+        [{"label": "my-bot", "uses": 7, "bytes": 5 * 1024 * 1024, "last_used_at": None}],
+        "https://vyron.example",
+        sudo=True,
+    )
+    assert "5.0 MB" in usage and "41" in usage

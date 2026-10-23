@@ -51,12 +51,15 @@ never need Node locally.
 | **Queue** | now-playing row, queued rows with jump/remove, autoplay switch, shuffle/clear actions, state hint |
 | **Playlists** | cover mosaic cards, detail panel with play-all/delete, empty states |
 | **Rooms** | live voice chats with cover, listeners, volume/effects chips, open-in-Telegram, how-it-works |
-| **Profile** | avatar card, theme cards (Beat / Telegram / System), accent dots, playback switches, loop + volume, effects chips, Telegram integration, local-data reset |
+| **Music API** | base URL, live status, key list with usage, create/revoke, endpoint table, cURL/Python/Node snippets, links to `/v1/docs` and OpenAPI |
+| **Profile** | avatar card, theme cards (Beat / Telegram / System), accent dots, playback switches, loop + volume, effects chips, keyboard shortcuts, developers card, Telegram integration, local-data reset |
 
 Desktop is a 3-column grid (`sidebar · content · rail`) with a sticky now-playing
-card; below 1240 px the rail folds away, below 860 px the sidebar becomes a
-floating tabbar plus a mini player. Keyboard: `/` search · `Space` play/pause ·
-`N` skip · `Esc` close modal.
+card and an always-on player dock; below 1240 px the rail folds away, below
+860 px the sidebar becomes a floating tabbar plus a mini player.
+
+Keyboard: `⌘K`/`Ctrl+K` command palette · `?` shortcuts · `/` search ·
+`Space` play/pause · `←`/`→` seek · `N` next · `M` mute · `Esc` close.
 
 ---
 
@@ -93,6 +96,13 @@ All endpoints return JSON. Authentication, in order of preference:
 | `GET` | `/api/playlists` | – | `playlists[]` (`id`, `name`, `count`, `duration`, `covers[]`, `tracks[]`) |
 | `POST` | `/api/action` | `{action, value}` | action result |
 | `POST` | `/api/auth` | – | `{token}` scoped to the current chat |
+| `POST` | `/api/lyrics` | `{title, artist, duration}` | `{text, synced, lines[{time, text}]}` |
+| `GET` | `/api/stream/{id}` | Range supported | audio bytes (`audio/mpeg`, or a generated WAV for demo tracks) |
+| `GET` `POST` | `/api/keys` | `{action: "create"\|"revoke", label?, key?}` | `keys[]`, `stats`, `base`, `docs`, `created` — owner only |
+
+The public music API (`/v1`, keys, `/v1/docs`, OpenAPI) is documented in the
+root [README](../README.md#-music-api-eldian-compatible-same-url); the Mini App
+only needs `base`, `docs`, `keys`, `stats` and `is_owner` from `/api/keys`.
 
 Every track object has the same shape everywhere:
 
