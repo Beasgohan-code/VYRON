@@ -285,6 +285,18 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
       }
       setLoading(false);
       setError("this track will not load");
+      // The media element gives us no reason, so ask the server what it knows
+      // and surface that instead of a generic failure.
+      if (typeof fetch === "function") {
+        void fetch(infoUrl(current))
+          .then((response) => response.json())
+          .then((info: { reason?: string; error?: string; playable?: boolean }) => {
+            if (keyOf(latest.current.track) !== key) return;
+            const why = info?.reason || (info?.playable === false ? info.error : "");
+            if (why) setError(why);
+          })
+          .catch(() => undefined);
+      }
       toast?.("That track will not load — skipping ahead", "error");
       setTimeout(() => {
         // only auto-skip if the listener is still sitting on this track
