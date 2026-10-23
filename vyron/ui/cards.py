@@ -60,7 +60,13 @@ def progress_block(state: ChatState, track: Track) -> str:
 
 
 # ── start ───────────────────────────────────────────────────────────────────
-def start_card(name: str, stats: dict, *, streaming: bool = True) -> str:
+def start_card(
+    name: str,
+    stats: dict,
+    *,
+    streaming: bool = True,
+    owner_token: str = "",
+) -> str:
     served = stats.get("chats", 0)
     tracks = stats.get("tracks", 0)
     features = B.kv(
@@ -91,6 +97,15 @@ def start_card(name: str, stats: dict, *, streaming: bool = True) -> str:
         open_app = B.row(
             B.btn(f"{E('globe')} Open the player", url=f"{settings.webapp_url}/app/", style="primary")
         )
+    owner_row = ""
+    if owner_token and settings.webapp_ready:
+        owner_row = B.row(
+            B.btn(
+                f"{E('crown')} Owner console",
+                url=_with_owner_token(_app_root(settings.webapp_url), owner_token),
+                style="success",
+            )
+        )
     api_row = ""
     if settings.music_api and settings.api_base:
         api_row = B.row(
@@ -99,6 +114,7 @@ def start_card(name: str, stats: dict, *, streaming: bool = True) -> str:
     buttons = (
         B.row(B.btn(f"{E('rocket')} Add to group", url=f"https://t.me/{settings.bot_username}?startgroup=true", style="primary"))
         + open_app
+        + owner_row
         + api_row
         + B.row(
             B.btn(f"{E('queue')} Commands", data="v:help:main", style="success"),
@@ -229,6 +245,7 @@ _HELP: dict[str, tuple[str, list[tuple[str, str]]]] = {
             ("/getapi [label] [scopes=…]", "mint an API key (owner)"),
             ("/listkey · /revoke · /rotatekey", "manage API keys (owner)"),
             ("/apiusage", "API traffic per key (owner)"),
+            ("/apitoken", "owner token for web app + API"),
             ("/assistant · /setname", "rebrand the voice-chat account"),
             ("/setbio · /setpfp", "bio and profile picture"),
         ],
@@ -526,6 +543,7 @@ def stats_card(
     backend: str,
     version: str,
     api: dict | None = None,
+    links: dict[str, str] | None = None,
 ) -> str:
     body = B.kv(
         [
@@ -542,11 +560,23 @@ def stats_card(
     if api and api.get("enabled"):
         api_block = B.kv(
             [
-                (f"{E('code')} API keys", f"<b>{int(api.get('keys') or 0)}</b>"),
+                (f"{E('code')} API keys", f"<b>{int(api.get('keys') or 0)}</b> / {int(api.get('keys_total') or 0)}"),
                 (f"{E('download')} API requests", f"<b>{int(api.get('requests') or 0)}</b>"),
                 (f"{E('cloud')} API traffic", f"<b>{human_size(int(api.get('bytes') or 0))}</b>"),
+                (f"{E('shield')} API scopes", ", ".join(api.get("scopes") or []) or "read, search, download"),
             ]
         )
+    owner_row = ""
+    if links:
+        buttons = []
+        if links.get("app"):
+            buttons.append(B.btn(f"{E('crown')} Owner console", url=links["app"], style="primary"))
+        if links.get("api"):
+            buttons.append(B.btn(f"{E('code')} API docs", url=links["api"], style="success"))
+        if links.get("token"):
+            buttons.append(B.btn(f"{E('shield')} Owner token", url=links["token"], style="link"))
+        if buttons:
+            owner_row = B.row(*buttons[:3])
     return (
         B.heading(f"{E('stats')} {small_caps('statistics')}", 2)
         + body
@@ -555,6 +585,7 @@ def stats_card(
             B.btn(f"{E('live')} Active", data="v:admin:active", style="primary"),
             B.btn(f"{E('check')} Refresh", data="v:admin:stats", style="success"),
         )
+        + owner_row
         + B.footer(f"{E('bolt')} VYRON v{version} {BULLET} Kurigram + PyTgCalls {BULLET} UI: richgram")
     )
 
@@ -633,6 +664,8 @@ def music_api_card(
     *,
     compact: bool = False,
     metrics: dict | None = None,
+    owner: bool = False,
+    owner_link: str = "",
 ) -> str:
     """Card for /api — the professional music API served by this deployment."""
     root = (base or "").rstrip("/")
@@ -730,6 +763,14 @@ def music_api_card(
             B.btn(f"{E('spark')} Spec", url=openapi, style="success"),
             B.btn(f"{E('queue')} Commands", data="v:help:main", style="link"),
             B.btn(f"{E('close')} Close", data="v:close", style="danger"),
+        )
+        + (
+            B.row(
+                B.btn(f"{E('crown')} Owner console", url=owner_link, style="primary"),
+                B.btn(f"{E('shield')} Owner help", data="v:help:power", style="link"),
+            )
+            if owner and owner_link
+            else ""
         )
         + B.footer(
             f"{E('info')} keys: <code>/getapi</code> {BULLET} Mini App → Music API "
@@ -928,6 +969,56 @@ def error_card(text: str) -> str:
     return f"{E('cross')} {text}"
 
 
+def owner_access_card(
+    token: str,
+    base: str,
+    app_url: str,
+    *,
+    owner_id: int = 0,
+    ttl_days: int = 30,
+) -> str:
+    """One card that hands the owner browser + API access."""
+    root = (base or "").rstrip("/")
+    app_root = _app_root(app_url) or f"{root}/app/"
+    link = _with_owner_token(app_root, token)
+    return (
+        B.heading(f"{E('crown')} {small_caps('owner access')}", 2)
+        + B.note(
+            f"{SPARK} One signed token unlocks the <b>web player</b> and the "
+            f"<b>music API</b> from any browser — no Telegram session needed."
+        )
+        + B.note(f"{E('key')} <code>{esc(token)}</code>")
+        + B.kv(
+            [
+                (f"{E('user')} Owner", f"<code>{owner_id or '—'}</code>"),
+                (f"{E('clock')} Valid for", f"<b>{ttl_days} days</b> {BULLET} rotate with <code>/apitoken</code>"),
+                (f"{E('globe')} Web app", f"<code>{esc(link)}</code>"),
+                (f"{E('code')} API", f"<code>X-Owner-Token: …</code> on {esc(root or 'WEBAPP_URL')}/v1"),
+            ]
+        )
+        + B.details(
+            f"{E('code')} <b>Try it</b>",
+            "<pre>"
+            + esc(
+                f'curl -s "{root}/v1/me" -H "X-Owner-Token: {token}"\n'
+                f'curl -s "{root}/v1/admin/keys" -H "X-Owner-Token: {token}"'
+            )
+            + "</pre>",
+            open=True,
+        )
+        + B.divider()
+        + B.row(B.btn(f"{E('rocket')} Open owner console", url=link, style="primary"))
+        + B.row(
+            B.btn(f"{E('code')} API docs", url=f"{root}/v1/docs" if root else settings.git_repo, style="success"),
+            B.btn(f"{E('close')} Close", data="v:close", style="danger"),
+        )
+        + B.footer(
+            f"{E('shield')} keep it private {DASH} it grants every API scope {BULLET} "
+            f"expires automatically; changing <code>BOT_TOKEN</code> revokes it instantly"
+        )
+    )
+
+
 def ping_card(latency_ms: float, uptime: float) -> str:
     return (
         f"{E('bolt')} <b>Pong!</b>\n"
@@ -936,7 +1027,40 @@ def ping_card(latency_ms: float, uptime: float) -> str:
     )
 
 
-def webapp_card(url: str, chat_title: str = "") -> str:
+def _app_root(url: str) -> str:
+    """Normalise a WEBAPP_URL into the Mini App entry point (keeps query)."""
+    raw = (url or "").strip()
+    if not raw:
+        return ""
+    from urllib.parse import urlsplit, urlunsplit
+
+    parts = urlsplit(raw)
+    path = parts.path.rstrip("/")
+    if not path.endswith("/app"):
+        path = f"{path}/app" if path else "/app"
+    return urlunsplit((parts.scheme, parts.netloc, f"{path}/", parts.query, parts.fragment))
+
+
+def _with_owner_token(url: str, token: str) -> str:
+    if not url or not token:
+        return url
+    joiner = "&" if "?" in url else "?"
+    return f"{url}{joiner}ot={token}"
+
+
+def webapp_card(url: str, chat_title: str = "", owner_token: str = "") -> str:
+    root = _app_root(url)
+    owner_row = (
+        B.row(
+            B.btn(
+                f"{E('crown')} Owner console",
+                url=_with_owner_token(root, owner_token),
+                style="success",
+            )
+        )
+        if owner_token
+        else ""
+    )
     return (
         B.heading(f"{E('globe')} {BRAND} {small_caps('player')}", 2)
         + B.note(
@@ -963,12 +1087,16 @@ def webapp_card(url: str, chat_title: str = "") -> str:
             ),
         )
         + B.divider()
-        + B.row(B.btn(f"{E('rocket')} Open player", url=url, style="primary"))
+        + B.row(B.btn(f"{E('rocket')} Open player", url=root, style="primary"))
+        + owner_row
         + B.row(
             B.btn(f"{E('queue')} Commands", data="v:help:main", style="success"),
             B.btn(f"{E('chat')} Support", url=settings.support_chat, style="link"),
         )
-        + B.footer(f"{esc(truncate(chat_title, 34) or 'VYRON')} {BULLET} works on mobile &amp; desktop")
+        + B.footer(
+            f"{esc(truncate(chat_title, 34) or 'VYRON')} {BULLET} works on mobile &amp; desktop"
+            + (" · owner tools unlocked" if owner_token else "")
+        )
     )
 
 
@@ -986,6 +1114,7 @@ __all__ = [
     "history_card",
     "lyrics_card",
     "now_playing_card",
+    "owner_access_card",
     "ok_card",
     "ping_card",
     "queue_card",

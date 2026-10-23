@@ -5,9 +5,11 @@ from __future__ import annotations
 
 from aiohttp import web
 
-from vyron.core.musicapi import AuthResult, get_music_api
 from vyron.api.errors import ApiError
 from vyron.api.state import AUTH, RATE_HEADERS
+from vyron.config import settings
+from vyron.core.musicapi import AuthResult, get_music_api
+from vyron.web.auth import OWNER_TOKEN_PREFIX, verify_owner_token
 
 
 def raw_key(request: web.Request) -> str:
@@ -36,18 +38,44 @@ def headers_for(auth: AuthResult) -> dict[str, str]:
     if auth.record:
         headers["X-Key-Prefix"] = str(auth.record.get("prefix") or "")
         headers["X-Key-Scopes"] = ",".join(auth.scopes or ())
+    elif auth.owner:
+        headers["X-Auth-Mode"] = "owner"
+        headers["X-Key-Scopes"] = ",".join(auth.scopes or ())
     elif auth.open_access:
         headers["X-Auth-Mode"] = "open"
     return headers
 
 
+def owner_token(request: web.Request) -> str:
+    """`X-Owner-Token` (or an `X-API-Key` carrying a `vown_` token)."""
+    header = (request.headers.get("X-Owner-Token") or "").strip()
+    if header:
+        return header
+    key = raw_key(request)
+    return key if key.startswith(OWNER_TOKEN_PREFIX) else ""
+
+
 async def authorize(request: web.Request, scope: str | None = None) -> AuthResult:
     """Authenticate the request and (optionally) enforce a scope.
 
-    Raises :class:`ApiError` with the correct status + rate-limit headers so the
-    middleware can render a consistent envelope.
+    Accepts an API key **or** the deployment owner's signed token (which gets
+    every scope). Raises :class:`ApiError` with the correct status +
+    rate-limit headers so the middleware can render a consistent envelope.
     """
-    auth = await get_music_api().authenticate(raw_key(request))
+    api = get_music_api()
+    token = owner_token(request)
+    if token:
+        who = verify_owner_token(token, settings.bot_token)
+        if who is None or who.user_id not in settings.owners:
+            raise ApiError(
+                "invalid_key",
+                "owner token is invalid, expired or not for this deployment",
+                status=403,
+                hint="run /apitoken in the bot to mint a fresh one",
+            )
+        auth = await api.authenticate_owner(who.user_id)
+    else:
+        auth = await api.authenticate(raw_key(request))
     headers = headers_for(auth)
 
     if not auth.ok:
@@ -79,6 +107,8 @@ def describe(auth: AuthResult) -> dict:
     return {
         "key": f"{prefix}…" if prefix else "",
         "id": record.get("id"),
+        "owner": bool(auth.owner),
+        "mode": "owner" if auth.owner else ("open" if auth.open_access else "key"),
         "prefix": record.get("prefix"),
         "label": record.get("label", ""),
         "owner_id": record.get("owner_id"),
@@ -97,4 +127,4 @@ def describe(auth: AuthResult) -> dict:
     }
 
 
-__all__ = ["authorize", "describe", "headers_for", "raw_key"]
+__all__ = ["authorize", "describe", "headers_for", "owner_token", "raw_key"]

@@ -249,9 +249,14 @@ PAGE = Template("""<!doctype html>
       <tr><td>Header</td><td><code>X-API-Key: vyrn_…</code></td></tr>
       <tr><td>Bearer</td><td><code>Authorization: Bearer vyrn_…</code></td></tr>
       <tr><td>Query (dev only)</td><td><code>?key=vyrn_…</code></td></tr>
+      <tr><td>Owner token</td><td><code>X-Owner-Token: vown_…</code> — every scope</td></tr>
     </tbody></table>
     <div class="note">Keys are shown in full <b>once</b>, when they are created. Store them in your
     client's environment — never in a public repo.</div>
+    <p>The deployment owner can mint a signed token with <code>/apitoken</code> in the bot. It works
+    as <code>X-Owner-Token</code> (or <code>X-API-Key</code>), grants every scope, is valid for 30
+    days, and unlocks the Mini App at <code>/app/?ot=…</code> without Telegram auth. Rotating
+    <code>BOT_TOKEN</code> revokes it instantly.</p>
 
     <h2 id="scopes">Scopes</h2>
     <table><thead><tr><th>Scope</th><th>Grants</th><th>Routes</th></tr></thead><tbody>$scope_rows</tbody></table>

@@ -141,7 +141,8 @@ export interface AppState {
   version?: string;
   bot?: string;
   streaming?: boolean;
-  user?: { id?: number; name?: string; username?: string };
+  user?: { id?: number; name?: string; username?: string; owner?: boolean; access?: string };
+  owner?: boolean;
   chat?: { id?: number; title?: string; is_group?: boolean };
   now?: NowPlaying | null;
   queue?: Track[];

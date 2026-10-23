@@ -1416,3 +1416,58 @@ input[type="range"]:disabled { opacity: .5; }
   .sheet-groups { grid-template-columns: 1fr; gap: 12px; }
   .shortcut-sheet { padding: 16px 16px 12px; }
 }
+
+/* ── owner access ───────────────────────────────────────────────────────── */
+.owner-badge {
+  display: inline-flex; align-items: center; gap: 4px; margin-left: 8px;
+  padding: 2px 8px; border-radius: 999px; vertical-align: middle;
+  font-size: 9.6px; letter-spacing: .1em; text-transform: uppercase;
+  color: #fcd34d; background: rgba(251, 191, 36, .12);
+  border: 1px solid rgba(251, 191, 36, .32);
+}
+.owner-panel {
+  margin-top: 12px; padding: 12px 13px; border-radius: 12px;
+  border: 1px solid rgba(251, 191, 36, .26);
+  background: linear-gradient(160deg, rgba(251, 191, 36, .09), rgba(251, 191, 36, .03));
+}
+.owner-panel-head {
+  display: flex; align-items: center; gap: 7px; margin-bottom: 8px;
+  font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: #fcd34d;
+}
+.owner-panel ul { display: flex; flex-direction: column; gap: 7px; margin: 0 0 10px; }
+.owner-panel li { display: flex; gap: 8px; font-size: 12px; color: var(--muted); line-height: 1.45; }
+.owner-panel li svg { flex: 0 0 auto; margin-top: 2px; color: #fcd34d; }
+.owner-panel code { font-size: 11.2px; }
+
+.owner-dot {
+  display: inline-block; width: 7px; height: 7px; margin-left: 6px;
+  border-radius: 50%; background: #fbbf24; vertical-align: middle;
+  box-shadow: 0 0 0 3px rgba(251, 191, 36, .16);
+}
+
+/* toast icon + tone */
+.toast { display: flex; align-items: center; gap: 8px; }
+.toast svg { flex: 0 0 auto; }
+.toast.success svg { color: var(--success); }
+.toast.error svg { color: var(--danger); }
+.toast.info svg { color: var(--accent-2); }
+
+/* respect reduced-motion everywhere */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* API console loading state */
+.api-view.loading .panel { opacity: .55; transition: opacity .2s; }
+.api-view.loading .panel::after { content: none; }
+.skeleton-pill {
+  width: 74px; height: 28px; border-radius: 999px; padding: 0;
+  background: linear-gradient(100deg, rgba(255,255,255,.05) 30%, rgba(255,255,255,.12) 50%, rgba(255,255,255,.05) 70%);
+  background-size: 200% 100%; animation: shimmer 1.4s infinite linear;
+}
+@keyframes shimmer { from { background-position: 140% 0; } to { background-position: -40% 0; } }

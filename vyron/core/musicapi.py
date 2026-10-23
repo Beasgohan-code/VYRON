@@ -123,9 +123,10 @@ class AuthResult:
     remaining: int = 0
     reset_in: int = 0
     open_access: bool = False
+    owner: bool = False
 
     def has(self, scope: str) -> bool:
-        return self.open_access or "admin" in self.scopes or scope in self.scopes
+        return self.owner or self.open_access or "admin" in self.scopes or scope in self.scopes
 
 
 @dataclass
@@ -386,6 +387,39 @@ class MusicAPI:
             remaining=remaining,
             reset_in=reset_in,
             scopes=tuple(normalise_scopes(record.get("scopes"))),
+        )
+
+    async def authenticate_owner(self, owner_id: int) -> AuthResult:
+        """Authenticate the deployment owner (web-app/API owner token).
+
+        Owner access is scoped to `admin` + everything else, gets a more
+        generous window and never touches the key store.
+        """
+        limit = max(int(self.settings.music_api_rate), 120)
+        bucket = f"owner:{int(owner_id)}"
+        if not self._consume(bucket, limit):
+            remaining, reset_in = self._rate(bucket, limit)
+            return AuthResult(
+                False,
+                None,
+                status=429,
+                code="rate_limited",
+                error=f"rate limit reached ({limit}/min) — retry in {reset_in}s",
+                limit=limit,
+                remaining=remaining,
+                reset_in=reset_in,
+                scopes=tuple(SCOPES),
+                owner=True,
+            )
+        remaining, reset_in = self._rate(bucket, limit)
+        return AuthResult(
+            True,
+            None,
+            limit=limit,
+            remaining=remaining,
+            reset_in=reset_in,
+            scopes=tuple(SCOPES),
+            owner=True,
         )
 
     async def note_use(self, record: dict[str, Any] | None, *, size: int = 0) -> None:

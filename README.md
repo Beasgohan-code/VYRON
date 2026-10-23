@@ -300,6 +300,25 @@ curl -X POST "$WEBAPP_URL/v1/tracks" \
   Eldian database keeps every key already handed out working (legacy plaintext
   records are accepted and migrated on first use).
 
+### 🔑 Owner access — web app + API
+
+The deployment owner (`OWNER_ID`) can get into both the player and the API from
+**any browser**, without a Telegram session:
+
+```text
+/apitoken        # bot → signed owner token (30 days, rotated any time)
+```
+
+| Where | How |
+| --- | --- |
+| Web app | open `<WEBAPP_URL>/app/?ot=<token>` (or send `X-Owner-Token`) |
+| API | `X-Owner-Token: <token>` — or `X-API-Key: vown_…`; every scope, 120 req/min |
+| Mini App | owner sees **Owner tools**, can mint/rotate/revoke keys |
+
+Tokens are HMAC-signed with `BOT_TOKEN`, so changing the bot token revokes every
+owner token at once. `/start`, `/app`, `/api` and `/stats` also grow direct
+owner links automatically.
+
 ```bash
 MUSIC_API=true       # serve /v1 on this deployment (default on)
 MUSIC_API_OPEN=false # dev only: no key required

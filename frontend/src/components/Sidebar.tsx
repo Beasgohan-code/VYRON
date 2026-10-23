@@ -97,7 +97,10 @@ export function Sidebar() {
       >
         <span className="avatar">{initials(user.name)}</span>
         <span className="meta">
-          <b>{user.name || "Listener"}</b>
+          <b>
+            {user.name || "Listener"}
+            {(state?.owner || user.owner) && <span className="owner-dot" title="Owner" aria-label="owner" />}
+          </b>
           <span>
             @{state?.bot || "VyronMusicBot"} · Online
             {online ? ` · ${compact(online)} chats` : ""}

@@ -45,6 +45,8 @@ COMMANDS = [
     ("settings", "per-chat settings"),
     ("app", "open the player web app"),
     ("api", "music API for other bots"),
+    ("getapi", "mint a music API key"),
+    ("apitoken", "owner token for web app + API"),
     ("effects", "audio effects panel"),
     ("locks", "content locks & anti-flood"),
     ("warn", "warn a member"),
@@ -172,7 +174,9 @@ async def _async_main() -> int:
     await _setup_menu_button(bot)
     if settings.music_api:
         base = settings.api_base or f"http://0.0.0.0:{settings.port}"
-        logger.info("music api → %s/v1/docs  (owner: /getapi to mint a key)", base)
+        logger.info(
+            "music api → %s/v1/docs  (keys: /getapi · owner login: /apitoken)", base
+        )
 
     await runtime.player.start_background()
     maintenance.start()

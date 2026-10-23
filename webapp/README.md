@@ -80,10 +80,16 @@ Without it the bot stays in chat-only mode and `/app` explains what to set.
 
 All endpoints return JSON. Authentication, in order of preference:
 
-1. `X-Vyron-Token: <token>` — HMAC-signed `{chat, user, exp}` (from `/app` links).
+1. `X-Owner-Token: <vown_…>` — signed owner token from `/apitoken`, valid 30 days.
+   Works from any browser (`/app/?ot=…` links) and unlocks the API console.
+2. `X-Vyron-Token: <token>` — HMAC-signed `{chat, user, exp}` (from `/app` links).
    Lets the Mini App steer a **group** player.
-2. `X-Init-Data: <Telegram.WebApp.initData>` — standard Mini App verification.
-3. `WEBAPP_ALLOW_ANON=true` — development only.
+3. `X-Init-Data: <Telegram.WebApp.initData>` — standard Mini App verification.
+4. `WEBAPP_ALLOW_ANON=true` — development only.
+
+`/apitoken` also grants every scope on the public API: send the same value as
+`X-Owner-Token` (or `X-API-Key`) against `/v1/*`. Changing `BOT_TOKEN` revokes
+every owner token at once.
 
 | Method | Path | Body / query | Returns |
 |---|---|---|---|
@@ -98,11 +104,12 @@ All endpoints return JSON. Authentication, in order of preference:
 | `POST` | `/api/auth` | – | `{token}` scoped to the current chat |
 | `POST` | `/api/lyrics` | `{title, artist, duration}` | `{text, synced, lines[{time, text}]}` |
 | `GET` | `/api/stream/{id}` | Range supported | audio bytes (`audio/mpeg`, or a generated WAV for demo tracks) |
-| `GET` `POST` | `/api/keys` | `{action: "create"\|"revoke", label?, key?}` | `keys[]`, `stats`, `base`, `docs`, `created` — owner only |
+| `GET` `POST` | `/api/keys` | `{action: "create"\|"rotate"\|"revoke", label?, id?, scopes?, days?, rate_limit?}` | `keys[]`, `stats`, `metrics`, `base`, `docs`, `openapi`, `scopes`, `is_owner`, `created` — owner only |
 
 The public music API (`/v1`, keys, `/v1/docs`, OpenAPI) is documented in the
-root [README](../README.md#-music-api-eldian-compatible-same-url); the Mini App
-only needs `base`, `docs`, `keys`, `stats` and `is_owner` from `/api/keys`.
+root [README](../README.md#-music-api-v2-on-the-same-url); the Mini App only
+needs `base`, `docs`, `openapi`, `keys`, `stats`, `metrics`, `scopes` and
+`is_owner` from `/api/keys`.
 
 Every track object has the same shape everywhere:
 

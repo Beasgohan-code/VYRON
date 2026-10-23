@@ -7,6 +7,7 @@
 #  /revoke <id|prefix|key>        owner: deactivate a key
 #  /rotatekey <id|prefix>         owner: swap a key, old one dies instantly
 #  /apiusage                      owner: traffic, latency and per-key meters
+#  /apitoken                      owner: signed token for the web app + API
 #
 #  The API itself is served by the same aiohttp process on /v1 — see
 #  vyron/api/ — so there is nothing to deploy separately.
@@ -25,8 +26,10 @@ from vyron.core import acl
 from vyron.core.musicapi import SCOPES, find_key, get_music_api, mask_key, normalise_scopes
 from vyron.runtime import runtime
 from vyron.ui import cards, rich
+from vyron.ui.theme import E
 from vyron.utils.filters import owner
 from vyron.utils.helpers import command_args, display_name
+from vyron.web.auth import OWNER_TOKEN_TTL, make_owner_token
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +40,31 @@ def _base() -> str:
 
 async def _reply(client: Client, message: Message, markup: str) -> None:
     await rich.send(client, message.chat.id, markup, reply_to=message.id)
+
+
+async def _reply_private(client: Client, message: Message, markup: str, what: str = "Key") -> None:
+    """Secrets never go to a group — deliver them in the caller's DM."""
+    if getattr(message.chat.type, "name", "") == "PRIVATE":
+        await _reply(client, message, markup)
+        return
+    try:
+        await rich.send(client, message.from_user.id, markup)
+    except Exception as exc:  # owner has never started the bot in DM
+        logger.info("could not DM %s: %s", message.from_user.id, exc)
+        await _reply(
+            client,
+            message,
+            cards.warn_card(
+                f"<b>{what} not sent</b> — open a private chat with me first, then run the "
+                f"command again. Secrets are never posted in groups."
+            ),
+        )
+        return
+    await _reply(
+        client,
+        message,
+        cards.ok_card(f"{what} sent to your DM {E('shield')}"),
+    )
 
 
 def parse_key_args(raw: str) -> dict:
@@ -73,10 +101,26 @@ def register(client: Client) -> None:
         api = get_music_api()
         stats = await api.stats()
         compact = bool(getattr(message.chat, "type", None) and message.chat.type.name != "PRIVATE")
+        sender = message.from_user.id if message.from_user else 0
+        owner = bool(sender and sender in settings.owners)
+        owner_link = ""
+        if owner and settings.bot_token and settings.webapp_ready:
+            from vyron.web.auth import make_owner_token
+
+            owner_link = (
+                f"{settings.webapp_url.rstrip('/')}/app/?ot={make_owner_token(settings.bot_token, sender)}"
+            )
         await _reply(
             client,
             message,
-            cards.music_api_card(base=_base(), stats=stats, compact=compact, metrics=METRICS.snapshot()),
+            cards.music_api_card(
+                base=_base(),
+                stats=stats,
+                compact=compact,
+                metrics=METRICS.snapshot(),
+                owner=owner,
+                owner_link=owner_link,
+            ),
         )
 
     @client.on_message(filters.command(["getapi", "newkey"]) & owner)
@@ -94,7 +138,7 @@ def register(client: Client) -> None:
             await _reply(client, message, cards.error_card(rich.esc(error or "could not create a key")))
             return
         logger.info("api key issued for %s (%s)", message.from_user.id, record.get("label"))
-        await _reply(
+        await _reply_private(
             client,
             message,
             cards.api_key_card(
@@ -106,6 +150,7 @@ def register(client: Client) -> None:
                 expires_at=record.get("expires_at"),
                 owner_id=record.get("owner_id"),
             ),
+            what="API key",
         )
 
     @client.on_message(filters.command(["listkey", "apikeys"]) & owner)
@@ -137,7 +182,7 @@ def register(client: Client) -> None:
         if record is None:
             await _reply(client, message, cards.error_card(rich.esc(error or "could not rotate that key")))
             return
-        await _reply(
+        await _reply_private(
             client,
             message,
             cards.api_key_card(
@@ -149,6 +194,7 @@ def register(client: Client) -> None:
                 expires_at=record.get("expires_at"),
                 owner_id=record.get("owner_id"),
             ),
+            what="API key",
         )
 
     @client.on_message(filters.command(["revoke", "revokekey"]) & owner)
@@ -194,6 +240,26 @@ def register(client: Client) -> None:
                 sudo=acl.is_sudo(message.from_user.id),
                 metrics=METRICS.snapshot(),
             ),
+        )
+
+    @client.on_message(filters.command(["apitoken", "ownertoken", "ownerkey"]) & owner)
+    async def _apitoken(_: Client, message: Message) -> None:
+        if not settings.bot_token:
+            await _reply(client, message, cards.error_card("Set <code>BOT_TOKEN</code> first."))
+            return
+        token = make_owner_token(settings.bot_token, message.from_user.id)
+        logger.info("owner token issued for %s", message.from_user.id)
+        await _reply_private(
+            client,
+            message,
+            cards.owner_access_card(
+                token,
+                _base() or "",
+                settings.webapp_url or _base() or "",
+                owner_id=message.from_user.id,
+                ttl_days=OWNER_TOKEN_TTL // 86400,
+            ),
+            what="Owner token",
         )
 
     logger.debug(

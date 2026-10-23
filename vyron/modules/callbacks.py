@@ -135,8 +135,17 @@ def register(client: Client) -> None:
             if not settings.webapp_url:
                 await cq.answer("Set WEBAPP_URL first.", show_alert=True)
                 return
-            await _show(client, cq, cards.webapp_card(settings.webapp_url, chat.title or ""),
-                        keyboards.back_close("v:help:main"))
+            owner_token = ""
+            if cq.from_user and cq.from_user.id in settings.owners and settings.bot_token:
+                from vyron.web.auth import make_owner_token
+
+                owner_token = make_owner_token(settings.bot_token, cq.from_user.id)
+            await _show(
+                client,
+                cq,
+                cards.webapp_card(settings.webapp_url, chat.title or "", owner_token=owner_token),
+                keyboards.back_close("v:help:main"),
+            )
             await cq.answer()
             return
 

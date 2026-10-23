@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from urllib.parse import parse_qsl
 
 TOKEN_TTL = 12 * 3600
+OWNER_TOKEN_PREFIX = "vown_"
+OWNER_TOKEN_TTL = 30 * 86400  # long enough for scripts, short enough to rotate
 
 
 @dataclass
@@ -27,6 +29,7 @@ class WebUser:
     chat_id: int = 0
     source: str = "anon"
     auth_date: int = 0
+    owner: bool = False
 
     @property
     def authenticated(self) -> bool:
@@ -116,14 +119,52 @@ def verify_token(token: str, bot_token: str) -> WebUser | None:
     )
 
 
+def make_owner_token(bot_token: str, owner_id: int, *, ttl: int = OWNER_TOKEN_TTL) -> str:
+    """A bearer token that grants owner access to the web app *and* the API.
+
+    Signed with the bot token, so rotating ``BOT_TOKEN`` revokes every token.
+    """
+    if not bot_token or not owner_id:
+        return ""
+    expires = int(time.time()) + max(0, int(ttl))
+    blob = base64.urlsafe_b64encode(f"{int(owner_id)}:{expires}".encode()).decode().rstrip("=")
+    signature = hmac.new(bot_token.encode(), f"owner:{blob}".encode(), hashlib.sha256).hexdigest()[:32]
+    return f"{OWNER_TOKEN_PREFIX}{blob}.{signature}"
+
+
+def verify_owner_token(token: str, bot_token: str) -> WebUser | None:
+    """Validate an owner token; returns a `WebUser` with ``owner=True``."""
+    token = (token or "").strip()
+    if not token.startswith(OWNER_TOKEN_PREFIX) or "." not in token or not bot_token:
+        return None
+    blob, _, signature = token[len(OWNER_TOKEN_PREFIX):].partition(".")
+    expected = hmac.new(bot_token.encode(), f"owner:{blob}".encode(), hashlib.sha256).hexdigest()[:32]
+    if not hmac.compare_digest(expected, signature):
+        return None
+    try:
+        padded = blob + "=" * (-len(blob) % 4)
+        owner_id, expires = base64.urlsafe_b64decode(padded).decode().split(":", 1)
+        owner_id_int, expires_int = int(owner_id), int(expires)
+    except Exception:
+        return None
+    if expires_int and expires_int < time.time():
+        return None
+    return WebUser(user_id=owner_id_int, name="Owner", source="owner", owner=True)
+
+
 def resolve_user(
     *,
     init_data: str,
     token: str,
     bot_token: str,
     allow_anon: bool = False,
+    owner_ids: set[int] | frozenset[int] | None = None,
 ) -> WebUser:
     """Pick the best available identity, preferring signed chat tokens."""
+    owner = verify_owner_token(token, bot_token) if token else None
+    if owner is not None and (not owner_ids or owner.user_id in owner_ids):
+        return owner
+
     signed = verify_token(token, bot_token) if token else None
     telegram = verify_init_data(init_data, bot_token) if init_data else None
 
@@ -142,4 +183,14 @@ def resolve_user(
     return WebUser()
 
 
-__all__ = ["WebUser", "make_token", "resolve_user", "verify_init_data", "verify_token"]
+__all__ = [
+    "OWNER_TOKEN_PREFIX",
+    "OWNER_TOKEN_TTL",
+    "WebUser",
+    "make_owner_token",
+    "make_token",
+    "resolve_user",
+    "verify_init_data",
+    "verify_owner_token",
+    "verify_token",
+]

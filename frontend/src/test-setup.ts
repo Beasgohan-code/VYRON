@@ -35,7 +35,8 @@ export const demoState = {
   version: "preview",
   bot: "VyronMusicBot",
   streaming: true,
-  user: { id: 1, name: "Test Listener", username: "tester" },
+  user: { id: 1, name: "Test Listener", username: "tester", owner: true, access: "preview" },
+  owner: true,
   chat: { id: -1001, title: "Test Chat", is_group: true },
   now: {
     id: "d1",

@@ -548,3 +548,49 @@ def test_api_console_creates_rotates_and_revokes_keys(tmp_path, monkeypatch):
         assert missing.status == 404
 
     _client(scenario, with_webapp=True)
+
+
+# ── owner access ────────────────────────────────────────────────────────────
+def test_owner_token_unlocks_every_api_scope(tmp_path, monkeypatch):
+    from vyron.web.auth import make_owner_token
+
+    api, _ = _api(tmp_path, monkeypatch)
+    monkeypatch.setattr("vyron.api.routes.get_music_api", lambda: api)
+    monkeypatch.setattr("vyron.api.security.get_music_api", lambda: api)
+    monkeypatch.setattr("vyron.api.security.settings", dataclasses.replace(settings, owner_id=424242))
+
+    token = make_owner_token(settings.bot_token, 424242)
+
+    async def scenario():
+        async with TestClient(TestServer(build_app(with_webapp=False))) as client:
+            me = await client.get("/v1/me", headers={"X-Owner-Token": token})
+            body = await me.json()
+            assert me.status == 200 and body["owner"] is True and body["mode"] == "owner"
+            assert set(body["scopes"]) == {"read", "search", "download", "admin"}
+            assert me.headers["X-Auth-Mode"] == "owner"
+
+            listed = await client.get("/v1/admin/keys", headers={"X-Owner-Token": token})
+            assert listed.status == 200
+
+            # a bearer-style owner token works through X-API-Key too
+            via_key = await client.get("/v1/admin/keys", headers={"X-API-Key": token})
+            assert via_key.status == 200
+
+            stranger = make_owner_token(settings.bot_token, 1234)
+            denied = await client.get("/v1/me", headers={"X-Owner-Token": stranger})
+            assert denied.status == 403 and (await denied.json())["code"] == "invalid_key"
+
+    asyncio.run(scenario())
+
+
+def test_owner_rate_limit_is_generous(tmp_path, monkeypatch):
+    api, _ = _api(tmp_path, monkeypatch, music_api_rate=1)
+    monkeypatch.setattr("vyron.api.security.get_music_api", lambda: api)
+    monkeypatch.setattr("vyron.api.security.settings", dataclasses.replace(settings, owner_id=424242))
+
+    async def scenario():
+        result = await api.authenticate_owner(424242)
+        assert result.ok and result.owner and result.limit >= 120
+        assert result.has("admin") and result.has("download")
+
+    asyncio.run(scenario())

@@ -22,7 +22,7 @@ from vyron.core.queue import LoopMode, Track
 from vyron.runtime import runtime
 from vyron.core.musicapi import find_key, get_music_api, mask_key
 from vyron.web import stream as audio
-from vyron.web.auth import WebUser, make_token, resolve_user
+from vyron.web.auth import WebUser, make_token, resolve_user, verify_owner_token
 
 logger = logging.getLogger(__name__)
 
@@ -186,16 +186,31 @@ async def _identify(request: web.Request) -> WebUser:
         or request.query.get("init_data", "")
     )
     token = request.headers.get("X-Vyron-Token") or body.get("token") or request.query.get("t", "")
+
+    # Owner access: `X-Owner-Token`, `?ot=` (or a `vown_` link token) works
+    # from any browser — no Telegram initData required.
+    owner_raw = (
+        request.headers.get("X-Owner-Token")
+        or body.get("owner_token")
+        or request.query.get("ot", "")
+        or (token if token.startswith("vown_") else "")
+    ).strip()
+    if owner_raw:
+        who = verify_owner_token(owner_raw, settings.bot_token)
+        if who is not None and who.user_id in settings.owners:
+            return who
+
     return resolve_user(
         init_data=init_data or "",
         token=token or "",
         bot_token=settings.bot_token,
         allow_anon=settings.webapp_allow_anon,
+        owner_ids=settings.owners,
     )
 
 
 def _denied(user: WebUser) -> web.Response | None:
-    if user.authenticated or settings.webapp_allow_anon:
+    if user.authenticated or user.owner or settings.webapp_allow_anon:
         return None
     return web.json_response(
         {"ok": False, "error": "unauthorized", "hint": "open the app from Telegram"},
@@ -205,6 +220,10 @@ def _denied(user: WebUser) -> web.Response | None:
 
 def _is_preview(user: WebUser) -> bool:
     return user.source == "anon" and runtime.player is None
+
+
+def _is_owner(user: WebUser) -> bool:
+    return bool(getattr(user, "owner", False) or (user.user_id and user.user_id in settings.owners))
 
 
 def _chat_id(user: WebUser) -> int:
@@ -274,7 +293,14 @@ async def state(request: web.Request) -> web.Response:
             "version": runtime.version,
             "bot": settings.bot_username,
             "streaming": runtime.streaming_ready,
-            "user": {"id": user.user_id, "name": user.name, "username": user.username},
+            "user": {
+                "id": user.user_id,
+                "name": user.name,
+                "username": user.username,
+                "owner": _is_owner(user),
+                "access": user.source,
+            },
+            "owner": _is_owner(user),
             "chat": {
                 "id": chat_id,
                 "title": chat_title,
@@ -565,7 +591,7 @@ async def api_keys(request: web.Request) -> web.Response:
             return web.json_response({**payload, "ok": True, "created": record})
         return web.json_response({**payload, "ok": True, "revoked": True, "rotated": action == "rotate"})
 
-    is_owner = user.user_id in settings.owners
+    is_owner = _is_owner(user)
     if request.method == "GET":
         keys = await api.keys(None if is_owner else user.user_id, reveal=False)
         stats = await api.stats()

@@ -246,7 +246,7 @@ await fs.writeFile("track.mp3", file);`,
   };
 
   return (
-    <section className="view active api-view">
+    <section className={`view active api-view ${payload ? "" : "loading"}`}>
       <div className="view-head row-between">
         <div>
           <h1>Music API</h1>
@@ -256,6 +256,7 @@ await fs.writeFile("track.mp3", file);`,
           </p>
         </div>
         <div className="head-actions">
+          {!payload && <span className="pill-btn ghost skeleton-pill" aria-hidden="true" />}
           <span className={`api-status ${live ? "on" : "off"}`}>
             <i />
             {live ? "live" : health ? "degraded" : "offline"}

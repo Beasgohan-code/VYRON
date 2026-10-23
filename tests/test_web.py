@@ -370,3 +370,80 @@ def test_stream_rejects_unknown_tracks(tmp_path, monkeypatch):
             assert body["ok"] is False
 
     asyncio.run(scenario())
+
+
+# ── owner access ────────────────────────────────────────────────────────────
+def test_owner_token_roundtrip_and_expiry():
+    token = auth.make_owner_token(TOKEN, 424242)
+    assert token.startswith(auth.OWNER_TOKEN_PREFIX)
+    who = auth.verify_owner_token(token, TOKEN)
+    assert who is not None and who.owner and who.user_id == 424242
+
+    assert auth.verify_owner_token(token, "other-token") is None
+    tampered = token[:-1] + ("0" if token[-1] != "0" else "1")
+    assert auth.verify_owner_token(tampered, TOKEN) is None
+    expired = auth.make_owner_token(TOKEN, 424242, ttl=-5)
+    assert auth.verify_owner_token(expired, TOKEN) is None
+
+
+def test_owner_token_grants_web_app_access_without_telegram():
+    owner_token = auth.make_owner_token(TOKEN, settings.owner_id)
+
+    async def scenario(client):
+        state = await client.post("/api/state", json={}, headers={"X-Owner-Token": owner_token})
+        body = await state.json()
+        assert state.status == 200 and body["ok"] is True
+        assert body["owner"] is True and body["user"]["owner"] is True
+
+        via_query = await client.post(f"/api/state?ot={owner_token}", json={})
+        assert via_query.status == 200
+
+        # an owner token for somebody else is rejected
+        stranger = auth.make_owner_token(TOKEN, 999999)
+        denied = await client.post("/api/state", json={}, headers={"X-Owner-Token": stranger})
+        assert denied.status == 401
+
+        # keys console opens for the owner
+        keys = await client.get("/api/keys", headers={"X-Owner-Token": owner_token})
+        payload = await keys.json()
+        assert keys.status == 200 and payload["is_owner"] is True
+        assert "keys" in payload and "base" in payload
+
+    asyncio.run(_with_client(scenario))
+
+
+def test_api_console_key_lifecycle_for_the_owner(monkeypatch):
+    from vyron.core import musicapi as core
+
+    monkeypatch.setattr(core, "_api", None)  # isolated in-memory key store
+    owner_token = auth.make_owner_token(TOKEN, settings.owner_id)
+    headers = {"X-Owner-Token": owner_token, "X-Vyron-Token": ""}
+
+    async def scenario(client):
+        created = await client.post("/api/keys", json={"action": "create", "label": "ci"}, headers=headers)
+        body = await created.json()
+        assert created.status == 200 and body["created"]["key"].startswith("vyrn_")
+
+        listing = await (await client.get("/api/keys", headers=headers)).json()
+        assert listing["is_owner"] is True and listing["keys"]
+
+        revoked = await client.post(
+            "/api/keys", json={"action": "revoke", "id": listing["keys"][0]["id"]}, headers=headers
+        )
+        assert (await revoked.json())["revoked"] is True
+
+    asyncio.run(_with_client(scenario))
+
+
+def test_api_console_blocks_non_owners_from_minting():
+    token = auth.make_token(0, 555001, TOKEN)  # not OWNER_ID
+
+    async def scenario(client):
+        listed = await client.get("/api/keys", headers={"X-Vyron-Token": token})
+        payload = await listed.json()
+        assert listed.status == 200 and payload["is_owner"] is False and payload["keys"] == []
+
+        denied = await client.post("/api/keys", json={"action": "create"}, headers={"X-Vyron-Token": token})
+        assert denied.status == 403
+
+    asyncio.run(_with_client(scenario))

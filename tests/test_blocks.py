@@ -165,3 +165,28 @@ def test_music_api_cards():
         sudo=True,
     )
     assert "5.0 MB" in usage and "41" in usage
+
+
+def test_owner_access_is_surfaced_in_the_ui(monkeypatch):
+    import dataclasses
+
+    from vyron.config import settings as real_settings
+
+    live = dataclasses.replace(real_settings, webapp_url="https://vyron.example", webapp=True)
+    monkeypatch.setattr(cards, "settings", live)
+
+    start = cards.start_card("A", {}, owner_token="vown_tok")
+    assert "Owner console" in start and "ot=vown_tok" in start
+    assert "Owner console" not in cards.start_card("A", {})
+
+    token_card = cards.owner_access_card(
+        "vown_abc.def", "https://vyron.example", "https://vyron.example", owner_id=424242
+    )
+    assert "X-Owner-Token: vown_abc.def" in token_card
+    assert "https://vyron.example/app/?ot=vown_abc.def" in token_card
+    assert "424242" in token_card and "hashed at rest" not in token_card
+
+    web = cards.webapp_card("https://vyron.example", "chat", owner_token="vown_tok")
+    assert 'url="https://vyron.example/app/"' in web
+    assert "ot=vown_tok" in web
+    assert "owner tools unlocked" in web

@@ -19,10 +19,16 @@ def register(client: Client) -> None:
     async def _start(_: Client, message: Message) -> None:
         stats = await runtime.storage.counters() if runtime.storage else {}
         name = (message.from_user.first_name if message.from_user else "there") or "there"
+        owner_token = ""
+        if message.from_user and message.from_user.id in settings.owners and settings.bot_token:
+            from vyron.web.auth import make_owner_token
+
+            owner_token = make_owner_token(settings.bot_token, message.from_user.id)
         markup = cards.start_card(
             name,
             {"chats": stats.get("chats", 0), "tracks": stats.get("tracks", 0)},
             streaming=runtime.streaming_ready,
+            owner_token=owner_token,
         )
         await rich.send(
             message._client,
@@ -71,10 +77,16 @@ def register(client: Client) -> None:
                 reply_to=message.id,
             )
             return
+        owner_token = ""
+        sender = message.from_user.id if message.from_user else 0
+        if sender and sender in settings.owners and settings.bot_token:
+            from vyron.web.auth import make_owner_token
+
+            owner_token = make_owner_token(settings.bot_token, sender)
         await rich.send(
             message._client,
             message.chat.id,
-            cards.webapp_card(url, message.chat.title or ""),
+            cards.webapp_card(url, message.chat.title or "", owner_token=owner_token),
             reply_to=message.id,
         )
 

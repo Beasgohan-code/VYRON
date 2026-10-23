@@ -1,3 +1,4 @@
+import { CircleCheck, CircleX, Info } from "lucide-react";
 import { useEffect, useState } from "react";
 import { CommandPalette } from "./components/CommandPalette";
 import { MobileTabBar, MiniPlayer } from "./components/MobileChrome";
@@ -86,7 +87,18 @@ export default function App() {
       <ShortcutSheet open={shortcuts} onClose={() => setShortcuts(false)} />
 
       <div className={`toast ${toastMessage ? "show" : ""} ${toastTone}`} role="status" aria-live="polite">
-        {toastMessage}
+        {toastMessage ? (
+          <>
+            {toastTone === "success" ? (
+              <CircleCheck size={15} />
+            ) : toastTone === "error" ? (
+              <CircleX size={15} />
+            ) : (
+              <Info size={15} />
+            )}
+            <span>{toastMessage}</span>
+          </>
+        ) : null}
       </div>
     </div>
   );

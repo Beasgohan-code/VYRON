@@ -36,14 +36,32 @@ declare global {
 export const telegram = () => window.Telegram?.WebApp;
 
 const TOKEN_KEY = "vyron:token";
+const OWNER_KEY = "vyron:owner-token";
 
 const params = new URLSearchParams(window.location.search);
 if (params.get("t")) {
   localStorage.setItem(TOKEN_KEY, params.get("t") as string);
 }
+if (params.get("ot")) {
+  localStorage.setItem(OWNER_KEY, params.get("ot") as string);
+}
+
+// Keep tokens out of the address bar once they are stored, so screenshots and
+// shared links do not leak access.
+if ((params.get("t") || params.get("ot")) && window.history?.replaceState) {
+  params.delete("t");
+  params.delete("ot");
+  const query = params.toString();
+  window.history.replaceState({}, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+}
 
 export function token(): string {
-  return params.get("t") ?? localStorage.getItem(TOKEN_KEY) ?? "";
+  return localStorage.getItem(TOKEN_KEY) ?? "";
+}
+
+/** Signed owner token from `/apitoken` (`?ot=…` links). */
+export function ownerToken(): string {
+  return localStorage.getItem(OWNER_KEY) ?? "";
 }
 
 export class ApiError extends Error {
@@ -62,6 +80,7 @@ async function request<T>(path: string, body?: unknown): Promise<T> {
       "Content-Type": "application/json",
       "X-Init-Data": telegram()?.initData ?? "",
       "X-Vyron-Token": token(),
+      ...(ownerToken() ? { "X-Owner-Token": ownerToken() } : {}),
     },
     body: body === undefined ? undefined : JSON.stringify(body),
     credentials: "same-origin",

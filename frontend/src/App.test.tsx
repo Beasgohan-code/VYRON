@@ -49,6 +49,8 @@ describe("VYRON Player", () => {
 
     await user.click(nav("Settings"));
     expect(await screen.findByText("Profile & settings")).toBeInTheDocument();
+    expect(await screen.findByText("owner")).toBeInTheDocument();
+    expect(screen.getByText("Owner tools")).toBeInTheDocument();
     expect(screen.getByText("Beat")).toBeInTheDocument();
   });
 
@@ -161,6 +163,19 @@ describe("VYRON Player", () => {
     expect(screen.getByRole("button", { name: /Create key/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Rotate demo-bot/i })).toBeInTheDocument();
     expect(screen.getByText("Live traffic")).toBeInTheDocument();
+  });
+
+  it("opens the keyboard cheat sheet with ? and closes with escape", async () => {
+    const user = userEvent.setup();
+    mount();
+
+    await user.keyboard("?");
+    const sheet = await screen.findByRole("dialog", { name: "Keyboard shortcuts" });
+    expect(within(sheet).getByText("Command palette")).toBeInTheDocument();
+    expect(within(sheet).getByText("Play or pause")).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Keyboard shortcuts" })).toBeNull());
   });
 
   it("opens the download modal from the rail", async () => {

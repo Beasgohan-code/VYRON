@@ -1,4 +1,4 @@
-import { ArrowRight, Check, Code2, Gauge, Headphones, Keyboard, LogOut, Maximize2, Moon, Palette, Send, SunMedium, Wand2 } from "lucide-react";
+import { ArrowRight, Check, Code2, Crown, Gauge, Headphones, KeyRound, Keyboard, LogOut, Maximize2, Moon, Palette, Send, ShieldCheck, SunMedium, Wand2 } from "lucide-react";
 import { useApp } from "../lib/store";
 import type { AccentName, ThemeName } from "../lib/store";
 import { initials } from "../lib/format";
@@ -40,6 +40,7 @@ export function ProfileView() {
   } = useApp();
 
   const user = state?.user ?? {};
+  const isOwner = Boolean(state?.owner || user.owner);
   const settings = state?.settings;
   const effects = settings?.effects ?? [];
 
@@ -59,7 +60,14 @@ export function ProfileView() {
       <div className="profile-card">
         <div className="avatar xl">{initials(user.name)}</div>
         <div className="profile-id">
-          <strong>{user.name || "Listener"}</strong>
+          <strong>
+            {user.name || "Listener"}
+            {isOwner && (
+              <span className="owner-badge" title="Deployment owner">
+                <Crown size={11} /> owner
+              </span>
+            )}
+          </strong>
           <span className="muted">{user.username ? `@${user.username}` : `id ${user.id ?? "—"}`}</span>
         </div>
         <div className="profile-tags">
@@ -262,6 +270,40 @@ export function ProfileView() {
           <button type="button" className="pill-btn accent wide" onClick={() => setView("api")}>
             Music API console <ArrowRight size={14} />
           </button>
+          {isOwner ? (
+            <div className="owner-panel">
+              <div className="owner-panel-head">
+                <Crown size={14} /> Owner tools
+              </div>
+              <ul>
+                <li>
+                  <ShieldCheck size={13} />
+                  <span>
+                    Scoped API keys with <b>admin</b> access, rotation and expiry.
+                  </span>
+                </li>
+                <li>
+                  <KeyRound size={13} />
+                  <span>
+                    Browser + API access from any device: run <code>/apitoken</code> in the bot, then open{" "}
+                    <code>/app/?ot=…</code>.
+                  </span>
+                </li>
+              </ul>
+              <div className="head-actions">
+                <a className="pill-btn ghost" href="/v1/docs" target="_blank" rel="noreferrer">
+                  <Code2 size={13} /> API docs
+                </a>
+                <a className="pill-btn ghost" href="/v1/openapi.json" target="_blank" rel="noreferrer">
+                  OpenAPI 3.1
+                </a>
+              </div>
+            </div>
+          ) : (
+            <p className="muted small">
+              Owner access is available to the deployment owner — ask them to run <code>/apitoken</code>.
+            </p>
+          )}
         </article>
 
         <article className="panel">
