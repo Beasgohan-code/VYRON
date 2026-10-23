@@ -56,6 +56,7 @@ GLYPHS: dict[str, str] = {
     "volume": "🔊",
     "mute": "🔇",
     "loop": "🔁",
+    "replay": "⟲",
     "shuffle": "🔀",
     "search": "🔎",
     "download": "💾",

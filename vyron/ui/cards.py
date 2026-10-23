@@ -148,6 +148,7 @@ _HELP: dict[str, tuple[str, list[tuple[str, str]]]] = {
         [
             ("/pause · /resume", "hold or continue the stream"),
             ("/skip [n]", "jump forward n tracks"),
+            ("/replay", "start the current track over"),
             ("/seek 1:30", "jump inside the track"),
             ("/volume 1-200", "set assistant volume"),
             ("/loop off|one|all", "cycle the repeat mode"),

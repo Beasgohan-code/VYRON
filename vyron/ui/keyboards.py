@@ -28,7 +28,12 @@ def now_playing(state: ChatState, *, is_fav: bool = False) -> KM:
         else _btn(f"{G('pause')} Pause", "v:pause")
     )
     rows = [
-        [play_pause, _btn(f"{G('skip')} Skip", "v:skip"), _btn(f"{G('stop')} Stop", "v:stop")],
+        [
+            play_pause,
+            _btn(f"{G('skip')} Skip", "v:skip"),
+            _btn(f"{G('stop')} Stop", "v:stop"),
+            _btn(f"{G('replay')} Replay", "v:replay"),
+        ],
         [
             _btn(f"{G('volume')} −", "v:vol:-10"),
             _btn(f"{state.volume}%", "v:vol:show"),

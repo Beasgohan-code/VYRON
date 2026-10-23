@@ -87,6 +87,17 @@ def register(client: Client) -> None:
         await _player().seek(message.chat.id, target)
         await rich.react(message, "👍")
 
+    @client.on_message(filters.command(["replay"]))
+    async def _replay(_: Client, message: Message) -> None:
+        if not await _guard(message):
+            return
+        state = _player().queues.get(message.chat.id)
+        if not state.current:
+            await rich.send(message._client, message.chat.id, cards.warn_card("Nothing is playing."))
+            return
+        await _player().seek(message.chat.id, 0)
+        await rich.react(message, "🔁")
+
     @client.on_message(filters.command(["volume", "vol"]))
     async def _volume(_: Client, message: Message) -> None:
         if not await _guard(message):
