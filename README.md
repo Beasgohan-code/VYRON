@@ -877,7 +877,7 @@ MIT © [Beasgohan-code](https://github.com/Beasgohan-code) — fork it, improve 
 Third-party code under its own MIT licence (the notice sits above the code it
 covers): the download engine in `vyron/engine/youtube.py`, derived from
 [Eldian Music API](https://github.com/Eldian-Network/eldian-music-api), and
-queue/playback ideas from [ShizuMusic](https://github.com/Badmunda/ShizuMusic).
+queue/playback ideas from ShizuMusic.
 
 <div align="center">
 
