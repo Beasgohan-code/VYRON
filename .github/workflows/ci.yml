@@ -72,3 +72,31 @@ jobs:
 
       - name: Tests
         run: python -m pytest tests -q
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: vyron:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke the image
+        run: |
+          docker run --rm --entrypoint sh vyron:ci -c "
+            set -e
+            test -f /app/webapp/dist/index.html
+            test -f /app/webapp/dist/assets/$(ls /app/webapp/dist/assets | grep -m1 '\.js$')
+            python -c 'import vyron, pyrogram, pytgcalls; print("imports ok")'
+            python -m compileall -q /app/vyron
+          "

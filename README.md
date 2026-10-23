@@ -433,7 +433,8 @@ Mini App auth (initData HMAC + signed tokens), the whole JSON API surface
 (state/home/search/mix/rooms/playlists/actions), playlist storage round-trips,
 chart caching, generated artwork, handler registration and client construction.
 The Mini App has its own component suite (render, navigation, search, accent
-persistence, modals). CI runs both on Python 3.11/3.12 and Node 22.
+persistence, modals, file-mode badge, keyboard shortcuts). CI runs both on
+Python 3.11/3.12 and Node 22, and builds + smoke-tests the Docker image.
 
 ---
 
