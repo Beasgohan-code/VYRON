@@ -112,6 +112,16 @@ GLYPHS: dict[str, str] = {
     "infinity": "♾️",
     "api": "🔌",
     "meter": "📈",
+    "home": "🏠",
+    "now": "🎧",
+    "key": "🔑",
+    "name": "🏷️",
+    "add": "➕",
+    "lock": "🔒",
+    "unlock": "🔓",
+    "spinner": "🔄",
+    "medal": "🏅",
+    "box": "📦",
 }
 
 # ── Premium-emoji pack loader ───────────────────────────────────────────────

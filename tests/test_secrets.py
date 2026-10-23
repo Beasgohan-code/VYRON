@@ -278,7 +278,11 @@ def test_start_cached_file_id_skips_the_upload(webapp_configured, monkeypatch):
 
     class _Storage:
         async def get_meta(self, key, default=None):
-            return "AgAC-cached" if key == start._PHOTO_META else default
+            if key == start._PHOTO_META:
+                return "AgAC-cached"
+            if key == start._PHOTO_VERSION:
+                return start._ART_VERSION
+            return default
 
         async def set_meta(self, key, value):
             raise AssertionError("a cached id must not be written again")

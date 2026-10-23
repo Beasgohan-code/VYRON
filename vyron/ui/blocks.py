@@ -166,6 +166,79 @@ def powered_line(version: str = "") -> str:
     return footer(f"{SPARK} VYRON{tail} · built on Kurigram + PyTgCalls · UI by richgram")
 
 
+# ── design kit ─────────────────────────────────────────────────────────────
+#  Every card in the bot is built from these five pieces, so a settings screen
+#  and a queue screen feel like the same product:
+#
+#      head()      one line: glyph, SMALL-CAPS title, optional right-side meta
+#      context()   a quoted sentence saying what this card is about
+#      pill()      a small status token (live · 3 queued · owner)
+#      section()   a labelled block, separated by a hairline when repeated
+#      actions()   the button rows, always after a divider
+#
+#  They are deliberately thin — richgram does the rendering, this only keeps
+#  the rhythm identical everywhere.
+
+PILL_TONES = {
+    "ok": "🟢",
+    "live": "🔴",
+    "idle": "⚪",
+    "warn": "🟡",
+    "off": "⚫",
+    "info": "🔵",
+    "owner": "👑",
+}
+
+
+def head(title: str, *, glyph: str = "spark", meta: str = "", level: int = 2) -> str:
+    """Card header: glyph + small-caps title, with an optional trailing meta."""
+    from vyron.ui.theme import small_caps
+
+    line = f"{E(glyph)} {small_caps(title)}"
+    if meta:
+        line += f"  {meta}"
+    return heading(line, level)
+
+
+def context(text: str) -> str:
+    return note(text)
+
+
+def pill(text: str, tone: str = "info") -> str:
+    """A status token. Stays plain so it can live inside a heading."""
+    dot = PILL_TONES.get(tone, PILL_TONES["info"])
+    return f"{dot} {text}"
+
+
+def section(label: str, body: str, *, glyph: str | None = None, rule: bool = True) -> str:
+    from vyron.ui.theme import small_caps
+
+    prefix = f"{E(glyph)} " if glyph else ""
+    label = f"<b>{prefix}{small_caps(label)}</b>"
+    return (divider() if rule else "") + label + body
+
+
+def meter(value: float, total: float, *, width: int = 12, full: str = "▰", empty: str = "▱") -> str:
+    total = max(1e-9, float(total))
+    filled = int(max(0.0, min(1.0, value / total)) * width)
+    return full * filled + empty * (width - filled)
+
+
+def actions(*rows: str) -> str:
+    """The action block: a hairline, then the buttons in the order given."""
+    body = "".join(row_ for row_ in rows if row_)
+    return (divider() + body) if body else ""
+
+
+def meta_line(*bits: str) -> str:
+    """`3:45 · 2.4M plays · youtube` — skips empty parts, keeps one separator."""
+    return " · ".join(bit for bit in bits if bit)
+
+
+def empty_state(glyph: str, title: str, hint: str) -> str:
+    return f"{E(glyph)} <b>{title}</b>\n" + note(hint)
+
+
 # ── premium-emoji hook ─────────────────────────────────────────────────────
 def install_hooks() -> None:
     """Normalise custom-emoji tags for every richgram send."""
@@ -195,7 +268,15 @@ install_hooks()
 __all__ = [
     "RICHGRAM",
     "STYLES",
+    "actions",
     "badge",
+    "context",
+    "empty_state",
+    "head",
+    "meta_line",
+    "meter",
+    "pill",
+    "section",
     "bold",
     "btn",
     "bullets",

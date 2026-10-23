@@ -226,11 +226,23 @@ def to_plain_text(markup: str) -> str:
     if not markup:
         return ""
     text = _EMOJI_RE.sub(r"\1", str(markup))
+    # Structure first: the same down-conversion the HTML lane does, so lists,
+    # tables and separators stay legible when a toast or a log eats a card.
+    text = re.sub(r"</tg-button>", "  ·  ", text, flags=re.I)
+    text = re.sub(r"<tg-button-row[^>]*>", "", text, flags=re.I)
+    text = re.sub(r"</tg-button-row>", "\n", text, flags=re.I)
+    text = _CELL_BREAK_RE.sub("  ·  ", text)
+    text = re.sub(r"</tr>", "\n", text, flags=re.I)
+    text = re.sub(r"<li\b[^>]*>", "• ", text, flags=re.I)
+    text = re.sub(r"</li>", "\n", text, flags=re.I)
+    text = re.sub(r"<hr\s*/?>", "\n──────────\n", text, flags=re.I)
     text = _BLOCK_BREAK_RE.sub("\n", text)
     text = _BR_RE.sub("\n", text)
     text = _ANY_TAG_RE.sub("", text)
     text = _html.unescape(text)
-    return re.sub(r"\n{3,}", "\n\n", text).strip()
+    text = re.sub(r"[ \t]*·[ \t]*(?=\n|$)", "", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
 
 
 # ── delivery ────────────────────────────────────────────────────────────────

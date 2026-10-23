@@ -3,6 +3,7 @@
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from pathlib import Path
@@ -19,21 +20,42 @@ from vyron.utils.helpers import is_private_chat
 logger = logging.getLogger(__name__)
 
 # The picture `/start` sends. Once Telegram has it, the returned ``file_id`` is
-# cached in the shared meta store so later starts upload nothing at all.
+# cached in the shared meta store so later starts upload nothing at all —
+# ``_ART_VERSION`` invalidates that cache whenever the artwork changes.
 START_PHOTO = Path(__file__).resolve().parents[2] / "assets" / "start.jpg"
 _PHOTO_META = "start_photo_file_id"
+_PHOTO_VERSION = "start_photo_version"
+_ART_VERSION = "3"
 
 
 async def _photo_source() -> tuple[object, bool]:
-    """(source, cached) — a cached Telegram ``file_id`` or the shipped artwork."""
+    """(source, cached) — a cached Telegram ``file_id`` or the brand artwork.
+
+    Order: cached id (same artwork version) → shipped JPEG → freshly rendered
+    brand art. Nothing here is required for `/start` to work: if all three are
+    missing the caller falls back to the text card.
+    """
     if runtime.storage is not None:
         try:
+            version = str(await runtime.storage.get_meta(_PHOTO_VERSION, "") or "")
             stored = str(await runtime.storage.get_meta(_PHOTO_META, "") or "")
         except Exception:  # pragma: no cover - storage hiccups must not break /start
-            stored = ""
-        if stored:
+            version, stored = "", ""
+        if stored and version == _ART_VERSION:
             return stored, True
-    return (str(START_PHOTO) if START_PHOTO.is_file() else None), False
+
+    if START_PHOTO.is_file():
+        return str(START_PHOTO), False
+
+    try:
+        from vyron.utils import brandart
+
+        image = await asyncio.to_thread(brandart.start_image)
+        if image:
+            return image, False
+    except Exception:  # pragma: no cover - art is optional
+        logger.debug("could not render the /start artwork")
+    return None, False
 
 
 def register(client: Client) -> None:
@@ -118,6 +140,7 @@ def register(client: Client) -> None:
             if runtime.storage is not None:
                 try:
                     await runtime.storage.set_meta(_PHOTO_META, sent.photo.file_id)
+                    await runtime.storage.set_meta(_PHOTO_VERSION, _ART_VERSION)
                 except Exception:  # pragma: no cover
                     logger.debug("could not cache the /start photo id")
         if runtime.storage:

@@ -11,7 +11,6 @@ from pyrogram.types import Message
 from vyron.core.queue import LoopMode
 from vyron.runtime import runtime
 from vyron.ui import cards, keyboards, nowplaying, rich
-from vyron.ui.theme import E
 from vyron.utils.helpers import command_args, parse_seek
 from vyron.utils import thumbnails
 
@@ -70,7 +69,13 @@ def register(client: Client) -> None:
         await rich.send(
             message._client,
             message.chat.id,
-            cards.ok_card("<b>Stopped</b> — left the voice chat and cleared the queue."),
+            cards.toggle_card(
+                "stopped",
+                "offline",
+                glyph="stop",
+                tone="off",
+                hint="left the voice chat and cleared the queue.",
+            ),
         )
 
     @client.on_message(filters.command(["seek", "forward", "rewind"]))
@@ -97,7 +102,13 @@ def register(client: Client) -> None:
             await rich.send(
                 message._client,
                 message.chat.id,
-                f"{E('volume')} <b>Volume</b> <code>{state.volume}%</code>",
+                cards.toggle_card(
+                    "volume",
+                    f"{state.volume}%",
+                    glyph="volume",
+                    tone="info",
+                    hint="<code>/volume 120</code> sets it · <code>/volume +10</code> nudges it",
+                ),
             )
             return
         if arg[0] in "+-" and arg[1:].isdigit():
@@ -112,7 +123,7 @@ def register(client: Client) -> None:
         await rich.send(
             message._client,
             message.chat.id,
-            f"{E('volume')} <b>Volume set</b> <code>{volume}%</code>",
+            cards.toggle_card("volume", f"{volume}%", glyph="volume"),
         )
 
     @client.on_message(filters.command(["loop", "repeat"]))
@@ -127,7 +138,13 @@ def register(client: Client) -> None:
         await rich.send(
             message._client,
             message.chat.id,
-            f"{E('loop')} <b>Loop</b> <code>{state.loop.label}</code>",
+            cards.toggle_card(
+                "loop",
+                state.loop.label,
+                glyph="loop",
+                tone="info" if state.loop.label.lower() != "off" else "off",
+                hint="<code>/loop off|one|all</code> — or tap the button on the player",
+            ),
         )
 
     @client.on_message(filters.command(["shuffle"]))
@@ -139,7 +156,12 @@ def register(client: Client) -> None:
         await rich.send(
             message._client,
             message.chat.id,
-            f"{E('shuffle')} <b>Shuffled</b> <code>{count}</code> queued tracks",
+            cards.toggle_card(
+                "shuffled",
+                f"{count} tracks",
+                glyph="shuffle",
+                hint="the queue order changed — <code>/queue</code> shows the new one",
+            ),
         )
 
     @client.on_message(filters.command(["autoplay", "related"]))
@@ -153,7 +175,15 @@ def register(client: Client) -> None:
         await rich.send(
             message._client,
             message.chat.id,
-            f"{E('spark')} <b>Autoplay</b> <code>{state_text}</code>",
+            cards.toggle_card(
+                "autoplay",
+                state_text,
+                glyph="spark",
+                tone="ok" if state.autoplay else "off",
+                hint="when the queue runs dry, keep playing related tracks"
+                if state.autoplay
+                else "playback stops when the queue ends",
+            ),
         )
 
     @client.on_message(filters.command(["np", "now", "nowplaying", "current"]))
