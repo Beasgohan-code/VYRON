@@ -66,12 +66,17 @@ async def authorize(request: web.Request, scope: str | None = None) -> AuthResul
     token = owner_token(request)
     if token:
         who = verify_owner_token(token, settings.bot_token)
+        if who is not None and who.user_id in settings.owners:
+            from vyron.core import tokens
+
+            if not await tokens.accepts(who.user_id, who.epoch):
+                who = None
         if who is None or who.user_id not in settings.owners:
             raise ApiError(
                 "invalid_key",
-                "owner token is invalid, expired or not for this deployment",
+                "owner token is invalid, expired, revoked or not for this deployment",
                 status=403,
-                hint="run /apitoken in the bot to mint a fresh one",
+                hint="run /apitoken in the bot for a fresh one, /apitoken revoke to kill old ones",
             )
         auth = await api.authenticate_owner(who.user_id)
     else:

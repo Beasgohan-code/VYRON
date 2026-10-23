@@ -29,6 +29,7 @@ from vyron.ui import cards, rich
 from vyron.ui.theme import E
 from vyron.utils.filters import owner
 from vyron.utils.helpers import command_args, display_name, is_private_chat
+from vyron.core import tokens
 from vyron.web.auth import OWNER_TOKEN_TTL, make_owner_token
 
 logger = logging.getLogger(__name__)
@@ -198,12 +199,15 @@ def register(client: Client) -> None:
     async def _revoke(_: Client, message: Message) -> None:
         needle = (command_args(message) or "").strip().split()[0] if command_args(message) else ""
         if not needle:
-            await _reply(
+            # no argument: show the keys with a revoke button on each one
+            roster = await get_music_api().keys(reveal=False)
+            await _reply_private(
                 client,
                 message,
-                cards.warn_card(
-                    "Usage: <code>/revoke &lt;id|prefix|key&gt;</code> — copy it from <code>/listkey</code>."
-                ),
+                cards.api_keys_card(roster, base=_base())
+                if roster
+                else cards.warn_card("No API keys yet — mint one with <code>/getapi label</code>."),
+                what="Revoke a key",
             )
             return
         keys = await get_music_api().keys(reveal=False)
@@ -242,19 +246,49 @@ def register(client: Client) -> None:
 
     @client.on_message(filters.command(["apitoken", "ownertoken", "ownerkey"]) & owner)
     async def _apitoken(_: Client, message: Message) -> None:
+        """Mint (or rotate) the owner token, and offer to kill it again."""
         if not settings.bot_token:
             await _reply(client, message, cards.error_card("Set <code>BOT_TOKEN</code> first."))
             return
-        token = make_owner_token(settings.bot_token, message.from_user.id)
-        logger.info("owner token issued for %s", message.from_user.id)
+
+        args = command_args(message).lower().split()
+        action = args[0] if args else ""
+
+        if action in {"revoke", "kill", "delete", "reset"}:
+            epoch = await tokens.revoke_all(message.from_user.id)
+            logger.info("owner tokens revoked for %s", message.from_user.id)
+            await _reply(
+                client,
+                message,
+                cards.token_revoked_card(epoch=epoch),
+            )
+            return
+
+        if action in {"list", "keys"}:
+            roster = await get_music_api().keys(reveal=False)
+            await _reply_private(
+                client,
+                message,
+                cards.api_keys_card(roster, base=_base()),
+                what="API keys",
+            )
+            return
+
+        epoch = await tokens.epoch(message.from_user.id)
+        token = make_owner_token(settings.bot_token, message.from_user.id, epoch=epoch)
+        roster = await get_music_api().keys(reveal=False)
+        active = len([key for key in roster if key.get("active")])
+        logger.info("owner token issued for %s (epoch %s)", message.from_user.id, epoch)
         await _reply_private(
             client,
             message,
-            cards.owner_access_card(
+            cards.token_card(
                 token,
-                _base() or "",
+                base=_base() or "",
                 owner_id=message.from_user.id,
                 ttl_days=OWNER_TOKEN_TTL // 86400,
+                epoch=epoch,
+                active_keys=active,
             ),
             what="Owner token",
         )

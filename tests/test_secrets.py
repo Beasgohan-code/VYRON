@@ -234,3 +234,79 @@ def test_ranking_keeps_platform_order_on_a_tie():
     ]
     ranked = yt.rank("song", tracks)
     assert [track.id for track in ranked] == [track.id for track in tracks]
+
+
+# ── /start is a picture, and deep links skip straight to the player ─────────
+class PhotoClient(FakeClient):
+    """Registers handlers *and* accepts the photo upload."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.photos: list[dict] = []
+
+    async def send_photo(self, **kwargs):
+        self.photos.append(kwargs)
+
+        class _Sent:
+            id = 7
+            photo = type("Photo", (), {"file_id": "AgAC-photo"})()
+
+        return _Sent()
+
+
+def test_start_sends_a_picture_with_the_card_as_its_caption(webapp_configured):
+    from vyron.modules import start
+
+    client = PhotoClient()
+    start.register(client)
+    message = FakeMessage(FakeChat(ChatType.PRIVATE, 424242), FakeUser(424242))
+    message._client = client
+    _run(client.handlers["_start"], message)
+
+    assert client.photos, "/start must send a picture"
+    call = client.photos[0]
+    assert str(call["photo"]).endswith("start.jpg")
+    caption = call["caption"]
+    assert "𓆩 𝐕𝐘𝐑𝐎𝐍 𓆪" in caption
+    assert len(caption) <= 1024  # Telegram's caption ceiling
+    assert call["reply_markup"] is not None  # the panel buttons survive
+
+
+def test_start_cached_file_id_skips_the_upload(webapp_configured, monkeypatch):
+    from vyron.modules import start
+    from vyron.runtime import runtime
+
+    class _Storage:
+        async def get_meta(self, key, default=None):
+            return "AgAC-cached" if key == start._PHOTO_META else default
+
+        async def set_meta(self, key, value):
+            raise AssertionError("a cached id must not be written again")
+
+        async def counters(self):
+            return {"chats": 1, "tracks": 2}
+
+        async def bump(self, *_args, **_kwargs):
+            return None
+
+    monkeypatch.setattr(runtime, "storage", _Storage())
+    client = PhotoClient()
+    start.register(client)
+    message = FakeMessage(FakeChat(ChatType.PRIVATE, 424242), FakeUser(424242))
+    message._client = client
+    _run(client.handlers["_start"], message)
+    assert client.photos[0]["photo"] == "AgAC-cached"
+
+
+def test_start_deep_link_opens_the_player(webapp_configured, sent):
+    from vyron.modules import start
+
+    client = FakeClient()
+    start.register(client)
+    message = FakeMessage(FakeChat(ChatType.PRIVATE, 424242), FakeUser(424242))
+    message.text = "/start app"
+    _run(client.handlers["_start"], message)
+
+    assert "inside Telegram" in sent[-1]
+    buttons = [button for row in sent.keyboards[-1].inline_keyboard for button in row]
+    assert any(getattr(button, "web_app", None) for button in buttons)

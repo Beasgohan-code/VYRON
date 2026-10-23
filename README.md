@@ -154,16 +154,22 @@ Health check → <http://localhost:8080/health> · Mini App → <http://localhos
 | `/random [mood or query]` | play a surprise track from trending, a mood, or a search |
 | `/exportpl <name>` | send the playlist as a portable JSON file |
 | `/importpl [name]` | reply to that file to restore the playlist |
-| `/replay` | start the current track over |
-| `/daemons` | housekeeping, watchdog, keep-alive and timer status (owner) |
+| `/history` | what was played here recently |
+
+### Starting up
+
+`/start` answers with a picture card — brand art, the live chat/track
+counters and the buttons you actually need. The upload is cached by
+Telegram `file_id` after the first send, so later starts cost nothing.
+`t.me/<bot>?start=app` skips the card and opens the Mini App directly.
 
 ### Tools
 
-`/lyrics` · `/fav` · `/favs` · `/history` · `/settings` · `/247` · `/stats` · `/ping` · `/id` · `/emojis`
-`/whoami` · `/song` · `/vsong` · `/repo`
+`/lyrics` · `/fav` · `/favs` · `/history` · `/settings` · `/247` · `/stats` · `/ping` · `/id`
+`/song` · `/vsong` · `/repo`
 
 Videl/Fallen aliases are accepted everywhere they make sense: `/music` (`/start`),
-`/listpl`, `/loadpl`, `/rmplaylist`, `/deleteplaylist`, `/delpl`, `/spt`,
+`/listpl`, `/loadpl`, `/rmplaylist`, `/deleteplaylist`, `/delpl`,
 `/reboot`, `/gblock`, `/gunblock`, `/ublock`, `/uunblock`.
 
 ### Groups & voting
@@ -193,7 +199,6 @@ feeds the Library view of the web app. (YouTube imports stay on `/playlist`.)
 
 | Command | What it does |
 |---|---|
-| `/speedtest` | Bot API latency, media-CDN throughput, voice-chat readiness, uptime |
 | `/sudoers` | owner + `SUDO_USERS` with resolved names |
 | `/eval <code>` | run Python inside the bot process (owner, async aware) |
 | `/vars` | configuration snapshot — secrets masked, DM'd in groups |
@@ -323,7 +328,9 @@ The deployment owner (`OWNER_ID`) can get into both the player and the API from
 **any browser**, without a Telegram session:
 
 ```text
-/apitoken        # bot → signed owner token (30 days, rotated any time)
+/apitoken           # mint the owner token (30 days)
+/apitoken rotate    # mint a new one and kill the old one
+/apitoken revoke    # kill every owner token, instantly
 ```
 
 | Where | How |
@@ -333,8 +340,16 @@ The deployment owner (`OWNER_ID`) can get into both the player and the API from
 | Mini App | owner sees **Owner tools**, can mint/rotate/revoke keys |
 
 Tokens are HMAC-signed with `BOT_TOKEN`, so changing the bot token revokes every
-owner token at once. `/start`, `/app`, `/api` and `/stats` also grow direct
-owner links automatically.
+owner token at once. On top of that every token carries a **generation** number:
+`/apitoken revoke` (or the red button on the token card) bumps it, and every
+token minted before that moment stops verifying — including ones you already
+pasted into a script. The Mini App is unaffected, because it authenticates with
+Telegram's `initData`, not with this token.
+
+API keys work the same way and are killed separately: `/listkey` shows them with
+a **Revoke** button each, `/revoke <id|prefix>` does it from the command line, and
+`/rotatekey` swaps a key for a fresh one. `/start`, `/app`, `/api` and `/stats`
+also grow direct owner links automatically.
 
 ```bash
 MUSIC_API=true       # serve /v1 on this deployment (default on)
@@ -584,6 +599,7 @@ The interesting optional ones:
 | `MONGO_URL` | – | persistence (JSON file otherwise) |
 | `PREMIUM_EMOJI_FILE` | `./emoji.json` | custom emoji pack |
 | `RICH_MESSAGES` | `true` | rich cards (set `false` for plain HTML) |
+| `BOT_NAME` | `𓆩 𝐕𝐘𝐑𝐎𝐍 𓆪` | display name; `BOT_PROFILE` pushes it to Telegram on boot |
 | `BOT_PROFILE` | `true` | on boot, set the bot's name/bio and scope the command menus (users · group admins · owner) |
 | `KEEPALIVE_MINUTES` | `10` | ping our own `/health` + `/app/` so free hosts don't sleep (`0` = off) |
 | `KEEPALIVE_URL` | `RENDER_EXTERNAL_URL` | public URL to ping on Koyeb/Railway |

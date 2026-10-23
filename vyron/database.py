@@ -65,6 +65,12 @@ class Storage:
     async def all_chat_ids(self) -> list[int]:
         return []
 
+    # small key/value documents (token epochs, migrations, toggles) ----
+    async def get_meta(self, key: str, default: Any = None) -> Any:
+        return default
+
+    async def set_meta(self, key: str, value: Any) -> None: ...
+
     # music-API keys ---------------------------------------------------
     async def api_keys(self, owner_id: int | None = None) -> list[dict]:
         return []
@@ -100,6 +106,7 @@ class JsonStorage(Storage):
             "counters": {},
             "playlists": {},
             "api_keys": {},
+            "meta": {},
         }
         self._lock = asyncio.Lock()
 
@@ -195,6 +202,15 @@ class JsonStorage(Storage):
         if owner_id is not None:
             keys = [item for item in keys if int(item.get("owner_id", 0)) == int(owner_id)]
         return sorted(keys, key=lambda item: item.get("created_at") or 0, reverse=True)
+
+    # ── meta ───────────────────────────────────────────────────────────────
+    async def get_meta(self, key: str, default: Any = None) -> Any:
+        return self._data.get("meta", {}).get(key, default)
+
+    async def set_meta(self, key: str, value: Any) -> None:
+        async with self._lock:
+            self._data.setdefault("meta", {})[key] = value
+            await self._flush()
 
     # API keys are stored under their opaque `id` (never the raw key, which is
     # only ever held as a SHA-256 hash).  Legacy plaintext records written by
@@ -467,6 +483,24 @@ class MongoStorage(Storage):
             return removed
 
         return await asyncio.to_thread(_prune)
+
+    # ── meta ───────────────────────────────────────────────────────────────
+    async def get_meta(self, key: str, default: Any = None) -> Any:
+        def _load():
+            doc = self._db.meta.find_one({"_id": key})
+            return default if doc is None else doc.get("value", default)
+
+        try:
+            return await asyncio.to_thread(_load)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("meta read failed: %s", exc)
+            return default
+
+    async def set_meta(self, key: str, value: Any) -> None:
+        def _save():
+            self._db.meta.update_one({"_id": key}, {"$set": {"value": value}}, True)
+
+        await asyncio.to_thread(_save)
 
     # ── API keys ───────────────────────────────────────────────────────────
     async def api_keys(self, owner_id: int | None = None) -> list[dict]:

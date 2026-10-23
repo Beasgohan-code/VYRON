@@ -171,7 +171,7 @@ def test_music_api_cards():
 
 
 def test_owner_access_is_surfaced_without_leaking_it_into_the_ui():
-    token_card = cards.owner_access_card("vown_abc.def", "https://vyron.example", owner_id=424242)
+    token_card = cards.token_card("vown_abc.def", base="https://vyron.example", owner_id=424242)
 
     # the credential is the point of *this* card — and it stays in the DM
     assert "X-Owner-Token: vown_abc.def" in token_card

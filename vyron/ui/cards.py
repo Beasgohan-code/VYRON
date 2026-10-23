@@ -29,7 +29,7 @@ from vyron.ui.progress import (
     truncate,
 )
 from vyron.ui.progress import compact_number
-from vyron.ui.theme import BRAND, BULLET, DASH, E, SPARK, small_caps
+from vyron.ui.theme import BRAND, BRAND_DISPLAY, BULLET, DASH, E, SPARK, small_caps
 
 DOT = "·"
 
@@ -114,7 +114,7 @@ def start_card(
         )
     )
     return (
-        B.heading(f"{E('brand')} {esc(BRAND)}", 2)
+        B.heading(f"{E('brand')} {esc(BRAND_DISPLAY)}", 2)
         + B.note(
             f"<b>{esc(truncate(name, 40))}</b> · {mode}\n{detail}"
         )
@@ -183,12 +183,10 @@ _HELP: dict[str, tuple[str, list[tuple[str, str]]]] = {
             ("/history", "your recently played"),
             ("/settings", "per-chat defaults"),
             ("/247", "toggle 24/7 mode"),
-            ("/emojis", "premium emoji pack status"),
             ("/app", "open the player web app"),
             ("/api", "the music API (keys, docs)"),
             ("/exportpl <name>", "playlist → JSON file"),
             ("/importpl", "reply to that file to restore it"),
-            ("/whoami", "your id, role and chat"),
         ],
     ),
     "social": (
@@ -221,7 +219,6 @@ _HELP: dict[str, tuple[str, list[tuple[str, str]]]] = {
             ("/eval <code>", "run python in the bot process"),
             ("/vars", "configuration snapshot (masked)"),
             ("/dbstats", "storage size and counters"),
-            ("/speedtest", "latency, throughput, VC health"),
             ("/sudoers", "who can operate the bot"),
             ("/clearcache", "wipe downloads and temp files"),
             ("/dbcleanup 30", "drop history older than N days"),
@@ -232,7 +229,8 @@ _HELP: dict[str, tuple[str, list[tuple[str, str]]]] = {
             ("/getapi [label] [scopes=…]", "mint an API key (owner)"),
             ("/listkey · /revoke · /rotatekey", "manage API keys (owner)"),
             ("/apiusage", "API traffic per key (owner)"),
-            ("/apitoken", "owner token for web app + API"),
+            ("/apitoken", "owner token — mint, rotate, revoke"),
+            ("/apitoken revoke", "kill every owner token, instantly"),
             ("/logs [errors|warn|info]", "owner journal: start, stop, errors"),
             ("/logs export · /logs clear", "download or empty the journal"),
             ("/assistant · /setname", "rebrand the voice-chat account"),
@@ -780,6 +778,7 @@ def music_api_card(
         + (
             B.row(
                 B.btn(f"{E('crown')} Owner console", data="v:app", style="primary"),
+                B.btn(f"{E('key')} Owner token", data="v:token:rotate"),
                 B.btn(f"{E('shield')} Owner help", data="v:help:power", style="link"),
             )
             if owner
@@ -801,6 +800,7 @@ def api_key_card(
     scopes=None,
     expires_at: float | None = None,
     owner_id: int | None = None,
+    key_id: str = "",
 ) -> str:
     """The one-and-only view of a freshly minted key."""
     root = (base or "").rstrip("/")
@@ -838,13 +838,34 @@ def api_key_card(
         + B.divider()
         + B.row(
             B.btn(f"{E('code')} Docs", url=f"{root}/v1/docs" if root else settings.git_repo, style="primary"),
-            B.btn(f"{E('close')} Close", data="v:close", style="link"),
+            (
+                B.btn(f"{E('cross')} Revoke", data=f"v:key:revoke:{key_id}", style="danger")
+                if key_id
+                else B.btn(f"{E('close')} Close", data="v:close", style="link")
+            ),
+            B.btn(f"{E('key')} All keys", data="v:token:keys", style="link"),
         )
         + B.footer(
             f"{E('info')} revoke with <code>/revoke {key[:12]}…</code> {BULLET} "
             f"rotate with <code>/rotatekey {key[:12]}…</code>"
         )
     )
+
+
+def _key_action_rows(keys: list[dict], *, limit: int = 8) -> str:
+    """One revoke button per live key — deleting a credential should be a tap."""
+    live = [item for item in keys if item.get("active", True)][:limit]
+    buttons = [
+        B.btn(
+            f"{E('cross')} {esc(truncate(str(item.get('label') or item.get('prefix') or 'key'), 14))}",
+            data=f"v:key:revoke:{str(item.get('id') or '')}",
+            style="danger",
+        )
+        for item in live
+    ]
+    if not buttons:
+        return ""
+    return B.grid(buttons, columns=2)
 
 
 def api_keys_card(keys: list[dict], base: str) -> str:
@@ -872,11 +893,89 @@ def api_keys_card(keys: list[dict], base: str) -> str:
             f"{E('shield')} Keys are stored as SHA-256 hashes. The full value is only shown "
             f"when it is minted {DASH} rotate anything you have lost."
         )
+        + _key_action_rows(keys)
         + B.row(
             B.btn(f"{E('code')} Docs", url=f"{(base or '').rstrip('/')}/v1/docs", style="primary"),
             B.btn(f"{E('close')} Close", data="v:close", style="link"),
         )
         + B.footer(f"revoke <code>/revoke &lt;id|prefix&gt;</code> {BULLET} rotate <code>/rotatekey</code> {BULLET} {BRAND}")
+    )
+
+
+def token_card(
+    token: str,
+    *,
+    base: str = "",
+    owner_id: int = 0,
+    ttl_days: int = 30,
+    epoch: int = 0,
+    active_keys: int = 0,
+) -> str:
+    """``/apitoken`` — one screen for the owner's credentials and how to kill them."""
+    root = (base or "").rstrip("/") or "WEBAPP_URL"
+    return (
+        B.heading(f"{E('crown')} {small_caps('owner access')}", 2)
+        + B.note(
+            f"{SPARK} This token is your key to the <b>music API</b> and to scripts.\n"
+            f"The Mini App never needs it — Telegram already proves who you are."
+        )
+        + B.note(f"{E('key')} <code>{esc(token)}</code>")
+        + B.kv(
+            [
+                (f"{E('user')} Owner", f"<code>{owner_id or '—'}</code>"),
+                (f"{E('clock')} Expires", f"<b>{ttl_days} days</b> from the last rotate"),
+                (
+                    f"{E('shield')} Generation",
+                    f"<b>{int(epoch) + 1}</b> {BULLET} revoking kills every older token",
+                ),
+                (f"{E('code')} Header", "<code>X-Owner-Token: …</code>"),
+                (f"{E('key')} API keys", f"<b>{int(active_keys)}</b> active"),
+            ]
+        )
+        + B.details(
+            f"{E('code')} <b>Try it</b>",
+            "<pre>"
+            + esc(
+                f'curl -s "{root}/v1/me" -H "X-Owner-Token: {token}"\n'
+                f'curl -s "{root}/v1/admin/keys" -H "X-Owner-Token: {token}"'
+            )
+            + "</pre>",
+            open=False,
+        )
+        + B.divider()
+        + B.row(
+            B.btn(f"{E('play')} Open player", data="v:app", style="primary"),
+            B.btn(f"{E('code')} API docs", url=f"{root}/v1/docs", style="success"),
+        )
+        + B.row(
+            B.btn(f"{E('rocket')} Rotate", data="v:token:rotate"),
+            B.btn(f"{E('cross')} Revoke all", data="v:token:revoke", style="danger"),
+            B.btn(f"{E('key')} API keys", data="v:token:keys", style="link"),
+        )
+        + B.footer(
+            f"{E('shield')} a token lasts 30 days; <b>Revoke all</b> invalidates every one "
+            f"instantly — including any you already shared"
+        )
+    )
+
+
+def token_revoked_card(*, epoch: int = 0, keys_revoked: int = 0) -> str:
+    """Confirmation after a revocation — says plainly what still works."""
+    return (
+        B.heading(f"{E('shield')} {small_caps('tokens revoked')}", 2)
+        + B.note(
+            "Every owner token minted before now is <b>dead</b>. "
+            "The Mini App keeps working — it authenticates with Telegram, not this token."
+        )
+        + B.kv(
+            [
+                (f"{E('bolt')} Generation", f"<b>{int(epoch) + 1}</b>"),
+                (f"{E('key')} API keys revoked", f"<b>{int(keys_revoked)}</b>"),
+                (f"{E('info')} Next step", "mint a fresh one with <code>/apitoken</code>"),
+            ]
+        )
+        + B.row(B.btn(f"{E('check')} Got it", data="v:close", style="success"))
+        + B.footer(f"{E('crown')} you can also rotate only the API keys, from the API keys screen")
     )
 
 
@@ -951,7 +1050,7 @@ def about_card() -> str:
         ]
     )
     return (
-        B.heading(f"{E('brand')} {BRAND} {DASH} about", 2)
+        B.heading(f"{E('brand')} {esc(BRAND_DISPLAY)} {DASH} about", 2)
         + B.note(
             f"{SPARK} A modern Telegram voice-chat music bot: rich cards, premium emoji, "
             f"yt-dlp search, MP3/MP4 downloads, persistent queues and a companion web app."
@@ -980,52 +1079,6 @@ def warn_card(text: str) -> str:
 
 def error_card(text: str) -> str:
     return f"{E('cross')} {text}"
-
-
-def owner_access_card(
-    token: str,
-    base: str,
-    *,
-    owner_id: int = 0,
-    ttl_days: int = 30,
-) -> str:
-    """The owner's API credential — the Mini App needs no token at all."""
-    root = (base or "").rstrip("/") or "WEBAPP_URL"
-    return (
-        B.heading(f"{E('crown')} {small_caps('owner token')}", 2)
-        + B.note(
-            f"{SPARK} For the <b>API</b> and for scripts. The Mini App already knows "
-            f"you from Telegram — just tap <b>Player</b>."
-        )
-        + B.note(f"{E('key')} <code>{esc(token)}</code>")
-        + B.kv(
-            [
-                (f"{E('user')} Owner", f"<code>{owner_id or '—'}</code>"),
-                (f"{E('clock')} Valid for", f"<b>{ttl_days} days</b> {BULLET} rotate with <code>/apitoken</code>"),
-                (f"{E('globe')} Header", "<code>X-Owner-Token: …</code>"),
-            ]
-        )
-        + B.details(
-            f"{E('code')} <b>Try it</b>",
-            "<pre>"
-            + esc(
-                f'curl -s "{root}/v1/me" -H "X-Owner-Token: {token}"\n'
-                f'curl -s "{root}/v1/admin/keys" -H "X-Owner-Token: {token}"'
-            )
-            + "</pre>",
-            open=True,
-        )
-        + B.divider()
-        + B.row(
-            B.btn(f"{E('play')} Open player", data="v:app", style="primary"),
-            B.btn(f"{E('code')} API docs", url=f"{root}/v1/docs", style="success"),
-        )
-        + B.row(B.btn(f"{E('close')} Close", data="v:close", style="danger"))
-        + B.footer(
-            f"{E('shield')} keep it private {DASH} it grants every API scope {BULLET} "
-            f"expires automatically; changing <code>BOT_TOKEN</code> revokes it instantly"
-        )
-    )
 
 
 def ping_card(latency_ms: float, uptime: float) -> str:
@@ -1425,4 +1478,30 @@ def captcha_card(mention: str, *, seconds: int = 120, user_id: int = 0) -> str:
         + B.footer(
             f"{E('info')} still muted? the button stays live {BULLET} ask an admin if it fails"
         )
+    )
+
+
+def confirm_card(
+    title: str,
+    detail: str,
+    *,
+    confirm: str,
+    cancel: str = "v:close",
+    danger: bool = False,
+    confirm_label: str = "Yes, do it",
+) -> str:
+    """A two-step confirmation — destructive actions never fire on one tap."""
+    glyph = E("warn") if danger else E("info")
+    return (
+        B.heading(f"{glyph} {small_caps(title)}", 2)
+        + B.note(detail)
+        + B.row(
+            B.btn(
+                f"{E('check')} {confirm_label}",
+                data=confirm,
+                style="danger" if danger else "success",
+            ),
+            B.btn(f"{E('back')} Cancel", data=cancel),
+        )
+        + B.footer(f"{E('shield')} nothing happens until you confirm")
     )

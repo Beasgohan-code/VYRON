@@ -660,3 +660,65 @@ def test_room_attach_requires_admin_and_mints_a_chat_token(monkeypatch):
         assert anonymous.status == 401
 
     asyncio.run(_with_client(scenario))
+
+
+# ── token revocation (epochs) ───────────────────────────────────────────────
+def test_revoke_all_kills_older_tokens(tmp_path, monkeypatch):
+    from vyron.core import tokens
+    from vyron.database import JsonStorage
+    from vyron.runtime import runtime
+
+    storage = JsonStorage(settings)
+    storage.path = tmp_path / "db.json"
+    monkeypatch.setattr(runtime, "storage", storage)
+    tokens.reset_cache()
+
+    async def scenario():
+        first = auth.make_owner_token(TOKEN, 424242, epoch=await tokens.epoch(424242))
+        assert auth.verify_owner_token(first, TOKEN) is not None
+
+        epoch = await tokens.revoke_all(424242)
+        assert epoch == 1
+        assert (await storage.get_meta("token_epoch:424242")) == 1
+
+        # the old token still parses, but no longer passes the epoch gate
+        assert auth.verify_owner_token(first, TOKEN).epoch == 0
+        assert not await tokens.accepts(424242, 0)
+
+        second = auth.make_owner_token(TOKEN, 424242, epoch=await tokens.epoch(424242))
+        assert await tokens.accepts(424242, auth.verify_owner_token(second, TOKEN).epoch)
+
+        # revocation survives a process restart: a cold cache reads storage
+        tokens.reset_cache()
+        assert await tokens.epoch(424242) == 1
+        assert not await tokens.accepts(424242, 0)
+
+    asyncio.run(scenario())
+
+
+def test_revoked_owner_token_is_rejected_by_the_api(tmp_path, monkeypatch):
+    from vyron.core import tokens
+    from vyron.database import JsonStorage
+    from vyron.runtime import runtime
+
+    storage = JsonStorage(settings)
+    storage.path = tmp_path / "db.json"
+    monkeypatch.setattr(runtime, "storage", storage)
+    tokens.reset_cache()
+    owner_token = auth.make_owner_token(TOKEN, settings.owner_id)
+
+    async def scenario(client):
+        before = await client.post("/api/state", json={}, headers={"X-Owner-Token": owner_token})
+        assert before.status == 200 and (await before.json())["owner"] is True
+
+        await tokens.revoke_all(settings.owner_id)
+
+        after = await client.post("/api/state", json={}, headers={"X-Owner-Token": owner_token})
+        assert after.status == 401
+
+        # the same token through the query parameter path is refused too
+        via_query = await client.get(f"/api/keys?ot={owner_token}")
+        assert via_query.status == 401
+
+    asyncio.run(_with_client(scenario))
+    tokens.reset_cache()

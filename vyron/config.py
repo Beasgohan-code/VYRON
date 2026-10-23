@@ -53,7 +53,7 @@ class Settings:
 
     # ── Identity ────────────────────────────────────────────────────────────
     bot_username: str = field(default_factory=lambda: _env("BOT_USERNAME", "VyronMusicBot"))
-    bot_name: str = field(default_factory=lambda: _env("BOT_NAME", "VYRON"))
+    bot_name: str = field(default_factory=lambda: _env("BOT_NAME", "𓆩 𝐕𝐘𝐑𝐎𝐍 𓆪"))
     owner_id: int = field(default_factory=lambda: _int("OWNER_ID", 0))
     sudo_users: list[int] = field(default_factory=lambda: _split_ints(_env("SUDO_USERS")))
     support_chat: str = field(default_factory=lambda: _env("SUPPORT_CHAT", "https://t.me/BeasgohanSupport"))

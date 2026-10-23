@@ -17,6 +17,8 @@ from vyron.config import settings
 
 # ── Palette / structure ─────────────────────────────────────────────────────
 BRAND = "VYRON"
+# What Telegram shows: the same name with the ornaments people asked for.
+BRAND_DISPLAY = "𓆩 𝐕𝐘𝐑𝐎𝐍 𓆪"
 BRAND_LINE = "◈"
 DOT = "•"
 DASH = "—"
@@ -164,6 +166,7 @@ def pill(name: str, text: str) -> str:
 __all__ = [
     "E",
     "BRAND",
+    "BRAND_DISPLAY",
     "BULLET",
     "DASH",
     "DOT",

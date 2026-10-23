@@ -22,7 +22,7 @@ from vyron.config import settings
 
 logger = logging.getLogger(__name__)
 
-NAME = "VYRON"
+NAME = "𓆩 𝐕𝐘𝐑𝐎𝐍 𓆪"
 
 SHORT_DESCRIPTION = (
     "Stream music into any Telegram voice chat, or download it — "

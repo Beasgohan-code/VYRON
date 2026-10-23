@@ -57,7 +57,7 @@ def test_install_sets_name_about_commands_and_rights():
     report = asyncio.run(botprofile.install(bot))
 
     assert report == {"name": True, "about": True, "commands": True, "rights": True}
-    assert bot.named("set_bot_name")[0]["value"] == "VYRON"
+    assert bot.named("set_bot_name")[0]["value"] == "𓆩 𝐕𝐘𝐑𝐎𝐍 𓆪"
     assert "/play" in bot.named("description")[0]["text"]
 
     # the credentials never appear in anything Telegram shows publicly

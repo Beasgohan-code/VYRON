@@ -30,6 +30,7 @@ class WebUser:
     source: str = "anon"
     auth_date: int = 0
     owner: bool = False
+    epoch: int = 0
 
     @property
     def authenticated(self) -> bool:
@@ -119,21 +120,45 @@ def verify_token(token: str, bot_token: str) -> WebUser | None:
     )
 
 
-def make_owner_token(bot_token: str, owner_id: int, *, ttl: int = OWNER_TOKEN_TTL) -> str:
+def make_owner_token(
+    bot_token: str,
+    owner_id: int,
+    *,
+    ttl: int = OWNER_TOKEN_TTL,
+    epoch: int = 0,
+) -> str:
     """A bearer token that grants owner access to the web app *and* the API.
 
-    Signed with the bot token, so rotating ``BOT_TOKEN`` revokes every token.
+    Signed with the bot token, so rotating ``BOT_TOKEN`` revokes every token;
+    ``epoch`` adds per-owner revocation on top of that (see `core.tokens`).
     """
     if not bot_token or not owner_id:
         return ""
     expires = int(time.time()) + max(0, int(ttl))
-    blob = base64.urlsafe_b64encode(f"{int(owner_id)}:{expires}".encode()).decode().rstrip("=")
+    payload = f"{int(owner_id)}:{expires}:{int(epoch or 0)}"
+    blob = base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
     signature = hmac.new(bot_token.encode(), f"owner:{blob}".encode(), hashlib.sha256).hexdigest()[:32]
     return f"{OWNER_TOKEN_PREFIX}{blob}.{signature}"
 
 
-def verify_owner_token(token: str, bot_token: str) -> WebUser | None:
-    """Validate an owner token; returns a `WebUser` with ``owner=True``."""
+def owner_token_epoch(token: str, bot_token: str) -> int | None:
+    """The epoch a *valid* token was minted in (``None`` when invalid)."""
+    who = verify_owner_token(token, bot_token)
+    if who is None:
+        return None
+    return int(getattr(who, "epoch", 0) or 0)
+
+
+def verify_owner_token(
+    token: str,
+    bot_token: str,
+    *,
+    expected_epoch: int | None = None,
+) -> WebUser | None:
+    """Validate an owner token; returns a `WebUser` with ``owner=True``.
+
+    ``expected_epoch`` rejects tokens issued before a revocation.
+    """
     token = (token or "").strip()
     if not token.startswith(OWNER_TOKEN_PREFIX) or "." not in token or not bot_token:
         return None
@@ -143,13 +168,23 @@ def verify_owner_token(token: str, bot_token: str) -> WebUser | None:
         return None
     try:
         padded = blob + "=" * (-len(blob) % 4)
-        owner_id, expires = base64.urlsafe_b64decode(padded).decode().split(":", 1)
+        parts = base64.urlsafe_b64decode(padded).decode().split(":")
+        owner_id, expires = parts[0], parts[1]
+        token_epoch = int(parts[2]) if len(parts) > 2 else 0
         owner_id_int, expires_int = int(owner_id), int(expires)
     except Exception:
         return None
     if expires_int and expires_int < time.time():
         return None
-    return WebUser(user_id=owner_id_int, name="Owner", source="owner", owner=True)
+    if expected_epoch is not None and token_epoch != int(expected_epoch):
+        return None
+    return WebUser(
+        user_id=owner_id_int,
+        name="Owner",
+        source="owner",
+        owner=True,
+        epoch=token_epoch,
+    )
 
 
 def resolve_user(
@@ -159,9 +194,12 @@ def resolve_user(
     bot_token: str,
     allow_anon: bool = False,
     owner_ids: set[int] | frozenset[int] | None = None,
+    owner_epoch: int | None = None,
 ) -> WebUser:
     """Pick the best available identity, preferring signed chat tokens."""
-    owner = verify_owner_token(token, bot_token) if token else None
+    owner = (
+        verify_owner_token(token, bot_token, expected_epoch=owner_epoch) if token else None
+    )
     if owner is not None and (not owner_ids or owner.user_id in owner_ids):
         return owner
 
@@ -188,6 +226,7 @@ __all__ = [
     "OWNER_TOKEN_TTL",
     "WebUser",
     "make_owner_token",
+    "owner_token_epoch",
     "make_token",
     "resolve_user",
     "verify_init_data",

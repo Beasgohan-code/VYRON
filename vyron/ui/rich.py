@@ -288,6 +288,59 @@ async def send(
             return None
 
 
+async def send_photo(
+    client,
+    chat_id: int | str,
+    photo: Any,
+    markup: str,
+    *,
+    markup_keyboard=None,
+    reply_markup=None,
+    reply_to: int | None = None,
+    silent: bool = False,
+    protect: bool = False,
+    thread_id: int | None = None,
+):
+    """Send a picture with a rich *caption*, degrading gracefully.
+
+    Telegram captions are plain HTML — no headings, tables or buttons — so the
+    markup is flattened with `to_html` and the keyword rows are handed over as a
+    real inline keyboard.  If the photo cannot be uploaded at all (bad file, no
+    network) we fall back to the ordinary card so the user still gets `/start`.
+    """
+    if not markup:
+        return None
+    keyboard = markup_keyboard or reply_markup
+    caption = to_html(markup)
+    if len(caption) > 1024:  # Telegram's caption ceiling
+        caption = caption[:1010].rsplit("\n", 1)[0] + "…"
+    if photo:
+        try:
+            return await client.send_photo(
+                chat_id=chat_id,
+                photo=photo,
+                caption=caption,
+                parse_mode=ParseMode.HTML,
+                reply_markup=keyboard,
+                reply_parameters=ReplyParameters(message_id=reply_to) if reply_to else None,
+                message_thread_id=thread_id,
+                disable_notification=silent,
+                protect_content=protect,
+            )
+        except Exception as exc:
+            logger.debug("photo send failed (%s) — falling back to a text card", exc)
+    return await send(
+        client,
+        chat_id,
+        markup,
+        reply_markup=keyboard,
+        reply_to=reply_to,
+        silent=silent,
+        protect=protect,
+        thread_id=thread_id,
+    )
+
+
 async def edit(
     client,
     chat_id: int | str,

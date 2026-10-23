@@ -82,6 +82,141 @@ def register(client: Client) -> None:
             await verify_captcha(client, cq, chat.id, arg)
             return
 
+        # ── owner credentials (DM only) ────────────────────────────────────
+        if action == "token":
+            from vyron.core import tokens
+            from vyron.core.musicapi import get_music_api
+
+            actor = cq.from_user.id if cq.from_user else 0
+            if not is_owner(actor) or not is_private_chat(chat):
+                await cq.answer("Owner only, in a private chat.", show_alert=True)
+                return
+            if not settings.bot_token:
+                await cq.answer("BOT_TOKEN is not set.", show_alert=True)
+                return
+
+            if arg == "revoke":
+                # first tap asks, second tap does it — never a one-tap kill
+                await _show(
+                    client,
+                    cq,
+                    cards.confirm_card(
+                        "Revoke every owner token?",
+                        "Anywhere you pasted this token stops working immediately. "
+                        "The Mini App is unaffected.",
+                        confirm="v:token:confirm",
+                        cancel="v:token:cancel",
+                        danger=True,
+                    ),
+                )
+                await cq.answer()
+                return
+
+            if arg == "cancel":
+                await _show(
+                    client,
+                    cq,
+                    cards.notice_card(
+                        "Nothing changed",
+                        "Your token is still valid.",
+                        tone="info",
+                    ),
+                )
+                await cq.answer()
+                return
+
+            if arg == "confirm":
+                epoch = await tokens.revoke_all(actor)
+                await _show(client, cq, cards.token_revoked_card(epoch=epoch))
+                await cq.answer("Revoked")
+                return
+
+            if arg == "rotate":
+                from vyron.web.auth import OWNER_TOKEN_TTL, make_owner_token
+
+                epoch = await tokens.revoke_all(actor)
+                token = make_owner_token(settings.bot_token, actor, epoch=epoch)
+                roster = await get_music_api().keys(reveal=False)
+                await _show(
+                    client,
+                    cq,
+                    cards.token_card(
+                        token,
+                        base=settings.webapp_url or "",
+                        owner_id=actor,
+                        ttl_days=OWNER_TOKEN_TTL // 86400,
+                        epoch=epoch,
+                        active_keys=len([key for key in roster if key.get("active")]),
+                    ),
+                )
+                await cq.answer("New token issued — the old one is dead")
+                return
+
+            if arg == "keys":
+                roster = await get_music_api().keys(reveal=False)
+                await _show(
+                    client,
+                    cq,
+                    cards.api_keys_card(roster, base=settings.webapp_url or ""),
+                )
+                await cq.answer()
+                return
+
+            await cq.answer()
+            return
+
+        # ── API keys: revoke / rotate from the card ────────────────────────
+        if action == "key":
+            from vyron.core.musicapi import find_key, get_music_api
+
+            actor = cq.from_user.id if cq.from_user else 0
+            if not is_owner(actor):
+                await cq.answer("Owner only.", show_alert=True)
+                return
+            identifier = ":".join(parts[3:])
+            if not identifier:
+                await cq.answer("Which key?", show_alert=True)
+                return
+            api = get_music_api()
+            roster = await api.keys(reveal=False)
+            target = find_key(roster, identifier)
+            if target is None:
+                await cq.answer("That key is gone already.", show_alert=True)
+                return
+
+            if arg == "revoke":
+                done = await api.revoke(None, str(target.get("id") or identifier), force=True)
+                roster = await api.keys(reveal=False)
+                await _show(client, cq, cards.api_keys_card(roster, base=settings.webapp_url or ""))
+                await cq.answer("Key revoked" if done else "Could not revoke")
+                return
+
+            if arg == "rotate":
+                record, error = await api.rotate(actor, str(target.get("id") or identifier))
+                roster = await api.keys(reveal=False)
+                if record is None:
+                    await cq.answer(error or "Could not rotate", show_alert=True)
+                    return
+                await _show(
+                    client,
+                    cq,
+                    cards.api_key_card(
+                        key=str(record.get("key") or ""),
+                        label=str(record.get("label") or "key"),
+                        base=settings.webapp_url or "",
+                        rate=int(record.get("rate_limit") or settings.music_api_rate),
+                        scopes=record.get("scopes"),
+                        expires_at=record.get("expires_at"),
+                        owner_id=record.get("owner_id"),
+                        key_id=str(record.get("id") or ""),
+                    ),
+                )
+                await cq.answer("Rotated — copy the new key")
+                return
+
+            await cq.answer()
+            return
+
         # ── group manager panel (admins only) ──────────────────────────────
         if action == "grp":
             from vyron.core import chatcfg

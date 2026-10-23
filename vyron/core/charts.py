@@ -200,7 +200,7 @@ class Charts:
                 tracks=tracks,
                 kind="mix",
             )
-            for key, tracks in zip(keys, mix_tracks)
+            for key, tracks in zip(keys, mix_tracks, strict=False)
         ]
         cover = next((t.thumbnail for t in trending_tracks if t.thumbnail), "")
         return {

@@ -3,7 +3,9 @@
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 
+import logging
 import time
+from pathlib import Path
 
 from pyrogram import Client, filters
 from pyrogram.types import Message
@@ -11,56 +13,31 @@ from pyrogram.types import Message
 from vyron.config import settings
 from vyron.runtime import runtime
 from vyron.ui import cards, keyboards, rich
-from vyron.ui.theme import E, emoji_enabled
+from vyron.ui.theme import E
 from vyron.utils.helpers import is_private_chat
+
+logger = logging.getLogger(__name__)
+
+# The picture `/start` sends. Once Telegram has it, the returned ``file_id`` is
+# cached in the shared meta store so later starts upload nothing at all.
+START_PHOTO = Path(__file__).resolve().parents[2] / "assets" / "start.jpg"
+_PHOTO_META = "start_photo_file_id"
+
+
+async def _photo_source() -> tuple[object, bool]:
+    """(source, cached) — a cached Telegram ``file_id`` or the shipped artwork."""
+    if runtime.storage is not None:
+        try:
+            stored = str(await runtime.storage.get_meta(_PHOTO_META, "") or "")
+        except Exception:  # pragma: no cover - storage hiccups must not break /start
+            stored = ""
+        if stored:
+            return stored, True
+    return (str(START_PHOTO) if START_PHOTO.is_file() else None), False
 
 
 def register(client: Client) -> None:
-    @client.on_message(filters.command(["start", "begin"]))
-    async def _start(_: Client, message: Message) -> None:
-        stats = await runtime.storage.counters() if runtime.storage else {}
-        name = (message.from_user.first_name if message.from_user else "there") or "there"
-        markup = cards.start_card(
-            name,
-            {"chats": stats.get("chats", 0), "tracks": stats.get("tracks", 0)},
-            streaming=runtime.streaming_ready,
-        )
-        # No credential and no URL in the card: the Mini App identifies the
-        # owner from Telegram's own initData, and its button is DM-only.
-        await rich.send(
-            message._client,
-            message.chat.id,
-            markup,
-            markup_keyboard=keyboards.start_panel(player=is_private_chat(message.chat)),
-            reply_to=message.id,
-        )
-        if runtime.storage:
-            await runtime.storage.bump("starts")
-            if message.chat.type.name in {"GROUP", "SUPERGROUP"}:
-                await runtime.storage.bump("chats")
-
-    @client.on_message(filters.command("help"))
-    async def _help(_: Client, message: Message) -> None:
-        await rich.send(
-            message._client,
-            message.chat.id,
-            cards.help_card("main"),
-            markup_keyboard=keyboards.help_nav("main"),
-            reply_to=message.id,
-        )
-
-    @client.on_message(filters.command(["about", "source", "repo"]))
-    async def _about(_: Client, message: Message) -> None:
-        await rich.send(
-            message._client,
-            message.chat.id,
-            cards.about_card(),
-            markup_keyboard=keyboards.back_close("v:help:main"),
-            reply_to=message.id,
-        )
-
-    @client.on_message(filters.command(["app", "player", "webapp", "web"]))
-    async def _webapp(_: Client, message: Message) -> None:
+    async def _send_app(message: Message) -> None:
         """Open the Mini App *inside Telegram* — never as a browser link."""
         if not keyboards.app_url():
             await rich.send(
@@ -92,6 +69,70 @@ def register(client: Client) -> None:
                 reply_to=message.id,
             )
 
+    @client.on_message(filters.command(["start", "begin"]))
+    async def _start(_: Client, message: Message) -> None:
+        # t.me/<bot>?start=app deep-links straight into the player, so a shared
+        # link lands people where the music actually is.
+        payload = (message.text or "").split(maxsplit=1)
+        if len(payload) > 1 and payload[1].strip().lower() in {"app", "player", "miniapp", "music"}:
+            await _send_app(message)
+            return
+
+        stats = await runtime.storage.counters() if runtime.storage else {}
+        name = (message.from_user.first_name if message.from_user else "there") or "there"
+        markup = cards.start_card(
+            name,
+            {"chats": stats.get("chats", 0), "tracks": stats.get("tracks", 0)},
+            streaming=runtime.streaming_ready,
+        )
+        # No credential and no URL in the card: the Mini App identifies the
+        # owner from Telegram's own initData, and its button is DM-only.
+        photo, cached = await _photo_source()
+        sent = await rich.send_photo(
+            message._client,
+            message.chat.id,
+            photo,
+            markup,
+            markup_keyboard=keyboards.start_panel(player=is_private_chat(message.chat)),
+            reply_to=message.id,
+        )
+        # Remember the upload so the next /start is instant. A stale id would
+        # fail later; `_photo_source` re-reads it and `/start` is idempotent.
+        if not cached and sent is not None and getattr(sent, "photo", None):
+            if runtime.storage is not None:
+                try:
+                    await runtime.storage.set_meta(_PHOTO_META, sent.photo.file_id)
+                except Exception:  # pragma: no cover
+                    logger.debug("could not cache the /start photo id")
+        if runtime.storage:
+            await runtime.storage.bump("starts")
+            if message.chat.type.name in {"GROUP", "SUPERGROUP"}:
+                await runtime.storage.bump("chats")
+
+    @client.on_message(filters.command("help"))
+    async def _help(_: Client, message: Message) -> None:
+        await rich.send(
+            message._client,
+            message.chat.id,
+            cards.help_card("main"),
+            markup_keyboard=keyboards.help_nav("main"),
+            reply_to=message.id,
+        )
+
+    @client.on_message(filters.command(["about", "source", "repo"]))
+    async def _about(_: Client, message: Message) -> None:
+        await rich.send(
+            message._client,
+            message.chat.id,
+            cards.about_card(),
+            markup_keyboard=keyboards.back_close("v:help:main"),
+            reply_to=message.id,
+        )
+
+    @client.on_message(filters.command(["app", "player", "webapp", "web"]))
+    async def _webapp(_: Client, message: Message) -> None:
+        await _send_app(message)
+
     @client.on_message(filters.command("ping"))
     async def _ping(_: Client, message: Message) -> None:
         started = time.perf_counter()
@@ -118,23 +159,6 @@ def register(client: Client) -> None:
             lines.append(f"{E('song')} <b>File</b> <code>{message.reply_to_message.audio.file_id[:42]}…</code>")
         await rich.send(message._client, chat.id, "\n".join(lines), reply_to=message.id)
 
-    @client.on_message(filters.command(["emojis", "emoji", "premium"]))
-    async def _emojis(_: Client, message: Message) -> None:
-        pack = settings.emoji_map
-        if not emoji_enabled() or not pack:
-            text = (
-                f"{E('info')} <b>Premium emoji: off</b>\n"
-                f"<blockquote>Add an <code>emoji.json</code> pack (name → id) or set "
-                f"<code>PREMIUM_EMOJI_FILE</code>. VYRON keeps working with plain glyphs "
-                f"until then.</blockquote>"
-            )
-        else:
-            sample = " ".join(E(name) for name in list(pack)[:12])
-            text = (
-                f"{E('spark')} <b>Premium emoji: on</b>\n"
-                f"<blockquote>{len(pack)} glyphs loaded</blockquote>\n{sample}"
-            )
-        await rich.send(message._client, message.chat.id, text, reply_to=message.id)
 
 
 __all__ = ["register"]

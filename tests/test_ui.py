@@ -92,3 +92,86 @@ def test_stats_and_settings_cards():
     assert "42" in stats and "mongo" in stats
     settings_markup = cards.settings_card({"volume": 60, "loop": "all", "autoplay": False}, "Chat")
     assert "60%" in settings_markup and "All" in settings_markup
+
+
+# ── /start picture + credential cards ──────────────────────────────────────
+class _PhotoBot:
+    """Minimal client that records photo sends and can be told to fail."""
+
+    def __init__(self, fail: bool = False):
+        self.calls: list[dict] = []
+        self.fail = fail
+
+    async def send_photo(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.fail:
+            raise RuntimeError("upload failed")
+
+        class _Sent:
+            id = 1
+
+            class photo:  # noqa: N801 - mimics pyrogram's attribute
+                file_id = "AgAC-start"
+
+        return _Sent()
+
+    async def send_message(self, **kwargs):
+        self.calls.append({"text": kwargs.get("text")})
+        return None
+
+
+def test_send_photo_flattens_the_caption_and_keeps_the_keyboard():
+    import asyncio
+
+    bot = _PhotoBot()
+    markup = "<h2>Title</h2><p>Body</p>"
+    sent = asyncio.run(
+        rich.send_photo(bot, 1, "assets/start.jpg", markup, reply_markup="KB")
+    )
+    assert sent is not None
+    call = bot.calls[0]
+    assert call["photo"] == "assets/start.jpg"
+    assert "<h2" not in call["caption"] and "Title" in call["caption"]
+    assert call["reply_markup"] == "KB"
+
+
+def test_send_photo_falls_back_to_a_text_card():
+    import asyncio
+
+    bot = _PhotoBot(fail=True)
+    asyncio.run(rich.send_photo(bot, 1, "missing.jpg", "<b>hi</b>"))
+    assert bot.calls[-1]["text"] == "<b>hi</b>"
+
+
+def test_start_card_carries_the_display_name():
+    from vyron.ui.theme import BRAND_DISPLAY
+
+    text = rich.to_plain_text(cards.start_card("Rahul", {"chats": 1, "tracks": 2}))
+    assert BRAND_DISPLAY in text
+
+
+def test_token_card_explains_revocation():
+    text = rich.to_plain_text(
+        cards.token_card("vown_abc.sig", base="https://v.test", owner_id=7, epoch=1)
+    )
+    assert "vown_abc.sig" in text
+    assert "Revoke all" in text and "Generation" in text
+    markup = cards.token_card("vown_abc.sig", base="https://v.test", owner_id=7)
+    assert 'data="v:token:revoke"' in markup
+    assert 'data="v:token:rotate"' in markup
+
+
+def test_api_keys_card_offers_a_revoke_button_per_key():
+    keys = [
+        {"id": "k1", "label": "phone", "masked": "vyrn_aa…", "active": True, "uses": 3},
+        {"id": "k2", "label": "old", "masked": "vyrn_bb…", "active": False, "uses": 1},
+    ]
+    markup = cards.api_keys_card(keys, base="https://v.test")
+    assert 'data="v:key:revoke:k1"' in markup
+    assert 'data="v:key:revoke:k2"' not in markup  # already dead
+
+
+def test_confirm_card_is_a_two_step_action():
+    markup = cards.confirm_card("Really?", "detail", confirm="v:x:yes", danger=True)
+    assert 'data="v:x:yes"' in markup
+    assert "Cancel" in rich.to_plain_text(markup)
