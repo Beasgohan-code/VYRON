@@ -40,6 +40,8 @@ async def _health(_request: web.Request) -> web.Response:
     return web.json_response(
         {
             "ok": True,
+            # `status` keeps Eldian-style monitors ({"status": "ok"}) happy too.
+            "status": "ok",
             "ready": ready,
             "streaming": runtime.streaming_ready,
             "uptime": round(runtime.uptime, 1),

@@ -242,3 +242,24 @@ def test_v1_reports_not_ready_while_the_bot_boots(tmp_path, monkeypatch):
         assert (await response.json())["ready"] is False
 
     _client(scenario)
+
+
+def test_health_stays_compatible_with_eldian_monitors():
+    async def scenario(client):
+        response = await client.get("/health")
+        payload = await response.json()
+        assert response.status == 200 and payload["status"] == "ok" and payload["ok"] is True
+
+    _client(scenario)
+
+
+def test_music_api_can_be_switched_off(monkeypatch):
+    from vyron.web import musicapi as web_api
+
+    monkeypatch.setattr(web_api, "settings", dataclasses.replace(settings, music_api=False))
+
+    async def scenario(client):
+        assert (await client.get("/v1/health")).status == 404
+        assert (await client.get("/v1/docs")).status == 404
+
+    _client(scenario)
