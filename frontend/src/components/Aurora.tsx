@@ -109,7 +109,7 @@ export function Aurora({ className = "", tone = "violet" }: { className?: string
             col = mix(col, uC, smoothstep(0.55, 1.0, fbm(p * 0.75 - t * 0.5)) * 0.6);
 
             float d = distance(uv, vec2(0.52, 0.44));
-            float falloff = smoothstep(0.92, 0.12, d);
+            float falloff = 1.0 - smoothstep(0.12, 0.92, d);
             float alpha = falloff * (0.55 + 0.45 * band);
             col += (hash(uv * uRes.xy + uTime) - 0.5) * 0.02;
 

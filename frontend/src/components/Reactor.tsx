@@ -162,7 +162,6 @@ export function Reactor({ className = "", analyser, playing = false, size = "her
       /* ── drifting particles on a shell ────────────────────────────────── */
       const count = size === "dock" ? 260 : 900;
       const positions = new Float32Array(count * 3);
-      const seeds = new Float32Array(count);
       for (let i = 0; i < count; i += 1) {
         const radius = 1.9 + Math.random() * 2.4;
         const theta = Math.random() * Math.PI * 2;
@@ -170,7 +169,6 @@ export function Reactor({ className = "", analyser, playing = false, size = "her
         positions[i * 3] = radius * Math.sin(phi) * Math.cos(theta);
         positions[i * 3 + 1] = radius * Math.cos(phi) * 0.75;
         positions[i * 3 + 2] = radius * Math.sin(phi) * Math.sin(theta);
-        seeds[i] = Math.random() * Math.PI * 2;
       }
       const dustGeometry = new THREE.BufferGeometry();
       dustGeometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
@@ -261,16 +259,32 @@ export function Reactor({ className = "", analyser, playing = false, size = "her
       };
       tick();
 
+      let onScreen = true;
+      let io: IntersectionObserver | null = null;
+      if (typeof IntersectionObserver !== "undefined") {
+        io = new IntersectionObserver(
+          ([entry]) => {
+            onScreen = entry.isIntersecting;
+            running = onScreen && !document.hidden;
+            cancelAnimationFrame(frame);
+            if (running && !reduced) frame = requestAnimationFrame(tick);
+          },
+          { threshold: 0.01 }
+        );
+        io.observe(parent);
+      }
+
       const onVisibility = () => {
-        running = !document.hidden;
+        running = !document.hidden && onScreen;
         cancelAnimationFrame(frame);
-        if (running) frame = requestAnimationFrame(tick);
+        if (running && !reduced) frame = requestAnimationFrame(tick);
       };
       document.addEventListener("visibilitychange", onVisibility);
 
       cleanup = () => {
         cancelAnimationFrame(frame);
         observer?.disconnect();
+        io?.disconnect();
         document.removeEventListener("visibilitychange", onVisibility);
         coreGeometry.dispose();
         coreMaterial.dispose();

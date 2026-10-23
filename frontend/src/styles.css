@@ -1551,3 +1551,11 @@ input[type="range"]:disabled { opacity: .5; }
 .hero-art:hover::before { opacity: 1; }
 .pv-body { perspective: 1400px; }
 .pv-art { transform-style: preserve-3d; will-change: transform; }
+
+/* Aurora is additive by design; on the light theme that reads as grey haze,
+   so it tints instead of glowing. */
+html[data-theme="system"] .hero-aurora,
+html[data-theme="system"] .api-aurora,
+html[data-theme="system"] .pv-reactor {
+  mix-blend-mode: multiply; opacity: .38;
+}
