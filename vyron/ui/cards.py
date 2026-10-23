@@ -23,6 +23,7 @@ from vyron.ui.blocks import esc
 from vyron.ui.progress import (
     fmt_duration,
     human_size,
+    length_label,
     human_time,
     percentage,
     progress_bar,
@@ -516,7 +517,7 @@ def _meta_line(track: Track) -> str:
     bits: list[str] = []
     if track.uploader:
         bits.append(esc(truncate(track.uploader, 28)))
-    bits.append(f"<code>{fmt_duration(track.duration)}</code>")
+    bits.append(f"<code>{length_label(track)}</code>")
     if getattr(track, "views", 0):
         bits.append(f"{compact_number(track.views)} plays")
     return f" {DOT} ".join(bits)

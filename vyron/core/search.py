@@ -202,6 +202,7 @@ class YouTube:
             uploader=str(entry.get("uploader") or entry.get("channel") or ""),
             thumbnail=thumb,
             is_video=bool(entry.get("is_video", False)),
+            is_live=bool(entry.get("is_live")) or entry.get("live_status") == "is_live",
             source=str(entry.get("extractor_key") or entry.get("ie_key") or "youtube").lower(),
             requested_by=requester[0],
             requested_name=requester[1],

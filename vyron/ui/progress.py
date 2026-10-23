@@ -4,6 +4,8 @@
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 
+from typing import Any
+
 import math
 import re
 import time
@@ -42,6 +44,14 @@ def fmt_duration(seconds: int | float | None, *, pad_hours: bool = False) -> str
     if hours or pad_hours:
         return f"{hours}:{minutes:02d}:{secs:02d}"
     return f"{minutes}:{secs:02d}"
+
+
+def length_label(track: Any) -> str:
+    """How long *track* is, in human terms — live streams have no length."""
+    if getattr(track, "is_live", False):
+        return "live"
+    seconds = int(getattr(track, "duration", 0) or 0)
+    return fmt_duration(seconds) if seconds else "—"
 
 
 def progress_bar(

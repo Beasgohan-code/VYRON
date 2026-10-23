@@ -43,6 +43,8 @@ class Track:
     uploader: str = ""
     thumbnail: str | None = None
     is_video: bool = False
+    # A live stream has no length: the progress bar must not pretend otherwise
+    is_live: bool = False
     source: str = "youtube"
     requested_by: int = 0
     requested_name: str = ""
@@ -83,6 +85,7 @@ class Track:
             "uploader": self.uploader,
             "thumbnail": self.thumbnail,
             "is_video": self.is_video,
+            "is_live": self.is_live,
             "source": self.source,
             "requested_by": self.requested_by,
             "requested_name": self.requested_name,
@@ -100,6 +103,7 @@ class Track:
             uploader=str(data.get("uploader") or ""),
             thumbnail=data.get("thumbnail"),
             is_video=bool(data.get("is_video")),
+            is_live=bool(data.get("is_live")),
             source=str(data.get("source") or "youtube"),
             requested_by=int(data.get("requested_by") or 0),
             requested_name=str(data.get("requested_name") or ""),

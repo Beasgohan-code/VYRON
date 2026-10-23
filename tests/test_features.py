@@ -154,3 +154,18 @@ def test_the_settings_panel_reports_this_chat_not_the_defaults(monkeypatch):
     assert "Volume" in text and "45%" in text
     assert "Artwork" in text and "Custom" in text
     assert "\u0939\u093f\u0928\u094d\u0926\u0940" in text or "Hindi" in text
+
+
+def test_a_live_stream_is_not_described_as_zero_seconds():
+    """A live set has no length; `0:00` next to it reads like a broken track."""
+    from vyron.core.queue import Track
+    from vyron.ui.progress import length_label
+
+    assert length_label(Track(id="x", title="Radio", duration=0)) == "—"
+    assert length_label(Track(id="x", title="Radio", duration=0, is_live=True)) == "live"
+    assert length_label(Track(id="x", title="Song", duration=205)) == "3:25"
+
+    # the flag has to survive a queue save/restore, or a restart would turn a
+    # live stream back into a zero-length song
+    restored = Track.from_dict(Track(id="x", title="Radio", is_live=True).to_dict())
+    assert restored.is_live is True
