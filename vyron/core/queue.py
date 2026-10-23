@@ -134,6 +134,10 @@ class ChatState:
     last_activity: float = field(default_factory=time.monotonic)
     total_played: int = 0
 
+    # stream-end de-duplication (audio and video streams both report "ended")
+    ended_track: str = ""
+    ended_at: float = 0.0
+
     # ── maths ──────────────────────────────────────────────────────────────
     def elapsed(self, clock: float | None = None) -> float:
         if not self.playing or not self.current:
@@ -159,6 +163,8 @@ class ChatState:
         self.started_at = 0.0
         self.offset = 0.0
         self.paused_at = None
+        self.ended_track = ""
+        self.ended_at = 0.0
 
 
 class QueueManager:

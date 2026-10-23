@@ -71,3 +71,36 @@ def test_effects_panel_renders():
     panel_markup = panel(["bass"])
     assert "<tg-button" in panel_markup and "v:fx:bass" in panel_markup
     assert "v:fx:off" in panel_markup
+
+
+# ── stream-end de-duplication ───────────────────────────────────────────────
+def test_duplicate_stream_end_is_ignored_for_the_same_track():
+    from vyron.core.player import Player
+    from vyron.core.queue import ChatState, Track
+
+    state = ChatState(chat_id=-100)
+    state.current = Track(id="abc12345678", title="Believer", duration=200)
+    state.is_video = False
+
+    assert Player.duplicate_stream_end(state, 1000.0) is False
+    # both the audio and the video stream report "ended" for a video track;
+    # a repeat within the window must not skip the track that just started
+    assert Player.duplicate_stream_end(state, 1000.4) is True
+
+    state.current = Track(id="def12345678", title="Thunder", duration=180)
+    assert Player.duplicate_stream_end(state, 1001.0) is False
+
+    # a genuinely later end for the same track (after the window) is honoured
+    state.current = Track(id="abc12345678", title="Believer", duration=200)
+    assert Player.duplicate_stream_end(state, 1009.0) is False
+
+
+def test_reset_stream_clears_end_state():
+    from vyron.core.queue import ChatState, Track
+
+    state = ChatState(chat_id=-100)
+    state.current = Track(id="abc12345678", title="Believer")
+    state.ended_track = "abc12345678:a"
+    state.ended_at = 5.0
+    state.reset_stream()
+    assert state.ended_track == "" and state.ended_at == 0.0

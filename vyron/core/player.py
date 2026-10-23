@@ -432,6 +432,22 @@ class Player:
         async def _on_chat_update(client, update):  # noqa: ANN001
             await self.on_chat_update(client, update)
 
+    @staticmethod
+    def duplicate_stream_end(state: ChatState, now: float) -> bool:
+        """True when this stream-end is a repeat for the same track.
+
+        A video track reports both an audio and a video stream end; without this
+        the second event used to skip the track that had just started.
+        """
+        if not state.current:
+            return True
+        key = f"{state.current.id}:{'v' if state.is_video else 'a'}"
+        if state.ended_track == key and now - state.ended_at < 3.0:
+            return True
+        state.ended_track = key
+        state.ended_at = now
+        return False
+
     async def on_stream_end(self, _client, update) -> None:
         chat_id = int(getattr(update, "chat_id", 0) or 0)
         if not chat_id:
@@ -441,6 +457,9 @@ class Player:
             return
         stream_type = str(getattr(update, "stream_type", "") or "")
         if "VIDEO" in stream_type.upper() and not state.is_video:
+            return
+        if self.duplicate_stream_end(state, clock()):
+            logger.debug("ignoring duplicate stream end in %s", chat_id)
             return
         try:
             await self.skip(chat_id, natural=True)
