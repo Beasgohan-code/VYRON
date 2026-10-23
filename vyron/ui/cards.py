@@ -28,7 +28,10 @@ from vyron.ui.progress import (
     progress_bar,
     truncate,
 )
+from vyron.ui.progress import compact_number
 from vyron.ui.theme import BRAND, BULLET, DASH, E, SPARK, small_caps
+
+DOT = "·"
 
 # ── shared bits ─────────────────────────────────────────────────────────────
 def _requester(track: Track) -> str:
@@ -69,15 +72,13 @@ def start_card(
 ) -> str:
     served = stats.get("chats", 0)
     tracks = stats.get("tracks", 0)
-    features = B.kv(
+    features = B.bullets(
         [
-            (f"{E('bolt')} Instant play", "links, replies &amp; plain text"),
-            (f"{E('search')} Smart search", "top results, one tap to stream"),
-            (f"{E('download')} Downloads", "MP3 &amp; MP4 with covers"),
-            (f"{E('lyrics')} Lyrics", "synced via LRCLIB"),
-            (f"{E('globe')} Web player", "queue, lyrics &amp; cast from a browser"),
-            (f"{E('code')} Music API", "drop-in <code>/v1</code> API for other bots"),
-            (f"{E('shield')} Admin-first", "only admins steer playback"),
+            f"<b>Play anything</b> {DASH} a link, a reply or <code>/play believer</code>",
+            f"<b>Search that ranks</b> {DASH} the best match first, not the loudest",
+            f"<b>Downloads</b> {DASH} MP3 &amp; MP4 with covers and tags",
+            f"<b>Web player</b> {DASH} queue, lyrics and cast from a browser",
+            f"<b>Music API</b> {DASH} drop-in <code>/v1</code> for other bots",
         ]
     )
     guide = B.details(
@@ -90,7 +91,7 @@ def start_card(
             ],
             ordered=True,
         ),
-        open=True,
+        open=False,
     )
     open_app = ""
     if settings.webapp_ready:
@@ -125,27 +126,21 @@ def start_card(
             B.btn(f"{E('star')} Updates", url=settings.updates_channel, style="link"),
         )
     )
+    mode = (
+        f"{E('bolt')} <b>Streaming ready</b> {DASH} voice chats and files"
+        if streaming
+        else f"{E('info')} <b>File mode</b> {DASH} no assistant session yet, so "
+        "<code>/play</code> sends the track as a file"
+    )
     return (
-        B.heading(f"{E('brand')} {BRAND}", 2)
-        + B.note(
-            f"{SPARK} <b>High-fidelity voice-chat streaming</b> for Telegram — search, "
-            f"queue, download and control everything from one clean panel."
-        )
+        B.heading(f"{E('brand')} {BRAND} {DASH} {small_caps('music for groups')}", 2)
+        + B.note(f"Hi <b>{esc(truncate(name, 40))}</b> {SPARK} {mode}")
         + features
         + guide
-        + (
-            ""
-            if streaming
-            else B.note(
-                f"{E('info')} <b>File mode</b> — no assistant session yet, so "
-                "<code>/play</code> sends the track as a file. Add "
-                "<code>STRING_SESSION</code> to stream into voice chats."
-            )
-        )
         + B.divider()
         + buttons
         + B.footer(
-            f"Hi <b>{esc(truncate(name, 40))}</b> {BULLET} {served} chats {BULLET} {tracks} tracks played "
+            f"{E('chat')} {served} chats {BULLET} {E('note')} {tracks} tracks played "
             f"{BULLET} v{_version()}"
         )
     )
@@ -311,6 +306,13 @@ def now_playing_card(state: ChatState, track: Track | None = None) -> str:
 
     muted = f"{E('volume')} {state.volume}%"
     footer_bits = [muted, f"{E('loop')} {state.loop.label}", f"{E('queue')} {len(state.queue)}"]
+    upcoming = state.queue[0] if state.queue else None
+    next_line = (
+        f"\n{E('skip')} <i>up next</i> {esc(truncate(upcoming.title, 40))}"
+        f" {DOT} {fmt_duration(upcoming.duration)}"
+        if upcoming
+        else ""
+    )
     if extras:
         footer_bits.append(f"{E('spark')} {', '.join(extras)}")
 
@@ -319,7 +321,7 @@ def now_playing_card(state: ChatState, track: Track | None = None) -> str:
         f"<blockquote>{E('note')} <b>{_watch_link(track)}</b>\n"
         f"{E('microphone')} {esc(truncate(track.uploader, 34) or 'unknown artist')}  {BULLET}  "
         f"{E('clock')} {fmt_duration(track.duration)}  {BULLET}  {_source_badge(track)}{requested}</blockquote>\n\n"
-        f"{progress_block(state, track)}\n\n"
+        f"{progress_block(state, track)}{next_line}\n\n"
         f"<code>{'  '.join(footer_bits)}</code>  {BULLET}  <i>{quality} audio</i>"
     )
 
@@ -402,37 +404,73 @@ def queue_card(state: ChatState, page: int = 0, per_page: int = 8) -> tuple[str,
 
 
 # ── search & downloads ──────────────────────────────────────────────────────
+def _meta_line(track: Track) -> str:
+    """`channel · 3:45 · 2.4M plays` — only the parts we actually know."""
+    bits: list[str] = []
+    if track.uploader:
+        bits.append(esc(truncate(track.uploader, 28)))
+    bits.append(f"<code>{fmt_duration(track.duration)}</code>")
+    if getattr(track, "views", 0):
+        bits.append(f"{compact_number(track.views)} plays")
+    return f" {DOT} ".join(bits)
+
+
 def search_card(query: str, tracks: Iterable[Track], *, mode: str = "play") -> str:
+    """Search results as a ranked list, not a wall of buttons.
+
+    The top hit is marked and carries the artwork; every row keeps its channel,
+    length and reach so the choice is possible without opening six links.
+    """
     tracks = list(tracks)
-    rows = [
-        (
-            f"<b>{index + 1}</b>",
-            esc(truncate(track.title, 44)),
-            fmt_duration(track.duration),
+    if not tracks:
+        return (
+            f"{E('search')} <b>No results</b>\n"
+            f"<blockquote>Nothing came back for <b>{esc(truncate(query, 48))}</b>. "
+            f"Try the artist name, or paste a link.</blockquote>"
         )
-        for index, track in enumerate(tracks)
-    ]
-    body = B.table(["#", "Result", "Time"], rows)
+
+    items: list[str] = []
+    for index, track in enumerate(tracks):
+        title = _watch_link(track)
+        if index == 0:
+            title = f"<mark>{title}</mark>"
+        items.append(f"{title}\n<i>{_meta_line(track)}</i>")
+    body = B.bullets(items, ordered=True)
+
+    art = B.image(tracks[0].thumbnail)
     buttons = B.grid(
         [
             B.btn(
-                f"{index + 1}. {truncate(track.title, 18)}",
+                f"{index + 1} {DASH} {fmt_duration(track.duration)}",
                 data=f"v:{'pick' if mode == 'play' else 'dl'}:{index}",
                 style="primary" if index == 0 else None,
             )
-            for index, track in enumerate(tracks)
+            for index, track in enumerate(tracks[:6])
         ],
-        columns=2,
+        columns=3,
+    )
+    top = tracks[0]
+    actions = B.row(
+        B.btn(
+            f"{E('play')} {'Play' if mode == 'play' else 'Download'} top result",
+            data=f"v:{'pick' if mode == 'play' else 'dl'}:0",
+            style="success",
+        ),
+        B.btn(f"{E('globe')} Open on YouTube", url=top.watch_url, style="link")
+        if top.watch_url
+        else "",
     )
     return (
         B.heading(f"{E('search')} {small_caps('search')} {DASH} {esc(truncate(query, 40))}", 2)
+        + art
         + body
         + B.divider()
         + buttons
+        + actions
         + B.row(B.btn(f"{E('close')} Cancel", data="v:close", style="danger"))
         + B.footer(
-            f"{E('info')} Tap a result to {'stream it' if mode == 'play' else 'download it'} "
-            f"{BULLET} {len(tracks)} found"
+            f"{E('info')} Ranked by match, length and reach {BULLET} "
+            f"tap a number below to {'stream' if mode == 'play' else 'download'}"
         )
     )
 
@@ -825,7 +863,7 @@ def api_key_card(
         + B.divider()
         + B.row(
             B.btn(f"{E('code')} Docs", url=f"{root}/v1/docs" if root else settings.git_repo, style="primary"),
-            B.btn(f"{E('queue')} List keys", data="v:noop", style="link"),
+            B.btn(f"{E('close')} Close", data="v:close", style="link"),
         )
         + B.footer(
             f"{E('info')} revoke with <code>/revoke {key[:12]}…</code> {BULLET} "
@@ -861,7 +899,7 @@ def api_keys_card(keys: list[dict], base: str) -> str:
         )
         + B.row(
             B.btn(f"{E('code')} Docs", url=f"{(base or '').rstrip('/')}/v1/docs", style="primary"),
-            B.btn(f"{E('spark')} New key", data="v:noop", style="link"),
+            B.btn(f"{E('close')} Close", data="v:close", style="link"),
         )
         + B.footer(f"revoke <code>/revoke &lt;id|prefix&gt;</code> {BULLET} rotate <code>/rotatekey</code> {BULLET} {BRAND}")
     )

@@ -34,6 +34,7 @@ from aiohttp import web
 
 from vyron.config import settings
 from vyron.core.queue import Track
+from vyron.core.search import MediaError, StreamInfo
 from vyron.runtime import runtime
 from vyron.web.auth import WebUser, resolve_user
 
@@ -177,52 +178,88 @@ def _identity(request: web.Request) -> WebUser:
     )
 
 
-def _file_response(path: Path, request: web.Request, *, mime: str = "audio/mpeg") -> web.StreamResponse:
+_MIME_BY_SUFFIX = {
+    ".mp3": "audio/mpeg",
+    ".m4a": "audio/mp4",
+    ".mp4": "video/mp4",
+    ".webm": "audio/webm",
+    ".opus": "audio/ogg",
+    ".ogg": "audio/ogg",
+    ".wav": "audio/wav",
+}
+
+
+class UpstreamExpired(RuntimeError):
+    """The signed media URL has expired (YouTube answers 403/410)."""
+
+
+def _file_response(path: Path, request: web.Request, *, mime: str = "") -> web.StreamResponse:
     response = web.FileResponse(path, headers={"Accept-Ranges": "bytes"})
-    response.content_type = mime
+    response.content_type = mime or _MIME_BY_SUFFIX.get(path.suffix.lower(), "audio/mpeg")
     response.headers["Cache-Control"] = "private, max-age=3600"
     response.headers["Content-Disposition"] = f"inline; filename={quote(path.name)}"
     return response
 
 
-async def _proxy_range(
-    request: web.Request, url: str, *, mime: str
-) -> web.StreamResponse:
-    """Stream *url* to the client, forwarding Range so the browser can seek."""
-    headers = {"User-Agent": "Mozilla/5.0 (compatible; VYRON/1.0)"}
+def _proxy_headers(request: web.Request, info: StreamInfo) -> dict[str, str]:
+    headers = dict(info.headers) or {"User-Agent": "Mozilla/5.0 (compatible; VYRON/1.0)"}
     range_header = request.headers.get("Range")
     if range_header:
         headers["Range"] = range_header
+    return headers
 
-    timeout = aiohttp.ClientTimeout(total=None, sock_connect=15, sock_read=45)
+
+async def _proxy_range(
+    request: web.Request, info: StreamInfo
+) -> web.StreamResponse:
+    """Stream the signed media URL, forwarding Range so the browser can seek.
+
+    The headers come from yt-dlp's own resolve: googlevideo binds a URL to the
+    client fingerprint that requested it, so a fresh User-Agent is a 403.
+    """
+    headers = _proxy_headers(request, info)
+    timeout = aiohttp.ClientTimeout(total=None, sock_connect=15, sock_read=60)
     session = aiohttp.ClientSession(timeout=timeout, headers=headers)
     try:
-        upstream = await session.get(url)
-    except Exception as exc:
-        await session.close()
-        logger.warning("audio proxy failed: %s", exc)
-        raise web.HTTPBadGateway(text="could not reach the audio source") from exc
+        try:
+            upstream = await session.get(info.url)
+        except Exception as exc:
+            logger.warning("audio proxy failed: %s", exc)
+            raise web.HTTPBadGateway(text="could not reach the audio source") from exc
 
-    try:
-        status = 206 if upstream.status == 206 else 200
-        response = web.StreamResponse(
-            status=status,
-            headers={
-                "Content-Type": upstream.headers.get("Content-Type", mime),
-                "Accept-Ranges": "bytes",
-                "Cache-Control": "private, max-age=900",
-            },
-        )
-        for header in ("Content-Range", "Content-Length"):
-            if header in upstream.headers:
-                response.headers[header] = upstream.headers[header]
-        await response.prepare(request)
-        async for chunk in upstream.content.iter_chunked(_CHUNK):
-            await response.write(chunk)
-        await response.write_eof()
-        return response
+        try:
+            if upstream.status in (403, 410):
+                raise UpstreamExpired(f"upstream returned {upstream.status}")
+            if upstream.status == 416:
+                response = web.Response(status=416, headers={"Content-Range": upstream.headers.get("Content-Range", "bytes */*")})
+                return response
+            if upstream.status >= 400:
+                raise web.HTTPBadGateway(text=f"audio source answered {upstream.status}")
+
+            status = 206 if upstream.status == 206 else 200
+            response = web.StreamResponse(
+                status=status,
+                headers={
+                    "Content-Type": upstream.headers.get("Content-Type", info.mime),
+                    "Accept-Ranges": "bytes",
+                    "Cache-Control": "private, max-age=900",
+                },
+            )
+            for header in ("Content-Range", "Content-Length"):
+                if header in upstream.headers:
+                    response.headers[header] = upstream.headers[header]
+            await response.prepare(request)
+            try:
+                async for chunk in upstream.content.iter_chunked(_CHUNK):
+                    await response.write(chunk)
+            except (ConnectionResetError, asyncio.CancelledError):
+                # the browser seeked away or closed the tab — not an error
+                raise
+            await response.write_eof()
+            return response
+        finally:
+            upstream.release()
     finally:
-        upstream.release()
         await session.close()
 
 
@@ -255,17 +292,61 @@ async def stream(request: web.Request) -> web.StreamResponse:
             return _file_response(cached, request)
 
     if runtime.youtube is None:
-        return web.json_response({"ok": False, "error": "streaming not configured"}, status=503)
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "not_ready",
+                "hint": "install yt-dlp (it is in requirements.txt) and restart",
+            },
+            status=503,
+        )
 
     try:
-        url = await runtime.youtube.stream_url(track)
-    except Exception as exc:
+        info = await runtime.youtube.stream_info(track)
+    except MediaError as exc:
         logger.info("could not resolve stream for %s: %s", media_id, exc)
-        # last resort: synthesise something so the UI never dead-ends
-        path = await asyncio.to_thread(demo_audio, media_id)
-        return _file_response(path, request, mime="audio/wav")
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "upstream_failed",
+                "reason": str(exc)[:180],
+                "hint": "the bot could not resolve this track — try another result",
+            },
+            status=502,
+        )
 
-    return await _proxy_range(request, url, mime="audio/mp4")
+    if request.method == "HEAD":
+        return web.Response(
+            status=200,
+            headers={
+                "Content-Type": info.mime,
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "private, max-age=60",
+            },
+        )
+
+    # Signed URLs expire; one silent re-resolve fixes the common 403.
+    for attempt in range(2):
+        try:
+            return await _proxy_range(request, info)
+        except UpstreamExpired as exc:
+            logger.info("stream URL expired for %s (%s)", media_id, exc)
+            if attempt:
+                break
+            try:
+                info = await runtime.youtube.stream_info(track, refresh=True)
+            except MediaError:
+                break
+
+    return web.json_response(
+        {
+            "ok": False,
+            "error": "upstream_failed",
+            "reason": "the audio source rejected the stream",
+            "hint": "tap play again, or use /song to get the file",
+        },
+        status=502,
+    )
 
 
 async def audio_info(request: web.Request) -> web.Response:
@@ -281,26 +362,30 @@ async def audio_info(request: web.Request) -> web.Response:
                 "duration": 24,
                 "mime": "audio/wav",
                 "demo": True,
+                "playable": True,
                 "stream": f"/api/stream/{media_id}",
             }
         )
     if track is None:
         return web.json_response({"ok": False, "error": "unknown track"}, status=404)
     cached = runtime.downloader.cached(track) if runtime.downloader else None
-    return web.json_response(
-        {
-            "ok": True,
-            "id": track.id,
-            "title": track.title,
-            "uploader": track.uploader,
-            "duration": track.duration,
-            "thumbnail": track.thumbnail,
-            "source": track.source,
-            "cached": bool(cached),
-            "mime": "audio/mpeg" if cached else "audio/mp4",
-            "stream": f"/api/stream/{track.id}",
-        }
-    )
+    ready = runtime.youtube is not None
+    payload = {
+        "ok": True,
+        "id": track.id,
+        "title": track.title,
+        "uploader": track.uploader,
+        "duration": track.duration,
+        "thumbnail": track.thumbnail,
+        "source": track.source,
+        "cached": bool(cached),
+        "playable": bool(cached) or ready,
+        "mime": "audio/mpeg" if cached else "audio/mp4",
+        "stream": f"/api/stream/{track.id}",
+    }
+    if not payload["playable"]:
+        payload["reason"] = "streaming is not configured on this deployment"
+    return web.json_response(payload)
 
 
 def register(app: web.Application) -> None:

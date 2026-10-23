@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   ChevronDown,
   Heart,
   ListMusic,
@@ -172,6 +173,26 @@ export function PlayerView() {
               <Equalizer playing={audio.playing} bars={4} /> {track.uploader || "unknown artist"}
             </p>
           </div>
+
+          {audio.error && (
+            <div className="pv-alert" role="status">
+              <AlertTriangle size={15} />
+              <span>{audio.error}</span>
+              <button
+                type="button"
+                className="pill-btn accent"
+                onClick={() => void audio.play(track, audio.queue.length ? audio.queue : [track])}
+              >
+                <Play size={13} fill="currentColor" /> Retry
+              </button>
+            </div>
+          )}
+
+          {audio.loading && !audio.error && (
+            <div className="pv-buffering" role="status" aria-live="polite">
+              <span className="pv-buffering-dot" /> buffering audio…
+            </div>
+          )}
 
           <div className="pv-seek">
             <input

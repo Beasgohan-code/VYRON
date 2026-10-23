@@ -15,7 +15,7 @@ from vyron.runtime import runtime
 from vyron.ui import cards, keyboards, rich
 from vyron.ui.progress import truncate
 from vyron.ui.theme import E
-from vyron.utils.helpers import is_chat_admin, is_owner
+from vyron.utils.helpers import is_chat_admin, is_owner, is_private_chat
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +136,12 @@ def register(client: Client) -> None:
                 await cq.answer("Set WEBAPP_URL first.", show_alert=True)
                 return
             owner_token = ""
-            if cq.from_user and cq.from_user.id in settings.owners and settings.bot_token:
+            if (
+                cq.from_user
+                and cq.from_user.id in settings.owners
+                and settings.bot_token
+                and is_private_chat(chat)
+            ):
                 from vyron.web.auth import make_owner_token
 
                 owner_token = make_owner_token(settings.bot_token, cq.from_user.id)

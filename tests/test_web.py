@@ -372,6 +372,95 @@ def test_stream_rejects_unknown_tracks(tmp_path, monkeypatch):
     asyncio.run(scenario())
 
 
+def test_stream_head_probe_reports_the_real_mime(monkeypatch, tmp_path):
+    """HEAD must answer cheaply, with the format's own mime — not audio/mpeg."""
+    from vyron.core.queue import Track
+    from vyron.core.search import StreamInfo
+    from vyron.runtime import runtime
+    from vyron.web import stream as audio
+
+    monkeypatch.setattr(audio, "settings", dataclasses.replace(audio.settings, webapp_allow_anon=True))
+    audio.remember(Track(id="abcdefghijk", title="WebM song", duration=200))
+
+    class FakeYouTube:
+        def __init__(self):
+            self.calls = 0
+
+        async def stream_info(self, track, *, video=False, refresh=False):
+            self.calls += 1
+            return StreamInfo(url="https://media.invalid/x", mime="audio/webm", ext="webm")
+
+    fake = FakeYouTube()
+    monkeypatch.setattr(runtime, "youtube", fake, raising=False)
+
+    async def scenario():
+        app = build_app(with_webapp=False)
+        audio.register(app)
+        async with TestClient(TestServer(app)) as client:
+            response = await client.head("/api/stream/abcdefghijk")
+            assert response.status == 200
+            assert response.headers["Content-Type"].startswith("audio/webm")
+            assert response.headers["Accept-Ranges"] == "bytes"
+            assert await response.read() == b""
+        assert fake.calls == 1
+
+    asyncio.run(scenario())
+
+
+def test_stream_reports_expired_source_instead_of_playing_a_fake_tone(monkeypatch):
+    """A browser must get a real error, not 24 seconds of synth beeps."""
+    from vyron.core.queue import Track
+    from vyron.core.search import StreamInfo
+    from vyron.runtime import runtime
+    from vyron.web import stream as audio
+
+    monkeypatch.setattr(audio, "settings", dataclasses.replace(audio.settings, webapp_allow_anon=True))
+    audio.remember(Track(id="zzzzzzzzzzz", title="Gone", duration=200))
+
+    class ExpiringYouTube:
+        async def stream_info(self, track, *, video=False, refresh=False):
+            return StreamInfo(url="https://media.invalid/gone", mime="audio/mp4")
+
+    async def fake_proxy(request, info):
+        raise audio.UpstreamExpired("403")
+
+    monkeypatch.setattr(runtime, "youtube", ExpiringYouTube(), raising=False)
+    monkeypatch.setattr(audio, "_proxy_range", fake_proxy)
+
+    async def scenario():
+        app = build_app(with_webapp=False)
+        audio.register(app)
+        async with TestClient(TestServer(app)) as client:
+            response = await client.get("/api/stream/zzzzzzzzzzz")
+            assert response.status == 502
+            payload = await response.json()
+            assert payload["error"] == "upstream_failed"
+            assert "fake" not in payload and payload["hint"]
+
+    asyncio.run(scenario())
+
+
+def test_audio_info_says_when_streaming_is_not_configured(monkeypatch, tmp_path):
+    from vyron.core.queue import Track
+    from vyron.runtime import runtime
+    from vyron.web import stream as audio
+
+    monkeypatch.setattr(audio, "settings", dataclasses.replace(audio.settings, webapp_allow_anon=True))
+    monkeypatch.setattr(runtime, "youtube", None, raising=False)
+    monkeypatch.setattr(runtime, "downloader", None, raising=False)
+    audio.remember(Track(id="yyyyyyyyyyy", title="Nothing", duration=100))
+
+    async def scenario():
+        app = build_app(with_webapp=False)
+        audio.register(app)
+        async with TestClient(TestServer(app)) as client:
+            payload = await (await client.get("/api/audio/yyyyyyyyyyy")).json()
+            assert payload["playable"] is False
+            assert "reason" in payload
+
+    asyncio.run(scenario())
+
+
 # ── owner access ────────────────────────────────────────────────────────────
 def test_owner_token_roundtrip_and_expiry():
     token = auth.make_owner_token(TOKEN, 424242)

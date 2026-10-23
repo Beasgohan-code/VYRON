@@ -160,6 +160,7 @@ def _track_json(track: Track | None, *, index: int | None = None) -> dict | None
         "thumbnail": track.thumbnail,
         "source": track.source,
         "requested_by": track.requested_name,
+        "views": track.views,
         "video": track.is_video,
         "url": track.watch_url,
         "query": f"{track.title} {track.uploader}".strip(),

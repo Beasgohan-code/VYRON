@@ -143,6 +143,9 @@ def to_html(markup: str) -> str:
     text = re.sub(r"<footer[^>]*>(.*?)</footer>", r"\n<i>\1</i>", text, flags=re.I | re.S)
     text = re.sub(r"<summary>(.*?)</summary>", r"<b>\1</b>\n", text, flags=re.I | re.S)
     text = re.sub(r"<mark>(.*?)</mark>", r"<b>\1</b>", text, flags=re.I | re.S)
+    # Rich cards draw their own coloured buttons; the classic lane gets a real
+    # ``reply_markup`` keyboard instead, so callback buttons are dropped rather
+    # than printed twice as bold text. Link buttons survive as inline links.
     text = re.sub(r"<tg-button-row[^>]*>", "", text, flags=re.I)
     text = re.sub(
         r'<tg-button[^>]*\burl="([^"]*)"[^>]*>(.*?)</tg-button>',
@@ -150,8 +153,9 @@ def to_html(markup: str) -> str:
         text,
         flags=re.I | re.S,
     )
-    text = re.sub(r"<tg-button(?:\s[^>]*)?>(.*?)</tg-button>", r"<b>\1</b>", text, flags=re.I | re.S)
-    text = re.sub(r"<button[^>]*>(.*?)</button>", r"<b>\1</b>", text, flags=re.I | re.S)
+    text = re.sub(r"<tg-button(?:\s[^>]*)?>.*?</tg-button>", "", text, flags=re.I | re.S)
+    text = re.sub(r"<tg-button[^>]*/?>", "", text, flags=re.I)
+    text = re.sub(r"<button[^>]*>.*?</button>", "", text, flags=re.I | re.S)
 
     # block-level decorations → readable text equivalents
     text = re.sub(r"<hr\s*/?>", "\n──────────\n", text, flags=re.I)

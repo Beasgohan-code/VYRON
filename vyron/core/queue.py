@@ -48,6 +48,7 @@ class Track:
     requested_name: str = ""
     stream_url: str | None = None
     filesize: int = 0
+    views: int = 0
 
     # ── display ────────────────────────────────────────────────────────────
     @property
@@ -86,6 +87,7 @@ class Track:
             "requested_by": self.requested_by,
             "requested_name": self.requested_name,
             "filesize": self.filesize,
+            "views": self.views,
         }
 
     @classmethod
@@ -102,6 +104,7 @@ class Track:
             requested_by=int(data.get("requested_by") or 0),
             requested_name=str(data.get("requested_name") or ""),
             filesize=int(data.get("filesize") or 0),
+            views=int(data.get("views") or 0),
         )
 
 

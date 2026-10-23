@@ -13,7 +13,7 @@ from vyron.config import settings
 from vyron.core.musicapi import get_music_api
 from vyron.ui import cards, rich
 from vyron.ui.theme import E, reload_pack
-from vyron.utils.helpers import command_args
+from vyron.utils.helpers import command_args, is_private_chat
 from vyron.utils.filters import owner
 
 
@@ -36,7 +36,11 @@ def register(client: Client) -> None:
             if root:
                 links["api"] = f"{root}/v1/docs"
             if settings.webapp_ready and settings.bot_token:
-                owner_token = make_owner_token(settings.bot_token, sender)
+                owner_token = (
+                    make_owner_token(settings.bot_token, sender)
+                    if is_private_chat(message.chat)
+                    else ""
+                )
                 links["app"] = cards.app_entry_url(settings.webapp_url, owner_token=owner_token)
         markup = cards.stats_card(
             uptime=runtime.uptime,

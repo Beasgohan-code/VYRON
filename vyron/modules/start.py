@@ -12,6 +12,7 @@ from vyron.config import settings
 from vyron.runtime import runtime
 from vyron.ui import cards, keyboards, rich
 from vyron.ui.theme import E, emoji_enabled
+from vyron.utils.helpers import is_private_chat
 
 
 def register(client: Client) -> None:
@@ -19,8 +20,14 @@ def register(client: Client) -> None:
     async def _start(_: Client, message: Message) -> None:
         stats = await runtime.storage.counters() if runtime.storage else {}
         name = (message.from_user.first_name if message.from_user else "there") or "there"
+        # A signed owner token is a credential: it only ever goes to a DM.
         owner_token = ""
-        if message.from_user and message.from_user.id in settings.owners and settings.bot_token:
+        if (
+            message.from_user
+            and message.from_user.id in settings.owners
+            and settings.bot_token
+            and is_private_chat(message.chat)
+        ):
             from vyron.web.auth import make_owner_token
 
             owner_token = make_owner_token(settings.bot_token, message.from_user.id)
@@ -79,7 +86,12 @@ def register(client: Client) -> None:
             return
         owner_token = ""
         sender = message.from_user.id if message.from_user else 0
-        if sender and sender in settings.owners and settings.bot_token:
+        if (
+            sender
+            and sender in settings.owners
+            and settings.bot_token
+            and is_private_chat(message.chat)
+        ):
             from vyron.web.auth import make_owner_token
 
             owner_token = make_owner_token(settings.bot_token, sender)

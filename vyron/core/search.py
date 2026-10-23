@@ -13,7 +13,7 @@ import logging
 import re
 import shlex
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import yt_dlp
@@ -33,11 +33,29 @@ class MediaError(RuntimeError):
     """Raised when a search / extraction fails in a user-presentable way."""
 
 
+MIME_BY_EXT = {
+    "m4a": "audio/mp4",
+    "mp4": "audio/mp4",
+    "webm": "audio/webm",
+    "mp3": "audio/mpeg",
+    "opus": "audio/ogg",
+    "ogg": "audio/ogg",
+    "aac": "audio/aac",
+    "wav": "audio/wav",
+}
+
+
 @dataclass
 class StreamInfo:
+    """Everything a proxy needs: the URL, the headers it was minted for, mime."""
+
     url: str
     is_live: bool = False
     expires_at: float = 0.0
+    headers: dict[str, str] = field(default_factory=dict)
+    ext: str = ""
+    mime: str = "audio/mp4"
+    title: str = ""
 
 
 def looks_like_url(text: str) -> bool:
@@ -126,6 +144,7 @@ class YouTube:
             requested_by=requester[0],
             requested_name=requester[1],
             filesize=int(entry.get("filesize") or entry.get("filesize_approx") or 0),
+            views=int(entry.get("view_count") or 0),
         )
 
     # ── public API ─────────────────────────────────────────────────────────
@@ -140,7 +159,9 @@ class YouTube:
         if not query:
             return []
         count = limit or self.settings.search_results
-        info = await self._async_extract(f"ytsearch{count}:{query}", extract_flat="in_playlist")
+        # Over-fetch so dedupe/filtering still leaves a full page of results.
+        fetch = count if count <= 2 else min(40, count * 2)
+        info = await self._async_extract(f"ytsearch{fetch}:{query}", extract_flat="in_playlist")
         entries = info.get("entries") or []
         tracks: list[Track] = []
         for entry in entries:
@@ -149,7 +170,65 @@ class YouTube:
                 tracks.append(track)
         if not tracks:
             raise MediaError("No results found for that query.")
-        return tracks
+        return self.rank(query, tracks)[:count]
+
+    # ── ranking ────────────────────────────────────────────────────────────
+    @staticmethod
+    def _words(text: str) -> set[str]:
+        return {word for word in re.findall(r"[a-z0-9]+", (text or "").lower()) if len(word) > 1}
+
+    def rank(self, query: str, tracks: list[Track]) -> list[Track]:
+        """Order results the way a person would: relevance, then playability, then reach.
+
+        YouTube's own order is good enough for the top hit and noisy afterwards —
+        duplicate uploads, 20-second Shorts and hour-long "1 hour loop" edits all
+        creep in. This keeps the top hit honest and pushes the junk down.
+        """
+        wanted = self._words(query)
+        seen_ids: set[str] = set()
+        seen_titles: set[str] = set()
+        scored: list[tuple[float, int, Track]] = []
+
+        for position, track in enumerate(tracks):
+            key = f"{track.source}:{track.id}"
+            if key in seen_ids:
+                continue
+            seen_ids.add(key)
+            normalised = " ".join(sorted(self._words(track.title)))
+            if normalised and normalised in seen_titles:
+                continue
+            seen_titles.add(normalised)
+
+            score = 0.0
+            if wanted:
+                overlap = len(wanted & self._words(track.title)) / len(wanted)
+                score += overlap * 4.0
+                if track.uploader and wanted & self._words(track.uploader):
+                    score += 0.8
+
+            # Playable-length preference: skip 20s Shorts, demote 2h "loops".
+            if 40 <= track.duration <= 3600:
+                score += 0.9
+            elif track.duration and track.duration < 40:
+                score -= 1.6
+            elif track.duration > 5400:
+                score -= 0.7
+            if not track.duration:
+                score -= 0.3
+
+            title_low = track.title.lower()
+            for noise in ("slowed + reverb", "1 hour", "10 hours", "nightcore", "8d audio"):
+                if noise in title_low and noise not in query.lower():
+                    score -= 0.6
+            if track.views:
+                score += min(1.4, (track.views / 2_000_000) ** 0.5)
+
+            # Tiny nudge so a clean tie keeps YouTube's ordering.
+            score -= position * 0.01
+            scored.append((score, position, track))
+
+        scored.sort(key=lambda item: (-item[0], item[1]))
+        return [track for _, _, track in scored]
 
     async def resolve(self, query: str, requester: tuple[int, str] = (0, "")) -> Track:
         """Turn a URL *or* a free-text query into a single playable track."""
@@ -203,10 +282,21 @@ class YouTube:
 
     async def stream_url(self, track: Track, *, video: bool = False) -> str:
         """Resolve a direct media URL suitable for ntgcalls/ffmpeg."""
+        return (await self.stream_info(track, video=video)).url
+
+    async def stream_info(
+        self, track: Track, *, video: bool = False, refresh: bool = False
+    ) -> StreamInfo:
+        """Resolve a direct media URL *and* the headers it must be fetched with.
+
+        YouTube signs URLs for one client fingerprint. Replaying them with a
+        different User-Agent is what turns a perfectly good stream into a 403,
+        so the headers travel with the URL and the proxy reuses them verbatim.
+        """
         key = f"{track.id}:{'v' if video else 'a'}"
         cached = self._stream_cache.get(key)
-        if cached and cached.expires_at > time.time():
-            return cached.url
+        if cached and not refresh and cached.expires_at > time.time():
+            return cached
 
         target = track.url or track.watch_url
         if not target:
@@ -226,6 +316,7 @@ class YouTube:
         if not info:
             raise MediaError("Could not resolve a stream for that track.")
 
+        chosen: dict[str, Any] | None = info if info.get("url") else None
         url = info.get("url")
         if not url:
             candidates = [f for f in (info.get("formats") or []) if f.get("url")]
@@ -239,15 +330,27 @@ class YouTube:
                 candidates = audio_only or candidates
             if not candidates:
                 raise MediaError("No downloadable formats available.")
-            url = candidates[0]["url"]
+            chosen = candidates[0]
+            url = chosen["url"]
 
+        ext = str((chosen or info).get("ext") or "").lower()
+        headers = {
+            str(name): str(value)
+            for name, value in ((chosen or info).get("http_headers") or {}).items()
+            if str(name).lower() not in {"host", "content-length", "accept-encoding"}
+        }
         ttl = self.settings.stream_cache_ttl
-        self._stream_cache[key] = StreamInfo(
+        result = StreamInfo(
             url=url,
             is_live=bool(info.get("is_live")),
             expires_at=time.time() + ttl,
+            headers=headers,
+            ext=ext,
+            mime=MIME_BY_EXT.get(ext, "audio/mp4"),
+            title=str(info.get("title") or track.title),
         )
-        return url
+        self._stream_cache[key] = result
+        return result
 
     def invalidate(self, track: Track) -> None:
         self._stream_cache.pop(f"{track.id}:a", None)

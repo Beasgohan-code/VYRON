@@ -31,7 +31,7 @@ from vyron.ui import rich
 from vyron.ui.progress import human_size, human_time, truncate
 from vyron.ui.theme import E
 from vyron.utils.filters import owner
-from vyron.utils.helpers import command_args, display_name, is_chat_admin
+from vyron.utils.helpers import command_args, display_name, is_chat_admin, is_private_chat
 
 logger = logging.getLogger(__name__)
 
@@ -313,6 +313,24 @@ def register(client: Client) -> None:
             )
             return
         card = await run_eval(code.strip(), client, message)
+        if not is_private_chat(message.chat) and message.from_user:
+            try:
+                await rich.send(client, message.from_user.id, card)
+                await rich.send(
+                    client,
+                    message.chat.id,
+                    B.note(f"{E('check')} Output sent to your DM — it can echo secrets."),
+                    reply_to=message.id,
+                )
+                return
+            except Exception:
+                await rich.send(
+                    client,
+                    message.chat.id,
+                    B.note(f"{E('warn')} Output withheld: open a DM with me to see it."),
+                    reply_to=message.id,
+                )
+                return
         await rich.send(client, message.chat.id, card, reply_to=message.id)
 
     # ── /vars ──────────────────────────────────────────────────────────────
@@ -326,7 +344,7 @@ def register(client: Client) -> None:
                 f"{E('warn')} secrets are masked — full values are never sent to a chat."
             )
         )
-        if message.chat.type != "private":
+        if not is_private_chat(message.chat):
             try:
                 await rich.send(client, settings.owner_id or message.from_user.id, card)
                 await rich.send(

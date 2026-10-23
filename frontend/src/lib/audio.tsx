@@ -57,15 +57,27 @@ const write = (key: string, value: string): void => {
 
 const keyOf = (track?: Track | null): string => String(track?.id ?? track?.title ?? "");
 
-function streamUrl(track: Track): string {
-  const id = encodeURIComponent(String(track.id ?? ""));
+function authParams(): URLSearchParams {
   const params = new URLSearchParams();
   const token = read("vyron:token", "");
   const initData = telegram()?.initData ?? "";
   if (token) params.set("t", token);
   if (initData) params.set("init_data", initData);
+  return params;
+}
+
+function streamUrl(track: Track, attempt = 0): string {
+  const id = encodeURIComponent(String(track.id ?? ""));
+  const params = authParams();
+  if (attempt) params.set("r", String(attempt));
   const suffix = params.toString();
   return `/api/stream/${id}${suffix ? `?${suffix}` : ""}`;
+}
+
+function infoUrl(track: Track): string {
+  const id = encodeURIComponent(String(track.id ?? ""));
+  const suffix = authParams().toString();
+  return `/api/audio/${id}${suffix ? `?${suffix}` : ""}`;
 }
 
 /**
@@ -89,6 +101,9 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
   const [shuffle, setShuffle] = useState(() => read("vyron:shuffle", "0") === "1");
   const [expanded, setExpanded] = useState(false);
 
+  /* one silent retry per track when the upstream URL expires mid-stream */
+  const retry = useRef<{ key: string; attempts: number }>({ key: "", attempts: 0 });
+
   /* keep the latest values available to the <audio> event handlers */
   const latest = useRef({ queue, track, repeat, shuffle, volume, muted });
   latest.current = { queue, track, repeat, shuffle, volume, muted };
@@ -96,7 +111,8 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
   const el = useCallback((): HTMLAudioElement => {
     if (!element.current) {
       const audio = new Audio();
-      audio.preload = "metadata";
+      audio.preload = "auto";
+      audio.setAttribute("playsinline", "");
       audio.volume = volume;
       audio.muted = muted;
       element.current = audio;
@@ -184,6 +200,24 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
       setLoading(true);
       setPosition(0);
       setDuration(next.duration ?? 0);
+      // Preflight tells us whether the server can even resolve this track; a
+      // generic "playback blocked" toast wastes the listener's time.
+      if (typeof fetch === "function") {
+        try {
+          const probe = await fetch(infoUrl(next));
+          const info = (await probe.json()) as { playable?: boolean; reason?: string };
+          if (info && info.playable === false) {
+            setPlaying(false);
+            setError(info.reason || "this track cannot be streamed right now");
+            toast?.(info.reason || "Streaming is not available here — try /song in the bot", "error");
+            setLoading(false);
+            return;
+          }
+        } catch {
+          /* the probe is a nicety: never block playback on it */
+        }
+      }
+      retry.current = { key: keyOf(next), attempts: 0 };
       try {
         audio.src = streamUrl(next);
         audio.currentTime = 0;
@@ -192,8 +226,9 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
       } catch (cause) {
         // Autoplay blocks and unsupported sources land here; the UI stays usable.
         setPlaying(false);
-        setError(cause instanceof Error ? cause.message : "playback blocked");
-        toast?.("Tap play to start the audio", "info");
+        const blocked = cause instanceof DOMException && cause.name === "NotAllowedError";
+        setError(blocked ? "tap play to start" : "could not start this track");
+        toast?.(blocked ? "Tap play to start the audio" : "That track would not start — try another", "info");
       } finally {
         setLoading(false);
       }
@@ -212,8 +247,25 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
     const onWaiting = () => setLoading(true);
     const onPlaying = () => setLoading(false);
     const onError = () => {
+      const current = latest.current.track;
+      const key = keyOf(current);
+      if (!current || !key) return;
+      if (retry.current.key !== key) retry.current = { key, attempts: 0 };
+      if (retry.current.attempts < 1) {
+        retry.current.attempts += 1;
+        setLoading(true);
+        audio.src = streamUrl(current, Date.now());
+        audio.currentTime = 0;
+        void audio.play().catch(() => {
+          setLoading(false);
+          setError("this track will not load");
+        });
+        return;
+      }
       setLoading(false);
-      if (audio.src) setError("stream unavailable");
+      setError("this track will not load");
+      toast?.("That track will not load — skipping ahead", "error");
+      setTimeout(() => advance(true), 1200);
     };
     audio.addEventListener("timeupdate", onTime);
     audio.addEventListener("loadedmetadata", onMeta);
@@ -235,7 +287,7 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
       audio.removeEventListener("playing", onPlaying);
       audio.removeEventListener("error", onError);
     };
-  }, [advance, el]);
+  }, [advance, el, toast]);
 
   useEffect(() => {
     const audio = el();

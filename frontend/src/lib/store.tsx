@@ -58,6 +58,7 @@ interface Store {
   act: <T = Record<string, unknown>>(action: string, value?: unknown) => Promise<(T & { preview?: boolean }) | null>;
   play: (value: string | Track | undefined, mode?: "play" | "play_now") => Promise<void>;
   runSearch: (query: string, remember?: boolean) => Promise<void>;
+  searching: boolean;
   loadMix: (key: string) => Promise<void>;
   refreshState: () => Promise<void>;
   refreshRooms: () => Promise<void>;
@@ -96,6 +97,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [results, setResults] = useState<Track[]>([]);
+  const [searching, setSearching] = useState(false);
   const [view, setViewState] = useState<View>("home");
   const [query, setQuery] = useState("");
   const [searchFilter, setSearchFilter] = useState<SearchFilter>("all");
@@ -297,11 +299,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (!clean) return;
       setQuery(clean);
       if (remember) rememberSearch(clean);
+      setSearching(true);
       try {
         const payload = await api.search(clean);
         setResults(payload.results ?? []);
       } catch (error) {
         toast(error instanceof Error ? error.message : "Search failed", "error");
+      } finally {
+        setSearching(false);
       }
     },
     [rememberSearch, toast]
@@ -350,6 +355,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       rooms,
       playlists,
       results,
+      searching,
       view,
       setView,
       query,

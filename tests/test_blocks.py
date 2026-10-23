@@ -45,8 +45,11 @@ def test_fallback_conversion_of_buttons():
     )
     html = rich.to_html(markup)
     assert "<tg-button" not in html
-    assert "<b>Pause</b>" in html
+    # Callback buttons are rendered by the real reply_markup keyboard in the
+    # classic lane, so they must not be duplicated as bold text.
+    assert "Pause" not in html
     assert 'href="https://x.dev"' in html
+    assert "Docs" in html
 
 
 def test_rich_detection_and_escaping():

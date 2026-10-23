@@ -77,6 +77,24 @@ def mention(user: User | None) -> str:
     return user.mention
 
 
+def is_private_chat(chat) -> bool:
+    """True for a one-to-one chat — the only place secrets may be posted.
+
+    ``pyrogram``/``kurigram`` chat types are enums, not strings, so
+    ``chat.type == "private"`` is always False. Compare the enum name instead,
+    and fall back to the (positive) DM chat id when a stub chat is passed.
+    """
+    if chat is None:
+        return False
+    name = str(getattr(getattr(chat, "type", None), "name", "") or "").upper()
+    if name:
+        return name == "PRIVATE"
+    try:
+        return int(getattr(chat, "id", 0) or 0) > 0
+    except (TypeError, ValueError):
+        return False
+
+
 def is_owner(user_id: int) -> bool:
     """Owner, SUDO_USERS, or someone granted trust with /addsudo."""
     try:

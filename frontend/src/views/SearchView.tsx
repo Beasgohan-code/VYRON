@@ -23,6 +23,7 @@ export function SearchView() {
     playlists,
     openPlaylist,
     play,
+    searching,
   } = useApp();
   const [value, setValue] = useState(query);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -54,7 +55,7 @@ export function SearchView() {
 
   const showSongs = searchFilter === "all" || searchFilter === "songs";
   const empty =
-    (showSongs && results.length === 0) ||
+    (showSongs && !searching && results.length === 0) ||
     (searchFilter === "artists" && artistGroups.length === 0) ||
     (searchFilter === "playlists" && playlistMatches.length === 0);
 
@@ -113,12 +114,34 @@ export function SearchView() {
         ))}
       </div>
 
-      {showSongs && (
-        <ul className="result-list">
-          {results.map((track, index) => (
-            <ResultRow key={`${track.id ?? track.title}-${index}`} track={track} index={index + 1} />
+      {showSongs && searching && (
+        <ul className="result-list" aria-hidden="true">
+          {Array.from({ length: 5 }, (_, index) => (
+            <li key={index} className="result skeleton-row">
+              <span className="skeleton-art" />
+              <div className="info">
+                <span className="skeleton-bar" style={{ width: `${64 - index * 7}%` }} />
+                <span className="skeleton-bar short" />
+              </div>
+            </li>
           ))}
         </ul>
+      )}
+
+      {showSongs && !searching && results.length > 0 && (
+        <>
+          <div className="section-head result-head">
+            <h2>Results</h2>
+            <span className="muted">
+              {results.length} track{results.length === 1 ? "" : "s"} for “{query}”
+            </span>
+          </div>
+          <ul className="result-list">
+            {results.map((track, index) => (
+              <ResultRow key={`${track.id ?? track.title}-${index}`} track={track} index={index + 1} />
+            ))}
+          </ul>
+        </>
       )}
 
       {searchFilter === "artists" && (

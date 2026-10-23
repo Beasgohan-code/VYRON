@@ -63,9 +63,24 @@ def queue(state: ChatState, page: int, pages: int) -> KM:
     return KM(rows)
 
 
+def _duration(seconds: int) -> str:
+    seconds = int(seconds or 0)
+    if seconds <= 0:
+        return "live"
+    minutes, rest = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}:{minutes:02d}:{rest:02d}" if hours else f"{minutes}:{rest:02d}"
+
+
 def search_results(tracks) -> KM:
+    """Classic-lane keyboard: numbered, titled, with the length on the button."""
     rows = [
-        [_btn(f"{index + 1}. {track.title[:38]}", f"v:pick:{index}")]
+        [
+            _btn(
+                f"{index + 1} · {_duration(track.duration)} · {track.title[:30]}",
+                f"v:pick:{index}",
+            )
+        ]
         for index, track in enumerate(tracks[:5])
     ]
     rows.append([_btn(f"{G('close')} Cancel", "v:close")])
@@ -74,7 +89,12 @@ def search_results(tracks) -> KM:
 
 def results_page(tracks) -> KM:
     rows = [
-        [_btn(f"▸ {index + 1}. {track.title[:34]}", f"v:dl:{index}")]
+        [
+            _btn(
+                f"⬇ {index + 1} · {_duration(track.duration)} · {track.title[:28]}",
+                f"v:dl:{index}",
+            )
+        ]
         for index, track in enumerate(tracks[:5])
     ]
     rows.append([_btn(f"{G('close')} Close", "v:close")])

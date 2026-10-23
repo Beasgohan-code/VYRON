@@ -28,7 +28,7 @@ from vyron.runtime import runtime
 from vyron.ui import cards, rich
 from vyron.ui.theme import E
 from vyron.utils.filters import owner
-from vyron.utils.helpers import command_args, display_name
+from vyron.utils.helpers import command_args, display_name, is_private_chat
 from vyron.web.auth import OWNER_TOKEN_TTL, make_owner_token
 
 logger = logging.getLogger(__name__)
@@ -104,7 +104,7 @@ def register(client: Client) -> None:
         sender = message.from_user.id if message.from_user else 0
         owner = bool(sender and sender in settings.owners)
         owner_link = ""
-        if owner and settings.bot_token and settings.webapp_ready:
+        if owner and settings.bot_token and settings.webapp_ready and is_private_chat(message.chat):
             from vyron.web.auth import make_owner_token
 
             owner_link = cards.app_entry_url(
@@ -157,7 +157,12 @@ def register(client: Client) -> None:
     @client.on_message(filters.command(["listkey", "apikeys"]) & owner)
     async def _listkeys(_: Client, message: Message) -> None:
         keys = await get_music_api().keys(reveal=False)
-        await _reply(client, message, cards.api_keys_card(keys, base=_base()))
+        await _reply_private(
+            client,
+            message,
+            cards.api_keys_card(keys, base=_base()),
+            what="Key list",
+        )
 
     @client.on_message(filters.command(["rotatekey", "rotateapi"]) & owner)
     async def _rotate(_: Client, message: Message) -> None:
@@ -231,7 +236,7 @@ def register(client: Client) -> None:
         api = get_music_api()
         stats = await api.stats()
         roster = await api.keys(reveal=False)
-        await _reply(
+        await _reply_private(
             client,
             message,
             cards.api_usage_card(
@@ -241,6 +246,7 @@ def register(client: Client) -> None:
                 sudo=acl.is_sudo(message.from_user.id),
                 metrics=METRICS.snapshot(),
             ),
+            what="Usage report",
         )
 
     @client.on_message(filters.command(["apitoken", "ownertoken", "ownerkey"]) & owner)

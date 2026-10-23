@@ -14,6 +14,7 @@ export interface Track {
   index?: number;
   video?: boolean;
   requested_by?: string;
+  views?: number;
 }
 
 export interface NowPlaying extends Track {
