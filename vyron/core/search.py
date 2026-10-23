@@ -14,6 +14,7 @@ import re
 import shlex
 import time
 from dataclasses import dataclass, field
+from urllib.parse import unquote
 from typing import Any
 
 import yt_dlp
@@ -334,6 +335,16 @@ class YouTube:
             url = chosen["url"]
 
         ext = str((chosen or info).get("ext") or "").lower()
+        # googlevideo URLs carry their own mime; trust it over a guessed default
+        # so HEAD probes and <audio> get a Content-Type the browser accepts.
+        mime = MIME_BY_EXT.get(ext, "")
+        if not mime:
+            found = re.search(r"[?&]mime=([^&]+)", url or "")
+            if found:
+                candidate = unquote(found.group(1)).lower()
+                if candidate.startswith(("audio/", "video/")):
+                    mime = candidate
+
         headers = {
             str(name): str(value)
             for name, value in ((chosen or info).get("http_headers") or {}).items()
@@ -346,7 +357,7 @@ class YouTube:
             expires_at=time.time() + ttl,
             headers=headers,
             ext=ext,
-            mime=MIME_BY_EXT.get(ext, "audio/mp4"),
+            mime=mime or ("video/mp4" if video else "audio/mp4"),
             title=str(info.get("title") or track.title),
         )
         self._stream_cache[key] = result

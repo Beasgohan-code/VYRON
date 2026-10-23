@@ -461,6 +461,53 @@ def test_audio_info_says_when_streaming_is_not_configured(monkeypatch, tmp_path)
     asyncio.run(scenario())
 
 
+def test_stream_resolver_crash_is_json_not_a_500(monkeypatch):
+    """A resolver bug must degrade to a readable error, never an HTML 500."""
+    from vyron.core.queue import Track
+    from vyron.runtime import runtime
+    from vyron.web import stream as audio
+
+    monkeypatch.setattr(audio, "settings", dataclasses.replace(audio.settings, webapp_allow_anon=True))
+    monkeypatch.setattr(runtime, "downloader", None, raising=False)
+    audio.remember(Track(id="crashcrash1", title="Crash", duration=200))
+
+    class BrokenYouTube:
+        async def stream_info(self, track, *, video=False, refresh=False):
+            raise RuntimeError("yt-dlp exploded")
+
+    monkeypatch.setattr(runtime, "youtube", BrokenYouTube(), raising=False)
+
+    async def scenario():
+        app = build_app(with_webapp=False)
+        audio.register(app)
+        async with TestClient(TestServer(app)) as client:
+            response = await client.get("/api/stream/crashcrash1")
+            assert response.status == 502
+            payload = await response.json()
+            assert payload["error"] == "upstream_failed" and payload["hint"]
+
+    asyncio.run(scenario())
+
+
+def test_audio_info_answers_for_demo_ids_before_the_registry(monkeypatch):
+    from vyron.core.queue import Track
+    from vyron.web import stream as audio
+
+    monkeypatch.setattr(audio, "settings", dataclasses.replace(audio.settings, webapp_allow_anon=True))
+    # A remembered track with a demo-shaped id must not shadow the demo answer.
+    audio.remember(Track(id="demo07", title="Registered", duration=99))
+
+    async def scenario():
+        app = build_app(with_webapp=False)
+        audio.register(app)
+        async with TestClient(TestServer(app)) as client:
+            payload = await (await client.get("/api/audio/demo07")).json()
+            assert payload["demo"] is True
+            assert payload["playable"] is True
+
+    asyncio.run(scenario())
+
+
 # ── owner access ────────────────────────────────────────────────────────────
 def test_owner_token_roundtrip_and_expiry():
     token = auth.make_owner_token(TOKEN, 424242)

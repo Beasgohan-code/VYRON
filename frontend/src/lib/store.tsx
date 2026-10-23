@@ -293,20 +293,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const searchSeq = useRef(0);
+
   const runSearch = useCallback(
     async (value: string, remember = true) => {
       const clean = value.trim();
       if (!clean) return;
       setQuery(clean);
       if (remember) rememberSearch(clean);
+      const seq = (searchSeq.current += 1);
       setSearching(true);
       try {
         const payload = await api.search(clean);
-        setResults(payload.results ?? []);
+        if (seq === searchSeq.current) setResults(payload.results ?? []);
       } catch (error) {
-        toast(error instanceof Error ? error.message : "Search failed", "error");
+        if (seq === searchSeq.current) {
+          toast(error instanceof Error ? error.message : "Search failed", "error");
+        }
       } finally {
-        setSearching(false);
+        if (seq === searchSeq.current) setSearching(false);
       }
     },
     [rememberSearch, toast]
@@ -395,7 +400,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       state, home, rooms, playlists, results, view, setView, query, searchFilter, libraryFilter,
       selectedPlaylist, openPlaylist, theme, setTheme, accent, setAccent, normalise, setNormalise,
       toastMessage, toast, toastTone, modal, openModal, closeModal, act, play, runSearch, loadMix,
-      refreshState, refreshRooms, refreshPlaylists, recent, rememberSearch, dragging,
+      refreshState, refreshRooms, refreshPlaylists, recent, rememberSearch, searching, dragging,
       audio, cast,
     ]
   );

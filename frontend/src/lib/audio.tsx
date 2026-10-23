@@ -103,6 +103,8 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
 
   /* one silent retry per track when the upstream URL expires mid-stream */
   const retry = useRef<{ key: string; attempts: number }>({ key: "", attempts: 0 });
+  /* monotonically increasing load id: stale loads must not touch the element */
+  const loadSeq = useRef(0);
 
   /* keep the latest values available to the <audio> event handlers */
   const latest = useRef({ queue, track, repeat, shuffle, volume, muted });
@@ -194,43 +196,58 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
   const load = useCallback(
     async (next: Track, list?: Track[]) => {
       const audio = el();
-      setTrack(next);
-      if (list) setQueue(list);
+      const seq = (loadSeq.current += 1);
+      const stale = () => seq !== loadSeq.current;
+
       setError(null);
       setLoading(true);
-      setPosition(0);
-      setDuration(next.duration ?? 0);
+
       // Preflight tells us whether the server can even resolve this track; a
       // generic "playback blocked" toast wastes the listener's time.
       if (typeof fetch === "function") {
         try {
           const probe = await fetch(infoUrl(next));
-          const info = (await probe.json()) as { playable?: boolean; reason?: string };
-          if (info && info.playable === false) {
-            setPlaying(false);
-            setError(info.reason || "this track cannot be streamed right now");
-            toast?.(info.reason || "Streaming is not available here — try /song in the bot", "error");
+          const info = (await probe.json()) as {
+            ok?: boolean;
+            playable?: boolean;
+            reason?: string;
+            error?: string;
+          };
+          if (stale()) return;
+          if (info && (info.playable === false || info.ok === false)) {
+            const why = info.reason || info.error || "this track cannot be streamed right now";
             setLoading(false);
+            setPlaying(false);
+            setError(why);
+            toast?.(why, "error");
             return;
           }
         } catch {
           /* the probe is a nicety: never block playback on it */
         }
       }
+      if (stale()) return;
+
+      // Commit the UI to the new track only once it is safe to play it: a
+      // failed load must not relabel the artwork while the old song plays on.
+      setTrack(next);
+      if (list) setQueue(list);
+      setPosition(0);
+      setDuration(next.duration ?? 0);
       retry.current = { key: keyOf(next), attempts: 0 };
       try {
         audio.src = streamUrl(next);
-        audio.currentTime = 0;
         await audio.play();
-        setPlaying(true);
+        if (!stale()) setPlaying(true);
       } catch (cause) {
         // Autoplay blocks and unsupported sources land here; the UI stays usable.
+        if (stale()) return;
         setPlaying(false);
         const blocked = cause instanceof DOMException && cause.name === "NotAllowedError";
         setError(blocked ? "tap play to start" : "could not start this track");
         toast?.(blocked ? "Tap play to start the audio" : "That track would not start — try another", "info");
       } finally {
-        setLoading(false);
+        if (!stale()) setLoading(false);
       }
     },
     [el, toast]
@@ -254,18 +271,25 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
       if (retry.current.attempts < 1) {
         retry.current.attempts += 1;
         setLoading(true);
-        audio.src = streamUrl(current, Date.now());
-        audio.currentTime = 0;
-        void audio.play().catch(() => {
+        try {
+          audio.src = streamUrl(current, Date.now());
+          void audio.play().catch(() => {
+            setLoading(false);
+            setError("this track will not load");
+          });
+        } catch {
           setLoading(false);
           setError("this track will not load");
-        });
+        }
         return;
       }
       setLoading(false);
       setError("this track will not load");
       toast?.("That track will not load — skipping ahead", "error");
-      setTimeout(() => advance(true), 1200);
+      setTimeout(() => {
+        // only auto-skip if the listener is still sitting on this track
+        if (keyOf(latest.current.track) === key) advance(true);
+      }, 1200);
     };
     audio.addEventListener("timeupdate", onTime);
     audio.addEventListener("loadedmetadata", onMeta);
@@ -337,17 +361,32 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
   /* ── public actions ──────────────────────────────────────────────────── */
   const play = useCallback(
     (next: Track, list?: Track[]) => {
-      void load(next, list ?? [next, ...latest.current.queue.filter((item) => keyOf(item) !== keyOf(next))]);
+      if (list) {
+        void load(next, list);
+        return;
+      }
+      const queue = latest.current.queue;
+      const queued = queue.some((item) => keyOf(item) === keyOf(next));
+      // A track picked from search jumps to the front; one that is already in
+      // the queue plays from its place, keeping the rest of the order intact.
+      void load(next, queued ? queue : [next, ...queue]);
     },
     [load]
   );
 
   const toggle = useCallback(() => {
     const audio = el();
-    if (!latest.current.track) return;
+    const current = latest.current.track;
+    if (!current) return;
+    // A media error leaves the element stuck on a dead source: reload instead
+    // of asking the browser to replay it.
+    if (audio.error) {
+      void load(current);
+      return;
+    }
     if (audio.paused) void audio.play().catch(() => undefined);
     else audio.pause();
-  }, [el]);
+  }, [el, load]);
 
   const prev = useCallback(() => {
     const audio = el();

@@ -194,7 +194,7 @@ export function PlayerView() {
               <button
                 type="button"
                 className="pill-btn accent"
-                onClick={() => void audio.play(track, audio.queue.length ? audio.queue : [track])}
+                onClick={() => void audio.play(track)}
               >
                 <Play size={13} fill="currentColor" /> Retry
               </button>

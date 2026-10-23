@@ -175,6 +175,7 @@ def _identity(request: web.Request) -> WebUser:
         token=request.query.get("t", ""),
         bot_token=settings.bot_token,
         allow_anon=settings.webapp_allow_anon,
+        owner_ids=settings.owners,
     )
 
 
@@ -263,6 +264,13 @@ async def _proxy_range(
         await session.close()
 
 
+def _upstream_error(reason: str, hint: str = "tap play again in a moment") -> web.Response:
+    return web.json_response(
+        {"ok": False, "error": "upstream_failed", "reason": reason, "hint": hint},
+        status=502,
+    )
+
+
 # ── routes ─────────────────────────────────────────────────────────────────
 async def stream(request: web.Request) -> web.StreamResponse:
     user = _identity(request)
@@ -305,15 +313,10 @@ async def stream(request: web.Request) -> web.StreamResponse:
         info = await runtime.youtube.stream_info(track)
     except MediaError as exc:
         logger.info("could not resolve stream for %s: %s", media_id, exc)
-        return web.json_response(
-            {
-                "ok": False,
-                "error": "upstream_failed",
-                "reason": str(exc)[:180],
-                "hint": "the bot could not resolve this track — try another result",
-            },
-            status=502,
-        )
+        return _upstream_error(str(exc)[:180], "the bot could not resolve this track — try another result")
+    except Exception as exc:  # defensive: a resolver bug must not 500 the audio
+        logger.warning("stream resolve crashed for %s: %s", media_id, exc)
+        return _upstream_error(str(exc)[:180])
 
     if request.method == "HEAD":
         return web.Response(
@@ -335,25 +338,23 @@ async def stream(request: web.Request) -> web.StreamResponse:
                 break
             try:
                 info = await runtime.youtube.stream_info(track, refresh=True)
-            except MediaError:
+            except Exception:
                 break
+        except web.HTTPException as exc:
+            # The proxy already answered upstream; turn it into JSON so the app
+            # can show a reason instead of a bare HTML error page.
+            logger.info("audio proxy failed for %s: %s", media_id, exc.reason)
+            return _upstream_error(str(exc.reason or "the audio source failed"))
 
-    return web.json_response(
-        {
-            "ok": False,
-            "error": "upstream_failed",
-            "reason": "the audio source rejected the stream",
-            "hint": "tap play again, or use /song to get the file",
-        },
-        status=502,
-    )
+    return _upstream_error("the audio source rejected the stream", "tap play again, or use /song to get the file")
 
 
 async def audio_info(request: web.Request) -> web.Response:
     user = _identity(request)
     media_id = (request.match_info.get("media_id") or "").strip()
-    track = await lookup_async(media_id, user_id=user.user_id)
-    if track is None and re.fullmatch(r"demo\d{2}", media_id, re.I):
+    # Demo ids are synthetic and locally generated: answer for them first, so a
+    # remembered demo track can never be described as "not streamable".
+    if re.fullmatch(r"demo\d{2}", media_id, re.I):
         return web.json_response(
             {
                 "ok": True,
@@ -366,6 +367,7 @@ async def audio_info(request: web.Request) -> web.Response:
                 "stream": f"/api/stream/{media_id}",
             }
         )
+    track = await lookup_async(media_id, user_id=user.user_id)
     if track is None:
         return web.json_response({"ok": False, "error": "unknown track"}, status=404)
     cached = runtime.downloader.cached(track) if runtime.downloader else None

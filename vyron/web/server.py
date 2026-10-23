@@ -249,7 +249,6 @@ async def index(_: web.Request) -> web.StreamResponse:
     # stop browsers from guessing content types.
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "SAMEORIGIN"
     return response
 
 
