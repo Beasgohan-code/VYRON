@@ -46,8 +46,10 @@ export function Reactor({ className = "", analyser, playing = false, size = "her
       if (disposed || !host.current) return;
 
       const parent = host.current;
-      const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      // Phones get a lighter scene: fewer vertices, fewer points, DPR capped.
+      const small = typeof window.matchMedia === "function" && window.matchMedia("(max-width: 860px)").matches;
+      const renderer = new THREE.WebGLRenderer({ antialias: !small, alpha: true, powerPreference: "high-performance" });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, small ? 1.5 : 2));
       renderer.setClearColor(0x000000, 0);
       const canvas = renderer.domElement;
       canvas.style.width = "100%";
@@ -142,7 +144,7 @@ export function Reactor({ className = "", analyser, playing = false, size = "her
       });
 
       // Detail 10 ≈ 7k vertices: smooth enough for the noise, cheap on phones.
-      const coreGeometry = new THREE.IcosahedronGeometry(1.28, size === "dock" ? 7 : 10);
+      const coreGeometry = new THREE.IcosahedronGeometry(1.28, size === "dock" || small ? 7 : 10);
       const core = new THREE.Mesh(coreGeometry, coreMaterial);
       group.add(core);
 
@@ -160,7 +162,7 @@ export function Reactor({ className = "", analyser, playing = false, size = "her
       group.add(shell);
 
       /* ── drifting particles on a shell ────────────────────────────────── */
-      const count = size === "dock" ? 260 : 900;
+      const count = size === "dock" ? 260 : small ? 420 : 900;
       const positions = new Float32Array(count * 3);
       for (let i = 0; i < count; i += 1) {
         const radius = 1.9 + Math.random() * 2.4;
@@ -198,6 +200,17 @@ export function Reactor({ className = "", analyser, playing = false, size = "her
 
       const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(resize) : null;
       observer?.observe(parent);
+
+      // Mobile GPUs drop contexts under memory pressure: stop drawing and show
+      // the CSS orb instead of leaving a frozen canvas on screen.
+      const onContextLost = (event: Event) => {
+        event.preventDefault();
+        running = false;
+        cancelAnimationFrame(frame);
+        canvas.style.display = "none";
+        setSupported(false);
+      };
+      canvas.addEventListener("webglcontextlost", onContextLost);
 
       const clock = new THREE.Clock();
       const spectrum = new Uint8Array(64);
@@ -285,6 +298,7 @@ export function Reactor({ className = "", analyser, playing = false, size = "her
         cancelAnimationFrame(frame);
         observer?.disconnect();
         io?.disconnect();
+        canvas.removeEventListener("webglcontextlost", onContextLost);
         document.removeEventListener("visibilitychange", onVisibility);
         coreGeometry.dispose();
         coreMaterial.dispose();
