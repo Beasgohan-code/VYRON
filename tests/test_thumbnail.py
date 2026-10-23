@@ -216,3 +216,43 @@ def test_the_card_is_read_only_for_members():
     text = cards.thumbnail_card(True, can_edit=False)
     assert "Remove artwork" not in text
     assert "admin" in text.lower()
+
+
+def test_an_oversized_image_file_is_refused(_isolated_state):
+    message = _message()
+    message.reply_to_message = SimpleNamespace(
+        photo=None,
+        document=SimpleNamespace(
+            file_id="big", mime_type="image/png", file_size=thumbnail_cmd.MAX_ART_BYTES + 1
+        ),
+    )
+    bot = Bot()
+    asyncio.run(_run_command(bot, message))
+
+    assert (-100, "thumbnail") not in _isolated_state
+    assert "too big" in bot.sent[-1][1]
+
+
+def test_a_failed_download_never_breaks_the_poster(_isolated_state, monkeypatch):
+    """An expired file id must degrade to the normal cover, not raise."""
+    bot = Bot()
+    _isolated_state[(-100, "thumbnail")] = "stale"
+
+    async def explode(*_args, **_kwargs):
+        raise RuntimeError("FILE_REFERENCE_EXPIRED")
+
+    monkeypatch.setattr(bot, "download_media", explode)
+    monkeypatch.setattr(nowplaying, "enabled", lambda: True)
+    monkeypatch.setattr(
+        thumbnails, "now_playing", lambda state, track, backdrop=None: _ok(b"art")
+    )
+
+    assert asyncio.run(nowplaying.chat_art(-100, bot)) is None
+
+    state = ChatState(chat_id=-100)
+    state.current = Track(id="t3", title="Song", duration=100)
+    assert asyncio.run(nowplaying.poster(state, state.current, bot=bot, chat_id=-100)) == b"art"
+
+
+async def _ok(value):
+    return value

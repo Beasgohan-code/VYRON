@@ -179,26 +179,70 @@ def _letterspaced(draw, xy, text: str, face, fill, spacing: int = 3) -> int:
 
 
 # ── colour ──────────────────────────────────────────────────────────────────
+_MARK_CACHE: dict[int, Any] = {}
+
+
+def _brand_mark(size: int):
+    """The profile mark as a circular RGBA tile, or ``None`` when unavailable."""
+    if not PIL_AVAILABLE:
+        return None
+    cached = _MARK_CACHE.get(size)
+    if cached is not None:
+        return cached
+    path = Path(__file__).resolve().parents[2] / "assets" / "pfp.png"
+    try:
+        image = Image.open(path).convert("RGB")
+        side = min(image.size)
+        image = image.crop(
+            ((image.width - side) // 2, (image.height - side) // 2,
+             (image.width + side) // 2, (image.height + side) // 2)
+        ).resize((size, size), Image.LANCZOS)
+        mask = Image.new("L", (size, size), 0)
+        ImageDraw.Draw(mask).ellipse((0, 0, size - 1, size - 1), fill=255)
+        tile = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        tile.paste(image, (0, 0), mask)
+        ring = ImageDraw.Draw(tile)
+        ring.ellipse((0, 0, size - 1, size - 1), outline=(255, 255, 255, 40), width=1)
+    except Exception as exc:  # pragma: no cover - brand art is best effort
+        logger.debug("brand mark unavailable: %s", exc)
+        tile = None
+    _MARK_CACHE[size] = tile
+    return tile
+
+
 def _accent_from(art) -> tuple[tuple[int, int, int], tuple[int, int, int]]:
     """Pick a vivid accent + a cooler companion out of the artwork."""
     try:
         small = art.convert("RGB").resize((48, 48))
         quantised = small.quantize(colors=8, method=Image.Quantize.MEDIANCUT)
         palette = quantised.getpalette() or []
-        counts = sorted(quantised.getcolors() or [], reverse=True)
-        for count, index in counts[:6]:
+        counts = quantised.getcolors() or []
+        best = None
+        for count, index in counts:
             r, g, b = palette[index * 3 : index * 3 + 3]
             h, s, v = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)
-            if s < 0.25 or v < 0.16:
+            if s < 0.20 or v < 0.20:
                 continue
-            # keep it luminous: brand-adjacent hues only get a nudge, others
-            # are lifted so the poster never turns muddy
-            s = min(1.0, max(0.45, s))
-            v = min(1.0, max(0.62, v))
+            # Vividness (not frequency) decides: a small saturated detail in
+            # the artwork makes a far better accent than a large grey field.
+            # Area still counts a little, so a one-pixel highlight cannot win.
+            score = (s ** 1.4) * (v ** 0.6) * (0.35 + 0.65 * (count / (counts[0][0] or 1)) ** 0.25)
+            if best is None or score > best[0]:
+                best = (score, h, s, v)
+        if best is not None:
+            _score, h, s, v = best
+            # keep it luminous: the poster is dark, so the accent must glow
+            s = min(1.0, max(0.55, s))
+            v = min(1.0, max(0.72, v))
             r, g, b = colorsys.hsv_to_rgb(h, s, v)
             accent = (int(r * 255), int(g * 255), int(b * 255))
-            h2 = (h + 0.09) % 1.0
-            r2, g2, b2 = colorsys.hsv_to_rgb(h2, min(1.0, s * 0.9), min(1.0, v * 0.85))
+            # companion = the accent pulled halfway toward the brand violet,
+            # which keeps every poster in the VYRON palette
+            r2 = (accent[0] * 0.55 + ACCENT[0] * 0.45) / 255
+            g2 = (accent[1] * 0.55 + ACCENT[1] * 0.45) / 255
+            b2 = (accent[2] * 0.55 + ACCENT[2] * 0.45) / 255
+            h2, s2, v2 = colorsys.rgb_to_hsv(r2, g2, b2)
+            r2, g2, b2 = colorsys.hsv_to_rgb(h2, min(1.0, s2 * 1.05), v2)
             return accent, (int(r2 * 255), int(g2 * 255), int(b2 * 255))
     except Exception as exc:  # pragma: no cover - palette maths is best effort
         logger.debug("accent extraction failed: %s", exc)
@@ -224,15 +268,33 @@ def _cover(cover: bytes | None, size: int = 360):
             return image.resize((size, size), Image.LANCZOS)
         except Exception as exc:
             logger.debug("cover decode failed: %s", exc)
-    placeholder = Image.new("RGB", (size, size), (18, 20, 30))
-    draw = ImageDraw.Draw(placeholder)
+    # No cover art (search results often arrive without one): draw a sleeve
+    # that looks designed on purpose rather than an empty grey tile.
+    placeholder = _gradient((size, size), (30, 24, 56), (10, 11, 18))
+    draw = ImageDraw.Draw(placeholder, "RGBA")
     centre = size // 2
-    for radius, colour in ((150, (26, 30, 46)), (110, (22, 25, 38)), (70, (30, 34, 52))):
+    for index, radius in enumerate(range(int(size * 0.46), 0, -int(size * 0.055))):
+        alpha = 12 + index * 5
         draw.ellipse(
             (centre - radius, centre - radius, centre + radius, centre + radius),
-            fill=colour,
+            outline=(255, 255, 255, alpha),
+            width=2,
         )
-    draw.ellipse((centre - 8, centre - 8, centre + 8, centre + 8), fill=ACCENT_2)
+    glow = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    ImageDraw.Draw(glow).ellipse(
+        (centre - 96, centre - 96, centre + 96, centre + 96),
+        fill=(*ACCENT, 90),
+    )
+    placeholder = Image.alpha_composite(
+        placeholder.convert("RGBA"), glow.filter(ImageFilter.GaussianBlur(48))
+    ).convert("RGB")
+    draw = ImageDraw.Draw(placeholder)
+    draw.ellipse(
+        (centre - 46, centre - 46, centre + 46, centre + 46),
+        outline=(*ACCENT_2, 120),
+        width=3,
+    )
+    draw.ellipse((centre - 6, centre - 6, centre + 6, centre + 6), fill=ACCENT_2)
     return placeholder
 
 
@@ -393,9 +455,9 @@ def render(
         layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         draw = ImageDraw.Draw(layer)
 
-        cover_x, cover_y, cover_size = 84, 192, 360
-        vinyl_size = 372
-        vinyl_x = cover_x + cover_size - 44
+        cover_x, cover_y, cover_size = 72, 188, 344
+        vinyl_size = 348
+        vinyl_x = cover_x + cover_size - 36
         vinyl_y = cover_y + cover_size // 2 - vinyl_size // 2
 
         # soft shadow behind the artwork stack
@@ -422,54 +484,83 @@ def render(
         )
 
         # ── type column ────────────────────────────────────────────────────
-        text_x = 720
-        max_width = W - text_x - 62
+        text_x = 744
+        max_width = W - text_x - 56
 
-        _letterspaced(draw, (56, 74), "VYRON", font(17, 600, "VYRON"), (236, 236, 242), 5)
-        draw.ellipse((150, 78, 159, 87), fill=accent)
+        # hairline that separates the artwork from the type column
+        draw.line(
+            [(text_x - 30, 176), (text_x - 30, 560)],
+            fill=(255, 255, 255, 16),
+            width=1,
+        )
 
-        # NOW PLAYING + equaliser glyph
-        bars_x, bars_y = text_x, 158
+        # ── letterhead ─────────────────────────────────────────────────────
+        mark = _brand_mark(30)
+        mark_y = 54
+        if mark is not None:
+            layer.alpha_composite(mark, (56, mark_y))
+        wordmark_x = 56 + (44 if mark is not None else 0)
+        _letterspaced(draw, (wordmark_x, 60), "VYRON", font(16, 700, "VYRON"), (240, 240, 246), 5)
+        _letterspaced(
+            draw,
+            (wordmark_x + 1, 82),
+            "MUSIC BEYOND LIMITS",
+            font(10, 500, "MUSIC BEYOND LIMITS"),
+            (128, 128, 148),
+            2,
+        )
+
+        # “NOW PLAYING” + a tiny equaliser, aligned with the type column
         for index in range(4):
-            height = (14, 26, 20, 32)[index]
+            height = (13, 24, 18, 30)[index]
             draw.rounded_rectangle(
-                (bars_x + index * 9, bars_y + (32 - height), bars_x + index * 9 + 5, bars_y + 32),
+                (text_x + index * 9, 66 + (30 - height), text_x + index * 9 + 5, 96),
                 radius=2,
                 fill=accent,
             )
-        _letterspaced(draw, (text_x + 48, bars_y + 10), "NOW PLAYING", font(15, 600, "NOW PLAYING"), MUTED, 4)
+        _letterspaced(
+            draw,
+            (text_x + 48, 70),
+            "NOW PLAYING",
+            font(14, 600, "NOW PLAYING"),
+            MUTED,
+            4,
+        )
 
         # Fit the title instead of always truncating: two full lines beat two
         # half-lines, and long "Artist - Title (Official Video)" names are the
         # norm for what people play.
         title = str(track.title or "").strip()
-        size, lines = 52, []
-        for candidate in (52, 47, 42, 38, 34):
+        size, lines = 50, []
+        for candidate in (50, 45, 40, 36, 32):
             face = font(candidate, 700, title)
             lines = _wrap(draw, title, face, max_width, limit=2)
             size = candidate
             if "…" not in " ".join(lines):  # everything fits: stop shrinking
                 break
-        title_y = 214
+        title_y = 168
         for line in lines:
             draw.text((text_x, title_y), line, font=font(size, 700, line), fill=TEXT)
-            title_y += int(size * 1.14)
+            title_y += int(size * 1.15)
 
         artist = track.uploader or "unknown artist"
+        # title_y already advanced past the last line; the small extra gap keeps
+        # descenders (g, y, p) from touching the artist line
+        artist_y = title_y + 2
         draw.text(
-            (text_x, title_y + 8),
-            _clip(draw, artist, font(26, 500, artist), max_width),
-            font=font(26, 500, artist),
+            (text_x, artist_y),
+            _clip(draw, artist, font(25, 500, artist), max_width),
+            font=font(25, 500, artist),
             fill=MUTED,
         )
 
         # ── chips ──────────────────────────────────────────────────────────
-        chips_y = title_y + 62
+        chips_y = artist_y + 62
         total = int(track.duration or 0)
         requested_name = (getattr(track, "requested_name", "") or "").strip()
         requester = requested_name.split()[0] if requested_name else ""
         if requester:
-            duration_w, requester_w = 196, 246
+            duration_w, requester_w = 190, 232
             _chip(draw, (text_x, chips_y), "DURATION", fmt_duration(total) if total else "—", duration_w, accent)
             _chip(
                 draw,
@@ -480,47 +571,68 @@ def render(
                 accent,
             )
         else:
-            _chip(draw, (text_x, chips_y), "DURATION", fmt_duration(total) if total else "—", 196, accent)
-            _chip(draw, (text_x + 212, chips_y), "SOURCE", str(getattr(track, "source", "stream")) or "stream", 190, accent)
+            source = str(getattr(track, "source", "stream")) or "stream"
+            _chip(draw, (text_x, chips_y), "DURATION", fmt_duration(total) if total else "—", 190, accent)
+            _chip(draw, (text_x + 206, chips_y), "SOURCE", source[:12], 200, accent)
 
         # ── waveform ───────────────────────────────────────────────────────
         elapsed = state.elapsed() if state else 0
         ratio = max(0.0, min(1.0, elapsed / total)) if total else 0.0
-        wave_y = 566
-        gap = 5
-        bar_w = 5
-        count = max(12, (W - text_x - 62) // (bar_w + gap))
+        wave_y = 596
+        gap = 4
+        bar_w = 4
+        count = max(12, (W - text_x - 56) // (bar_w + gap))
         heights = _bars(str(track.id or track.title), count)
         cursor = text_x
         played_until = ratio * count
         for index, height in enumerate(heights):
             played = index < played_until
+            mix = index / max(1, count - 1)
+            colour = tuple(
+                int(accent[channel] * (1 - mix) + accent2[channel] * mix) for channel in range(3)
+            )
             top = wave_y - height
             draw.rounded_rectangle(
                 (cursor, top, cursor + bar_w, wave_y + height // 3),
                 radius=2,
-                fill=accent if played else (accent[0], accent[1], accent[2], 70),
+                fill=(*colour, 255) if played else (*colour, 62),
             )
             cursor += bar_w + gap
 
+        if ratio:
+            head = text_x + ratio * count * (bar_w + gap)
+            draw.line([(head, wave_y - 58), (head, wave_y + 20)], fill=(*accent2, 210), width=2)
+
         draw.text(
-            (text_x, wave_y + 42),
+            (text_x, wave_y + 34),
             fmt_duration(elapsed),
-            font=font(20, 500),
+            font=font(19, 500),
             fill=(226, 226, 236) if elapsed else MUTED,
         )
         total_text = fmt_duration(total) if total else "live"
-        face = font(20, 500)
+        face = font(19, 500)
         draw.text(
-            (W - 62 - draw.textlength(total_text, font=face), wave_y + 42),
+            (W - 56 - draw.textlength(total_text, font=face), wave_y + 34),
             total_text,
             font=face,
             fill=MUTED,
         )
 
-        _letterspaced(
-            draw, (56, H - 74), "MUSIC BEYOND LIMITS", font(13, 500, "MUSIC BEYOND LIMITS"), (150, 150, 168), 3
-        )
+        # ── up next (fills the space under the sleeve with real information) ─
+        upcoming = [item for item in (state.queue if state else []) if item][:1]
+        if upcoming:
+            nxt = upcoming[0]
+            _letterspaced(draw, (56, 566), "UP NEXT", font(11, 600, "UP NEXT"), (132, 132, 152), 3)
+            face = font(19, 500, nxt.title)
+            draw.text(
+                (56, 588),
+                _clip(draw, nxt.title, face, 300),
+                font=face,
+                fill=(214, 214, 226),
+            )
+            face = font(17, 500)
+            meta = f"{getattr(nxt, 'uploader', '') or fmt_duration(getattr(nxt, 'duration', 0))}"
+            draw.text((56, 616), _clip(draw, meta, face, 300), font=face, fill=(132, 132, 152))
 
         canvas = Image.alpha_composite(canvas.convert("RGBA"), layer).convert("RGB")
         # accent hairline that ties the poster to the brand

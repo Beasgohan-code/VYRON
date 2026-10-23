@@ -27,19 +27,36 @@ logger = logging.getLogger(__name__)
 MAX_ART_BYTES = 4 * 1024 * 1024  # Telegram photos are far below this
 
 
+def _media_of(message: Message):
+    """The photo (or image document) attached to *message*, if any."""
+    photo = getattr(message, "photo", None)
+    if photo is not None:
+        return photo
+    document = getattr(message, "document", None)
+    if document is not None and (getattr(document, "mime_type", "") or "").lower().startswith("image/"):
+        return document
+    return None
+
+
 def photo_file_id(message: Message) -> str:
     """The best file id available on *message* (its own photo, or a reply's)."""
     for candidate in (message.reply_to_message, message):
         if candidate is None:
             continue
-        photo = getattr(candidate, "photo", None)
-        if photo is not None:
-            return str(getattr(photo, "file_id", "") or "")
-        document = getattr(candidate, "document", None)
-        mime = (getattr(document, "mime_type", "") or "").lower()
-        if document is not None and mime.startswith("image/"):
-            return str(getattr(document, "file_id", "") or "")
+        media = _media_of(candidate)
+        if media is not None:
+            return str(getattr(media, "file_id", "") or "")
     return ""
+
+
+def art_too_big(message: Message) -> bool:
+    """Photos are compressed by Telegram; an image *file* can be a huge PNG."""
+    for candidate in (message.reply_to_message, message):
+        media = _media_of(candidate) if candidate is not None else None
+        size = int(getattr(media, "file_size", 0) or 0) if media is not None else 0
+        if size and size > MAX_ART_BYTES:
+            return True
+    return False
 
 
 async def allowed_to_set(client: Client, message: Message) -> bool:
@@ -123,6 +140,18 @@ def register(client: Client) -> None:
             return
 
         if file_id:
+            if art_too_big(message):
+                await rich.send(
+                    actor,
+                    message.chat.id,
+                    cards.error_card(
+                        "<b>That picture is too big</b>\n"
+                        f"<blockquote>Keep the artwork under {MAX_ART_BYTES // (1024 * 1024)} MB "
+                        "— a normal photo works best.</blockquote>"
+                    ),
+                    reply_to=message.id,
+                )
+                return
             if not await allowed_to_set(actor, message):
                 await rich.send(
                     actor,
@@ -137,10 +166,7 @@ def register(client: Client) -> None:
             await save_art(actor, message, file_id)
             return
 
-        if current and argument in {"on", "enable"}:
-            await show_status(actor, message)
-            return
-
+        del current  # only the file id matters for the card
         await show_status(actor, message)
 
 

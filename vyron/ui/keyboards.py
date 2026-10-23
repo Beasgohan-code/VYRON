@@ -119,7 +119,7 @@ def search_results(tracks) -> KM:
     rows = [
         [
             _btn(
-                f"{index + 1} · {_duration(track.duration)} · {track.title[:30]}",
+                f"{G('play')} {index + 1} · {_duration(track.duration)} · {track.title[:30]}",
                 f"v:pick:{index}",
             )
         ]
@@ -133,7 +133,7 @@ def results_page(tracks) -> KM:
     rows = [
         [
             _btn(
-                f"⬇ {index + 1} · {_duration(track.duration)} · {track.title[:28]}",
+                f"{G('download')} {index + 1} · {_duration(track.duration)} · {track.title[:28]}",
                 f"v:dl:{index}",
             )
         ]
@@ -171,18 +171,24 @@ def start_panel(player: bool = False) -> KM:
         button = app_button()
         if button is not None:
             rows.append([button])
-    rows += [
-        [
-            _url(f"{G('rocket')} Add to group", f"https://t.me/{settings.bot_username}?startgroup=true"),
-            _btn(f"{G('queue')} Commands", "v:help:main"),
-        ],
-        [
-            _url(f"{G('chat')} Support", settings.support_chat),
-            _url(f"{G('star')} Updates", settings.updates_channel),
-        ],
-        [_btn(f"{G('info')} About VYRON", "v:about")],
-    ]
-    return KM(rows)
+    rows.append([_btn(f"{G('tools')} Commands", "v:help:main")])
+    links: list[B] = []
+    if settings.bot_username:
+        links.append(
+            _url(
+                f"{G('plus')} Add to group",
+                f"https://t.me/{settings.bot_username}?startgroup=true",
+            )
+        )
+    if settings.support_chat:
+        links.append(_url(f"{G('chat')} Support", settings.support_chat))
+    if settings.updates_channel:
+        links.append(_url(f"{G('star')} Updates", settings.updates_channel))
+    rows.append(links[:2])
+    if len(links) > 2:
+        rows.append(links[2:])
+    rows.append([_btn(f"{G('info')} About VYRON", "v:about")])
+    return KM([row for row in rows if row])
 
 
 def help_nav(section: str = "main") -> KM:
@@ -195,11 +201,13 @@ def help_nav(section: str = "main") -> KM:
         "social": "Groups",
         "power": "Owner",
     }
-    row = [
+    buttons = [
         _btn(("• " if tab == section else "") + labels[tab], f"v:help:{tab}")
         for tab in tabs
     ]
-    return KM([row, [_btn(f"{G('back')} Close", "v:close")]])
+    rows = [buttons[index : index + 3] for index in range(0, len(buttons), 3)]
+    rows.append([_btn(f"{G('back')} Close", "v:close")])
+    return KM(rows)
 
 
 def back_close(back_data: str = "v:np") -> KM:

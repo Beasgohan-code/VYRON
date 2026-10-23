@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from pyrogram import Client, filters
+from pyrogram.errors import FloodWait
 from pyrogram.types import Message
 
 from vyron.runtime import runtime
@@ -14,6 +16,8 @@ from vyron.core.musicapi import get_music_api
 from vyron.ui import cards, rich
 from vyron.ui.theme import E, reload_pack
 from vyron.utils.helpers import command_args, is_private_chat
+
+logger = logging.getLogger(__name__)
 from vyron.utils.filters import owner
 
 
@@ -66,7 +70,7 @@ def register(client: Client) -> None:
             f"{E('live')} <b>Active sessions</b>\n<blockquote>{body}</blockquote>",
         )
 
-    @client.on_message(filters.command("broadcast") & owner)
+    @client.on_message(filters.command(["broadcast", "gcast"]) & owner)
     async def _broadcast(_: Client, message: Message) -> None:
         text = command_args(message)
         target = message.reply_to_message
@@ -84,14 +88,26 @@ def register(client: Client) -> None:
         )
         sent = failed = 0
         for index, chat_id in enumerate(chat_ids, start=1):
-            try:
-                if target:
-                    await target.copy(chat_id)
-                else:
-                    await client.send_message(chat_id, text)
-                sent += 1
-            except Exception:
-                failed += 1
+            for attempt in (1, 2):
+                try:
+                    if target:
+                        await target.copy(chat_id)
+                    else:
+                        await client.send_message(chat_id, text)
+                    sent += 1
+                    break
+                except FloodWait as exc:
+                    # Telegram's own rate limit is not a failed delivery: wait
+                    # the exact amount it asks for, then retry this chat once.
+                    wait = int(getattr(exc, "value", 5) or 5) + 1
+                    logger.info("broadcast flood wait %ss", wait)
+                    if attempt == 1:
+                        await asyncio.sleep(wait)
+                        continue
+                    failed += 1
+                except Exception:
+                    failed += 1
+                    break
             if status and index % 10 == 0:
                 await rich.edit(
                     client,

@@ -1,6 +1,6 @@
 # ---------------------------------------------------------------------------
 #  VYRON — owner & operations extras
-#  block/unblock · activevc · sysstats · leaveall · gcast · sudo list
+#  block/unblock · activevc · sysstats · leaveall · sudo list
 #  Maintenance and broadcast commands.
 # ---------------------------------------------------------------------------
 from __future__ import annotations
@@ -201,38 +201,6 @@ def register(client: Client) -> None:
             client,
             message.chat.id,
             B.row(B.btn(f"{E('check')} Left {len(chats)} voice chats", data="v:noop", style="success")),
-        )
-
-    # ── broadcast alias (gcast) ────────────────────────────────────────────
-    @client.on_message(filters.command(["gcast"]) & owner)
-    async def _gcast(_: Client, message: Message) -> None:
-        text = command_args(message)
-        target = message.reply_to_message
-        if not text and not target:
-            await rich.send(client, message.chat.id, f"{E('info')} Usage: <code>/gcast hello</code>")
-            return
-        chats = await runtime.storage.all_chat_ids()
-        sent = failed = 0
-        for chat_id in chats:
-            try:
-                if target:
-                    await target.copy(chat_id)
-                else:
-                    await client.send_message(chat_id, text)
-                sent += 1
-            except Exception:
-                failed += 1
-            await asyncio.sleep(0.05)
-        await rich.send(
-            client,
-            message.chat.id,
-            B.row(
-                B.btn(
-                    f"{E('rocket')} gcast: {sent} sent · {failed} failed",
-                    data="v:noop",
-                    style="success",
-                )
-            ),
         )
 
     # ── restart hint ───────────────────────────────────────────────────────
