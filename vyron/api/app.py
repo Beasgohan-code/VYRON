@@ -126,7 +126,7 @@ def build_app() -> web.Application:
     router.add_delete("/admin/keys/{identifier}", routes.admin_key_item)
     router.add_post("/admin/keys/{identifier}/rotate", routes.admin_rotate)
 
-    # legacy Eldian aliases
+    # legacy aliases (kept so old integrations never break)
     router.add_post("/track/by-video-id", routes.track_by_video_id)
     router.add_get("/track/by-video-id", routes.track_by_video_id)
     router.add_post("/track/by-query", routes.track_by_query)

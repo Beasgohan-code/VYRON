@@ -858,7 +858,7 @@ def music_api_card(
         open=not compact,
     )
     legacy = B.details(
-        f"{E('shield')} <b>Eldian-compatible</b>",
+        f"{E('shield')} <b>Drop-in API</b>",
         B.table(
             ["Method", "Path"],
             [
@@ -868,7 +868,7 @@ def music_api_card(
                 ("<b>GET</b>", "/v1/key"),
             ],
         )
-        + B.note(f"{E('info')} Existing Eldian clients keep working — just swap the base URL."),
+        + B.note(f"{E('info')} Old integrations keep working — just swap the base URL."),
         open=False,
     )
     snippet = (
@@ -1178,7 +1178,7 @@ def about_card() -> str:
             (f"{E('bolt')} UI", "Bot API 10.3 rich messages"),
             (f"{E('cloud')} Deploy", "Docker · Render · Koyeb · VPS"),
             (f"{E('spark')} Extras", "lyrics · downloads · web app"),
-            (f"{E('code')} Music API", "Eldian-compatible <code>/v1</code>, same URL"),
+            (f"{E('code')} Music API", "drop-in <code>/v1</code> + <code>/vyron</code>, same URL"),
         ]
     )
     return (

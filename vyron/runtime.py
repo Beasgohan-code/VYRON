@@ -75,6 +75,7 @@ class Runtime:
             storage=self.storage,
             youtube=self.youtube,
             assistant=self.assistant,
+            downloader=self.downloader,
         )
         logger.info("services ready (storage=%s, streaming=%s)", self.storage.backend, self.streaming_ready)
 

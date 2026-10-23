@@ -105,7 +105,7 @@ def spec(request: web.Request) -> dict:
             "version": "2.0",
             "summary": "Downloads, streaming, search, metadata, lyrics and keys for Telegram music bots.",
             "description": (
-                "A production-grade, Eldian-compatible music API served by the VYRON bot on the "
+                "A production-grade music API served by the VYRON bot on the "
                 "same URL as its Mini App. Authenticate with `X-API-Key` (or `Authorization: Bearer`). "
                 "Every failure returns `{ok:false, error, code, request_id}`."
             ),
@@ -382,7 +382,7 @@ def spec(request: web.Request) -> dict:
                     "responses": {"200": {"description": "revoked"}, **_err(403, 404)},
                 }
             },
-            # ── legacy (Eldian) aliases ────────────────────────────────────
+            # ── legacy aliases (old clients keep working) ──────────────────
             "/track/by-video-id": {
                 "post": {
                     "tags": ["Tracks"],

@@ -7,7 +7,7 @@
 #    canonical  POST /tracks · GET /tracks/{id} · GET /tracks/{id}/stream
 #               POST /search · GET /lyrics · GET /me · /admin/keys
 #    legacy     POST /track/by-video-id · POST /track/by-query
-#               GET /info/by-video-id · GET /key          (Eldian compatible)
+#               GET /info/by-video-id · GET /key          (legacy aliases)
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 

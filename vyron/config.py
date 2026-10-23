@@ -75,6 +75,10 @@ class Settings:
     autoplay_default: bool = field(default_factory=lambda: _flag("AUTOPLAY", True))
     autoleave_24_7: bool = field(default_factory=lambda: _flag("ALWAYS_ON", False))
     stream_cache_ttl: int = field(default_factory=lambda: max(60, _int("STREAM_CACHE_TTL", 1800)))
+    # ShizuMusic's core idea: download the track first, then stream the local
+    # file. Immune to 403s, expiring URLs and mid-song drops — the usual reason
+    # a hosted deployment "plays nothing". Costs the first few seconds.
+    play_from_disk: bool = field(default_factory=lambda: _flag("PLAY_FROM_DISK", True))
     download_cache_hours: int = field(default_factory=lambda: max(1, _int("DOWNLOAD_CACHE_HOURS", 24)))
     maintenance_hours: int = field(default_factory=lambda: _int("MAINTENANCE_HOURS", 6))
     keepalive_minutes: int = field(default_factory=lambda: max(0, _int("KEEPALIVE_MINUTES", 10)))
@@ -95,6 +99,19 @@ class Settings:
         default_factory=lambda: _env("YOUTUBE_COOKIES") or _env("COOKIES_TEXT")
     )
     proxy: str = field(default_factory=lambda: _env("PROXY"))
+    # ── Download API (/vyron; engine in vyron/engine/) ─────────────────────
+    vyron_api: bool = field(default_factory=lambda: _flag("VYRON_API", True))
+    yt_dlp_format: str = field(default_factory=lambda: _env("YT_DLP_FORMAT", "bestaudio/best"))
+    yt_dlp_socket_timeout: int = field(default_factory=lambda: max(5, _int("YT_DLP_SOCKET_TIMEOUT", 20)))
+    yt_dlp_retries: int = field(default_factory=lambda: max(1, _int("YT_DLP_RETRIES", 3)))
+    download_cleanup_seconds: int = field(
+        default_factory=lambda: max(60, _int("DOWNLOAD_CLEANUP_SECONDS", 900))
+    )
+    youtube_proxy: str = field(default_factory=lambda: _env("YOUTUBE_PROXY") or _env("YT_DLP_PROXY"))
+    youtube_proxy_file: str = field(default_factory=lambda: _env("YOUTUBE_PROXY_FILE"))
+    youtube_cookies_file: str = field(
+        default_factory=lambda: _env("YOUTUBE_COOKIES_FILE") or _env("YT_DLP_COOKIES_FILE")
+    )
     ytdlp_args: str = field(default_factory=lambda: _env("YTDLP_ARGS"))
     # When every yt-dlp client fails, ask Invidious/Piped for a direct URL.
     # Set STREAM_FALLBACK=off for a yt-dlp-only deployment, or override the
@@ -133,7 +150,7 @@ class Settings:
     webapp_title: str = field(default_factory=lambda: _env("WEBAPP_TITLE", "VYRON Player"))
     webapp_dir: Path = field(default_factory=lambda: Path(_env("WEBAPP_DIR", str(ROOT / "webapp"))))
 
-    # ── Music API (Eldian-compatible, served on the same URL) ─────────────
+    # ── Music API (served on the same URL, one deploy) ────────────────────
     music_api: bool = field(default_factory=lambda: _flag("MUSIC_API", True))
     music_api_open: bool = field(default_factory=lambda: _flag("MUSIC_API_OPEN", False))
     music_api_rate: int = field(default_factory=lambda: max(1, _int("MUSIC_API_RATE", 30)))

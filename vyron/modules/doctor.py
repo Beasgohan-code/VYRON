@@ -85,6 +85,26 @@ def _cookies_state() -> tuple[bool | None, str]:
     return False, "set but missing on disk"
 
 
+def _disk_state() -> tuple[bool, str]:
+    """Can the bot actually write a downloaded track?"""
+    target = settings.downloads_dir
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        probe = target / ".doctor"
+        probe.write_bytes(b"ok")
+        probe.unlink(missing_ok=True)
+    except Exception as exc:
+        return False, f"{target} · {type(exc).__name__}"
+    free_mb = 0
+    try:
+        import shutil
+
+        free_mb = int(shutil.disk_usage(target).free / (1024 * 1024))
+    except Exception:  # pragma: no cover - exotic filesystems
+        pass
+    return True, f"{free_mb} MB free" if free_mb else str(target)
+
+
 def _engine_state() -> tuple[bool, str]:
     if runtime.calls is None:
         reason = "STRING_SESSION missing" if not settings.session_string else "session failed to start"
@@ -175,6 +195,22 @@ def register(client: Client) -> None:
                 f"{E('api')} music api",
                 settings.music_api,
                 "open" if settings.music_api_open else "keyed",
+            )
+        )
+        rows.append(
+            _row(
+                f"{E('download')} download api",
+                settings.vyron_api,
+                "/vyron/v1 · 2 at a time" if settings.vyron_api else "VYRON_API=off",
+            )
+        )
+        disk_ok, disk_note = _disk_state()
+        rows.append(_row(f"{E('cloud')} download dir", disk_ok, disk_note))
+        rows.append(
+            _row(
+                f"{E('play')} playback",
+                True,
+                "download → local file" if settings.play_from_disk else "stream URLs",
             )
         )
 

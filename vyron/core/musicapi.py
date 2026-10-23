@@ -11,7 +11,7 @@
 #    lookup and display, so a leaked database dump cannot be replayed.
 #  * every key carries scopes (`read`, `search`, `download`, `admin`), an
 #    optional expiry, a label and per-key usage counters.
-#  * legacy records from the old plaintext format (and upstream Eldian
+#  * legacy records from the old plaintext format (and older upstream
 #    databases) are still accepted and transparently upgraded on first use.
 #
 #  The store is VYRON's normal storage layer: MongoDB when configured, a JSON

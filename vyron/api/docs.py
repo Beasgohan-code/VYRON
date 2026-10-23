@@ -139,7 +139,7 @@ ERRORS = [
 CHANGELOG = [
     ("2.0", "Hashed keys, scopes, expiry, rotation, admin endpoints, metrics (JSON + Prometheus), "
            "canonical REST routes, OpenAPI 3.1, richer error envelope, request ids."),
-    ("1.0", "Eldian-compatible track download, search, metadata, lyrics, keys and docs."),
+    ("1.0", "the original track download, search, metadata, lyrics, keys and docs."),
 ]
 
 
@@ -228,7 +228,7 @@ PAGE = Template("""<!doctype html>
 
     <h2 id="overview">Overview</h2>
     <p>The API is mounted at <code>/v1</code> on the deployment that runs the bot. It is
-    <b>Eldian-compatible</b>: the original <code>POST /v1/track/by-video-id</code> flow with an
+    <b>Drop-in</b>: the original <code>POST /v1/track/by-video-id</code> flow with an
     <code>X-API-Key</code> header keeps working, and the canonical routes below add scopes,
     metadata, streaming and metrics.</p>
     <div class="cols">

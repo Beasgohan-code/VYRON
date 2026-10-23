@@ -66,6 +66,7 @@ class Player:
         storage: Storage,
         youtube: YouTube,
         assistant: Any = None,
+        downloader: Any = None,
     ) -> None:
         self.bot = bot
         self.calls = calls
@@ -76,6 +77,9 @@ class Player:
         # chat that nobody has started yet, which is the single most common
         # reason a first /play fails.
         self.assistant = assistant
+        # optional: when set (and PLAY_FROM_DISK is on) tracks are downloaded
+        # once and streamed from the cache — the ShizuMusic model
+        self.downloader = downloader
         self.queues = QueueManager(settings.default_volume, settings.autoplay_default)
 
         self._locks: dict[int, asyncio.Lock] = {}
@@ -301,14 +305,31 @@ class Player:
                 "Voice streaming is not configured — add API_ID, API_HASH and STRING_SESSION."
             )
         state = self.queues.get(chat_id)
-        try:
-            if track.source == "telegram" and Path(track.url).is_file():
-                # already downloaded locally — stream the file, not a URL
-                url = track.url
-            else:
+        url = ""
+        if track.source == "telegram" and Path(track.url).is_file():
+            # already downloaded locally — stream the file, not a URL
+            url = track.url
+        elif getattr(self.settings, "play_from_disk", False) and self.downloader is not None:
+            # ShizuMusic's model: fetch the file once, then hand ntgcalls a
+            # local path. A local stream cannot 403, expire or be throttled
+            # mid-song, which is what makes playback reliable on a datacenter
+            # IP — the cache makes the second play of a track instant.
+            try:
+                path = await self.downloader.fetch(track, video=video)
+                url = str(path)
+                logger.info("playing %s from disk (%s)", track.id, Path(path).suffix)
+            except Exception as exc:
+                logger.warning(
+                    "disk playback failed for %s (%s) — falling back to the stream URL",
+                    track.id,
+                    exc,
+                )
+                journal.warn("player", "disk playback failed, using the URL", track=track.id, error=str(exc))
+        if not url:
+            try:
                 url = await self.youtube.stream_url(track, video=video)
-        except MediaError as exc:
-            raise StreamError(f"Could not resolve that track: {exc}") from exc
+            except MediaError as exc:
+                raise StreamError(f"Could not resolve that track: {exc}") from exc
 
         stream = MediaStream(
             url,

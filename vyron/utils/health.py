@@ -9,6 +9,7 @@ import logging
 
 from aiohttp import web
 
+from vyron.config import settings
 from vyron.runtime import runtime
 
 logger = logging.getLogger(__name__)
@@ -41,12 +42,17 @@ async def _health(_request: web.Request) -> web.Response:
     return web.json_response(
         {
             "ok": True,
-            # `status` keeps Eldian-style monitors ({"status": "ok"}) happy too.
+            # `status` keeps third-party uptime monitors ({"status": "ok"}) happy too.
             "status": "ok",
             "ready": ready,
             "degraded": bool(runtime.boot_problems) or not runtime.streaming_ready,
             "problems": list(runtime.boot_problems),
             "streaming": runtime.streaming_ready,
+            "playback": "disk" if settings.play_from_disk else "stream",
+            "apis": {
+                "music": settings.music_api,
+                "download": settings.vyron_api,
+            },
             "uptime": round(runtime.uptime, 1),
             "watchdog": {
                 key: value
@@ -85,6 +91,15 @@ def build_app(*, with_webapp: bool = True) -> web.Application:
         register_music_api(app)
     except Exception as exc:  # pragma: no cover - never block liveness
         logger.warning("music api disabled: %s", exc)
+    # The download API answers on /vyron of the *same* port, so a client that
+    # only wants a file (or one ported from another service) changes its base
+    # URL and nothing else.
+    try:
+        from vyron.engine import register as register_download_api
+
+        register_download_api(app)
+    except Exception as exc:  # pragma: no cover - never block liveness
+        logger.warning("download api disabled: %s", exc)
     return app
 
 

@@ -356,10 +356,9 @@ Everything above also works from the inline buttons on the now-playing card.
 
 A professional music API for *other* bots and apps, served by the same aiohttp
 process as `/health` and the Mini App — **one deploy, one URL, no second
-service**. The legacy wire format from
-[`Eldian-Network/eldian-music-api`](https://github.com/Eldian-Network/eldian-music-api)
-still works (`POST /v1/track/by-video-id` + `X-API-Key` returns audio), and the
-canonical routes add metadata, streaming, scopes, expiry and metrics.
+service**. The original one-shot wire format still works
+(`POST /v1/track/by-video-id` + `X-API-Key` returns audio), and the canonical
+routes add metadata, streaming, scopes, expiry and metrics.
 
 | Method | Path | What it does | Scope |
 | --- | --- | --- | --- |
@@ -384,6 +383,9 @@ canonical routes add metadata, streaming, scopes, expiry and metrics.
 | `POST` | `/v1/track/by-query` | **legacy** download by query | `download` |
 | `GET` | `/v1/info/by-video-id` | **legacy** metadata | `read` |
 | `GET` | `/v1/key` | **legacy** key info | — |
+| `POST` | `/vyron/v1/track/by-video-id` | one-shot audio download | `download` |
+| `POST` | `/vyron/v1/track/by-query` | search, then download the top hit | `download` |
+| `GET` | `/vyron/health` | engine status (format, retries, cookies) | — |
 
 ```bash
 curl -X POST "$WEBAPP_URL/v1/tracks" \
@@ -426,10 +428,46 @@ answers `404`, never someone else's file.
 - **Docs** — a branded, self-contained page at `/v1/docs` (endpoint table,
   copy-paste snippets, live status check) plus `/v1/openapi.json` for generated
   clients.
-- **Bring your old keys** — keys live in the `api_keys` collection, exactly like
-  the upstream project, so pointing `MONGO_DB=eldian_music` at an existing
-  Eldian database keeps every key already handed out working (legacy plaintext
-  records are accepted and migrated on first use).
+- **Bring your old keys** — keys live in the `api_keys` collection, so pointing
+  `MONGODB_DB` at an existing deployment keeps every key already handed out
+  working (legacy plaintext records are accepted and migrated on first use).
+
+### 🎛 The download API — `/vyron`, two calls
+
+Not every client wants a music library. Two endpoints answer the only question a
+script usually has — *give me this track* — and they run in the same process on
+the same URL, so there is no second deploy and no second bill:
+
+```bash
+# by video id
+curl -X POST "$WEBAPP_URL/vyron/v1/track/by-video-id" \
+  -H "X-API-Key: vyrn_xxxxxxxx" -H "Content-Type: application/json" \
+  -d '{"video_id":"dQw4w9WgXcQ"}' --output track.m4a
+
+# or by plain text — we search, then download the top hit
+curl -X POST "$WEBAPP_URL/vyron/v1/track/by-query" \
+  -H "X-API-Key: vyrn_xxxxxxxx" -H "Content-Type: application/json" \
+  -d '{"query":"arijit singh kesariya"}' --output track.m4a
+```
+
+- **Bytes, then gone** — the response is the file; the temp directory is deleted
+  the moment the response finishes writing, and anything left behind by a crash
+  is swept on boot (`DOWNLOAD_CLEANUP_SECONDS`, default 900).
+- **Bounded** — two downloads run at once, so API traffic can never starve
+  voice-chat playback of CPU or upstream quota.
+- **One key store** — `/getapi`, `/apikeys` and the Mini App's **Music API** tab
+  mint keys that work on `/v1` and `/vyron` alike, with the same scopes, rate
+  limits, headers (`X-Track-Id`, `X-Engine`, `X-API-Version`) and error
+  envelopes. `/vyron/v1/docs` serves a small OpenAPI 3 document.
+- **Tuning** — `YT_DLP_FORMAT`, `YT_DLP_SOCKET_TIMEOUT`, `YT_DLP_RETRIES`,
+  `YOUTUBE_PROXY` (`YT_DLP_PROXY`) or `YOUTUBE_PROXY_FILE`, `YOUTUBE_COOKIES`
+  or `YOUTUBE_COOKIES_FILE`, `DOWNLOAD_CLEANUP_SECONDS`. Defaults are sane;
+  cookies are only needed for age/region-locked videos.
+- **`VYRON_API=off`** unmounts it; `/health` and `/v1` are unaffected.
+
+The download engine is derived from [Eldian Music
+API](https://github.com/Eldian-Network/eldian-music-api) (MIT); its licence text
+sits at the top of `vyron/engine/youtube.py`, above the code it covers.
 
 ### 🔑 Owner access — web app + API
 
@@ -673,7 +711,7 @@ VYRON/
 │   │   ├── maintenance.py      # periodic downloads + DB sweep
 │   │   ├── keepalive.py        # self-ping so free hosts stay awake
 │   │   ├── watchdog.py         # reconnects a dropped bot/assistant client
-│   │   ├── timers.py           # /timer parsing + per-chat sleep timers
+│   │   ├── autoplay.py         # similar-track radio when the queue ends
 │   │   ├── playlists.py        # per-user saved playlists
 │   │   └── pending.py          # short-lived picker state
 │   ├── ui/
@@ -686,6 +724,7 @@ VYRON/
 │   │                           # channel, moderation, locks, admin, extras, inline, callbacks,
 │   │                           # smartqueue, savedplaylists, diagnostics, power,
 │   │                           # assistant_tools, convenience
+│   ├── engine/                 # the download API: yt-dlp engine + /vyron routes
 │   ├── web/                    # Mini App: auth, JSON API, /v1 music API
 │   ├── utils/                  # helpers, filters, net, health server, artwork renderer
 │   └── tools/                  # session generator, emoji pack builder, cover generator, preview

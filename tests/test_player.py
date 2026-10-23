@@ -47,12 +47,14 @@ class FakeYouTube:
     def __init__(self) -> None:
         self.broken: set[str] = set()
         self.stream_info_calls: list[str] = []
+        self.stream_url_calls: list[str] = []
         self.related_calls = 0
         self.suggestions: list[Track] = []
         self.searches: list[str] = []
         self.search_results: list[Track] = []
 
     async def stream_url(self, track, video=False):
+        self.stream_url_calls.append(track.id)
         if track.id in self.broken:
             raise StreamError("unavailable")
         return f"https://cdn/{track.id}.m4a"
@@ -116,20 +118,22 @@ SETTINGS = SimpleNamespace(
     max_queue_size=20,
     np_refresh_seconds=45,
     idle_leave_seconds=300,
+    play_from_disk=True,
 )
 
 
-def make_player(*, assistant=None, calls=None) -> tuple[Player, FakeCalls, FakeYouTube, FakeStorage]:
+def make_player(*, assistant=None, calls=None, downloader=None, settings=None):
     calls = calls if calls is not None else FakeCalls()
     youtube = FakeYouTube()
     storage = FakeStorage()
     player = Player(
         bot=None,
         calls=calls,
-        settings=SETTINGS,
+        settings=settings or SETTINGS,
         storage=storage,
         youtube=youtube,
         assistant=assistant,
+        downloader=downloader,
     )
     return player, calls, youtube, storage
 
@@ -462,3 +466,55 @@ def test_autoplay_mood_and_language_survive_a_persist_round_trip():
 
     assert storage.saved[10]["mood"] == "chill"
     assert storage.saved[10]["language"] == "hindi"
+
+
+# ── disk playback (the ShizuMusic model) ────────────────────────────────────
+class FakeDownloader:
+    def __init__(self, path, *, fail=False):
+        self.path = path
+        self.fail = fail
+        self.calls: list[tuple[str, bool]] = []
+
+    async def fetch(self, track, *, video=False, on_progress=None):
+        self.calls.append((track.id, video))
+        if self.fail:
+            raise RuntimeError("every engine failed")
+        return self.path
+
+
+def test_playback_streams_the_downloaded_file(tmp_path):
+    local = tmp_path / "track.mp3"
+    local.write_bytes(b"ID3")
+    downloader = FakeDownloader(local)
+    player, calls, youtube, storage = make_player(downloader=downloader)
+
+    run(player.play_track(10, track("abc12345678")))
+
+    assert downloader.calls == [("abc12345678", False)]
+    assert calls.played == [str(local)]
+    assert youtube.stream_url_calls == []  # no remote URL was ever resolved
+
+
+def test_playback_falls_back_to_the_stream_url_when_the_download_fails(tmp_path):
+    downloader = FakeDownloader(tmp_path / "missing.mp3", fail=True)
+    player, calls, youtube, storage = make_player(downloader=downloader)
+
+    run(player.play_track(10, track("abc12345678")))
+
+    assert downloader.calls and youtube.stream_url_calls == ["abc12345678"]
+    assert calls.played == ["https://cdn/abc12345678.m4a"]
+
+
+def test_disk_playback_can_be_switched_off(tmp_path):
+    from types import SimpleNamespace
+
+    local = tmp_path / "track.mp3"
+    local.write_bytes(b"ID3")
+    downloader = FakeDownloader(local)
+    settings = SimpleNamespace(**{**vars(SETTINGS), "play_from_disk": False})
+    player, calls, youtube, storage = make_player(downloader=downloader, settings=settings)
+
+    run(player.play_track(10, track("abc12345678")))
+
+    assert downloader.calls == []
+    assert youtube.stream_url_calls == ["abc12345678"]
