@@ -1,129 +1,146 @@
-import { CircleCheck, CircleX, Info } from "lucide-react";
+import { AlertTriangle, Compass, Download, WifiOff } from "lucide-react";
 import { useEffect, useState } from "react";
-import { CommandPalette } from "./components/CommandPalette";
-import { MobileTabBar, MiniPlayer } from "./components/MobileChrome";
-import { PlayBar } from "./components/PlayBar";
-import { Modal } from "./components/Modal";
-import { NowPlayingRail } from "./components/NowPlayingRail";
-import { SessionGate } from "./components/SessionGate";
-import { ShortcutSheet } from "./components/ShortcutSheet";
-import { Sidebar } from "./components/Sidebar";
-import { Topbar } from "./components/Topbar";
-import { reveal } from "./lib/anim";
+import { Dock } from "./components/Dock";
+import { Rail, Tabs } from "./components/Nav";
+import { Sheet } from "./components/Sheet";
 import { useApp } from "./lib/store";
-import { ApiView } from "./views/ApiView";
-import { HomeView } from "./views/HomeView";
-import { LibraryView } from "./views/LibraryView";
-import { PlaylistsView } from "./views/PlaylistsView";
-import { ProfileView } from "./views/ProfileView";
-import { QueueView } from "./views/QueueView";
-import { RoomsView } from "./views/RoomsView";
-import { PlayerView } from "./views/PlayerView";
-import { SearchView } from "./views/SearchView";
+import { Home } from "./views/Home";
+import { Library } from "./views/Library";
+import { Owner } from "./views/Owner";
+import { Player } from "./views/Player";
+import { Rooms } from "./views/Rooms";
+import { Search } from "./views/Search";
+import { You } from "./views/You";
+
+const TITLES: Record<string, string> = {
+  home: "Home",
+  search: "Search",
+  library: "Library",
+  rooms: "Rooms",
+  profile: "You",
+  api: "Owner",
+  queue: "Queue",
+  playlists: "Playlists",
+};
 
 export default function App() {
-  const { view, audio, toastMessage, toastTone } = useApp();
-  const [shortcuts, setShortcuts] = useState(false);
+  const { view, setView, access, toastMessage, toastTone, audio, state, refreshState } = useApp();
+  const [retrying, setRetrying] = useState(false);
 
-  /* every view change fades its blocks up, staggered, via anime.js */
-  useEffect(() => {
-    const root = document.querySelector<HTMLElement>(".view.active");
-    if (!root) return;
-    reveal(root.querySelectorAll(":scope > *"), { y: 14, delay: 38, duration: 540 });
-  }, [view]);
-
-  /* cards follow the pointer: one delegated listener instead of a handler each */
-  useEffect(() => {
-    const onMove = (event: PointerEvent) => {
-      const target = event.target as HTMLElement | null;
-      const card = target?.closest<HTMLElement>(".track-card, .playlist-card, .room-card");
-      if (!card) return;
-      const rect = card.getBoundingClientRect();
-      card.style.setProperty("--mx", `${event.clientX - rect.left}px`);
-      card.style.setProperty("--my", `${event.clientY - rect.top}px`);
-    };
-    window.addEventListener("pointermove", onMove, { passive: true });
-    return () => window.removeEventListener("pointermove", onMove);
-  }, []);
-
-  /* keyboard shortcuts — ignored while typing */
+  /* keyboard: "/" jumps to search, space toggles playback */
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
-      const typing = target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
-      if (typing) return;
-      if (event.key === "/") {
+      const typing =
+        target &&
+        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+
+      if (event.key === "/" && !typing) {
         event.preventDefault();
-        window.dispatchEvent(new CustomEvent("vyron:focus-search"));
+        setView("search");
+        window.setTimeout(() => window.dispatchEvent(new Event("vyron:focus-search")), 60);
       }
-      if (event.code === "Space") {
+      if (event.code === "Space" && !typing && audio.track) {
         event.preventDefault();
         audio.toggle();
-      }
-      if (event.key === "ArrowRight") audio.seekBy(5);
-      if (event.key === "ArrowLeft") audio.seekBy(-5);
-      if (event.key.toLowerCase() === "n") audio.next();
-      if (event.key.toLowerCase() === "m") audio.toggleMute();
-      if (event.key === "?") {
-        event.preventDefault();
-        setShortcuts((open) => !open);
-      }
-      if (event.key === "Escape") {
-        audio.setExpanded(false);
-        setShortcuts(false);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [audio]);
+  }, [audio, setView]);
+
+  const page = (() => {
+    switch (view) {
+      case "search":
+        return <Search />;
+      case "library":
+      case "playlists":
+        return <Library />;
+      case "rooms":
+        return <Rooms />;
+      case "profile":
+        return <You />;
+      case "api":
+        return <Owner />;
+      default:
+        return <Home />;
+    }
+  })();
 
   return (
-    <div className="app">
-      <Sidebar />
+    <div className={`app ${audio.track ? "with-dock" : ""}`}>
+      <Rail />
 
       <main className="main">
-        <Topbar />
-        <SessionGate />
-        {view === "home" && <HomeView />}
-        {view === "search" && <SearchView />}
-        {view === "library" && <LibraryView />}
-        {view === "queue" && <QueueView />}
-        {view === "playlists" && <PlaylistsView />}
-        {view === "rooms" && <RoomsView />}
-        {view === "api" && <ApiView />}
-        {view === "profile" && <ProfileView />}
-        <footer className="app-footer">
-          <span>VYRON · music beyond limits</span>
-          <span>streaming · downloads · listen together</span>
+        <header className="topbar">
+          <div className="topbar-title">
+            <span className="mobile-brand">VYRON</span>
+            <h2>{TITLES[view] ?? "VYRON"}</h2>
+          </div>
+          <div className="topbar-actions">
+            <button
+              type="button"
+              className="btn-icon"
+              aria-label="Search"
+              onClick={() => {
+                setView("search");
+                window.setTimeout(() => window.dispatchEvent(new Event("vyron:focus-search")), 60);
+              }}
+            >
+              <Compass size={18} />
+            </button>
+            <span className={`status-dot ${state?.streaming ? "on" : ""}`} title={state?.streaming ? "voice chat ready" : "file mode"} />
+          </div>
+        </header>
+
+        {(access === "locked" || access === "offline") && (
+          <div className={`notice ${access === "offline" ? "error" : "warn"}`}>
+            {access === "offline" ? <WifiOff size={15} /> : <AlertTriangle size={15} />}
+            <span>
+              {access === "offline"
+                ? "Cannot reach the VYRON server. Check the deployment, then retry."
+                : "This app needs a Telegram session. Open it from the bot to unlock playback."}
+            </span>
+            <button
+              type="button"
+              className="btn btn-ghost sm"
+              disabled={retrying}
+              onClick={async () => {
+                setRetrying(true);
+                await refreshState();
+                setRetrying(false);
+              }}
+            >
+              {retrying ? "…" : "Retry"}
+            </button>
+          </div>
+        )}
+
+        <div className="view" key={view}>
+          {page}
+        </div>
+
+        <footer className="foot">
+          <span>VYRON v{state?.version ?? "1.2.0"}</span>
+          <span className="foot-dot" />
+          <span>{state?.streaming ? "voice chat" : "file mode"}</span>
+          <span className="foot-dot" />
+          <button type="button" onClick={() => setView("search")}>
+            <Download size={12} /> get music
+          </button>
         </footer>
       </main>
 
-      <aside className="rail">
-        <NowPlayingRail />
-      </aside>
+      <Dock />
+      <Tabs />
+      <Sheet />
+      {audio.expanded && <Player />}
 
-      <PlayBar />
-      <MiniPlayer />
-      <MobileTabBar />
-      {audio.expanded && <PlayerView />}
-      <Modal />
-      <CommandPalette />
-      <ShortcutSheet open={shortcuts} onClose={() => setShortcuts(false)} />
-
-      <div className={`toast ${toastMessage ? "show" : ""} ${toastTone}`} role="status" aria-live="polite">
-        {toastMessage ? (
-          <>
-            {toastTone === "success" ? (
-              <CircleCheck size={15} />
-            ) : toastTone === "error" ? (
-              <CircleX size={15} />
-            ) : (
-              <Info size={15} />
-            )}
-            <span>{toastMessage}</span>
-          </>
-        ) : null}
-      </div>
+      {toastMessage && (
+        <div className={`toast toast-${toastTone}`} role="status" aria-live="polite">
+          {toastMessage}
+        </div>
+      )}
     </div>
   );
 }

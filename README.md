@@ -534,6 +534,23 @@ Full list with comments: [`.env.example`](.env.example).
 
 ---
 
+## 🗒 Owner journal
+
+Everything the process does is recorded once, in one place:
+
+| Where | What |
+| --- | --- |
+| `/logs` (bot, owner DM) | newest events, filter by level or scope, `/logs export`, `/logs clear` |
+| Mini App → **Owner → Journal** | live tail (3 s poll), level/scope filters, copy, export, clear |
+| `GET /api/logs` | `?since=<seq>` cursor, owner token required |
+| `data/journal.jsonl` | rotated at 4 MB, greppable offline |
+
+Recorded automatically: boot and shutdown (version, storage backend, streaming
+readiness, handler count), stream start/stop per chat, voice-chat join/leave,
+watchdog reconnects, MongoDB connection or JSON fallback, every warning/error
+from `vyron.*`, `pyrogram`, `pytgcalls` and `aiohttp`, HTTP 5xx with tracebacks,
+and slow API requests.
+
 ## 🧪 Tests
 
 ```bash

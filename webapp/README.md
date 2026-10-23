@@ -104,6 +104,8 @@ every owner token at once.
 | `POST` | `/api/auth` | – | `{token}` scoped to the current chat |
 | `POST` | `/api/lyrics` | `{title, artist, duration}` | `{text, synced, lines[{time, text}]}` |
 | `GET` | `/api/stream/{id}` | Range supported | audio bytes (`audio/mpeg`/`audio/mp4`, Range-aware; falls back to a real cached download when the upstream URL refuses) |
+| `GET` | `/api/logs` | owner token · `?since=&level=&scope=&n=` | `{events[], stats, system}` — the bot's journal |
+| `POST` | `/api/logs` | owner token · `{action: "clear"\|"export"}` | `{cleared}` / `{file}` |
 | `GET` `POST` | `/api/keys` | `{action: "create"\|"rotate"\|"revoke", label?, id?, scopes?, days?, rate_limit?}` | `keys[]`, `stats`, `metrics`, `base`, `docs`, `openapi`, `scopes`, `is_owner`, `created` — owner only |
 
 The public music API (`/v1`, keys, `/v1/docs`, OpenAPI) is documented in the

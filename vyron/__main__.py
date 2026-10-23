@@ -16,6 +16,7 @@ from vyron.clients import build_assistant, build_bot
 from vyron.config import settings
 from vyron.modules import register_all
 from vyron.core import keepalive, maintenance, watchdog
+from vyron.core.journal import attach, journal
 from vyron.runtime import runtime
 from vyron.ui import cards, rich
 from vyron.utils import health
@@ -47,6 +48,7 @@ COMMANDS = [
     ("api", "music API for other bots"),
     ("getapi", "mint a music API key"),
     ("apitoken", "owner token for web app + API"),
+    ("logs", "owner journal: starts, stops, errors"),
     ("effects", "audio effects panel"),
     ("locks", "content locks & anti-flood"),
     ("warn", "warn a member"),
@@ -123,17 +125,28 @@ async def _notify_owner(bot) -> None:
 async def _async_main() -> int:
     setup_logging(settings.log_level)
     print(banner_text())
+    settings.ensure_dirs()
+    attach(settings.data_dir / "journal.jsonl")
+    journal.info(
+        "boot",
+        "process starting",
+        version=__version__,
+        port=settings.port,
+        music_api=settings.music_api,
+        webapp=settings.webapp,
+    )
 
     problems = settings.validate()
     if problems:
         for problem in problems:
             logger.error("config: %s", problem)
+            journal.error("config", problem)
         logger.error("Copy .env.example to .env and fill it in — see README.md")
         return 1
     for note in settings.warnings():
         logger.warning("config: %s", note)
+        journal.warn("config", note)
 
-    settings.ensure_dirs()
     # open the HTTP port first: Render/Koyeb polls it while the bot dials Telegram
     runner = await health.start(settings.port)
     runtime.settings = settings
@@ -184,11 +197,18 @@ async def _async_main() -> int:
     keepalive.start()
     await _notify_owner(bot)
 
+    storage_backend = runtime.storage.backend if runtime.storage else "none"
     logger.info(
         "VYRON is online — %d handler modules, streaming=%s, storage=%s",
         len(loaded),
         runtime.streaming_ready,
-        runtime.storage.backend if runtime.storage else "none",
+        storage_backend,
+    )
+    journal.boot(
+        version=__version__,
+        storage=storage_backend,
+        streaming=runtime.streaming_ready,
+        handlers=len(loaded),
     )
 
     stop = asyncio.Event()
@@ -203,6 +223,7 @@ async def _async_main() -> int:
         await stop.wait()
     finally:
         logger.info("shutting down…")
+        journal.shutdown("signal")
         await maintenance.stop()
         await watchdog.stop()
         await keepalive.stop()
@@ -236,6 +257,7 @@ def run() -> None:
     except Exception as exc:  # noqa: BLE001 - last-resort deploy log
         logger.debug("startup traceback", exc_info=True)
         logger.error("startup failed: %s", exc)
+        journal.error("boot", "startup failed", exc)
         logger.error(
             "check BOT_TOKEN, that API_ID/API_HASH belong to the same app, "
             "and that this host can reach api.telegram.org"

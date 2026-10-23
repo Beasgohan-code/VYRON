@@ -180,3 +180,46 @@ export interface ActionResult {
   preview?: boolean;
   [key: string]: unknown;
 }
+
+/* ── owner journal ──────────────────────────────────────────────────────── */
+export type JournalLevel = "debug" | "info" | "ok" | "warn" | "error";
+
+export interface JournalEvent {
+  seq: number;
+  ts: number;
+  level: JournalLevel;
+  scope: string;
+  message: string;
+  meta: Record<string, unknown>;
+}
+
+export interface JournalStats {
+  seq: number;
+  buffered: number;
+  counts: Partial<Record<JournalLevel, number>>;
+  errors: number;
+  warnings: number;
+  uptime: number;
+  file: string;
+}
+
+export interface SystemSnapshot {
+  version: string;
+  uptime: number;
+  storage: string;
+  streaming: boolean;
+  resolver: boolean;
+  downloader: boolean;
+  handlers: number;
+  chats: number;
+  playing: number;
+  watchdog: { checks?: number; reconnects?: number; last?: string | null; last_error?: string };
+  keepalive: { enabled?: boolean; runs?: number; last_ok?: number | null; last_status?: number | null };
+}
+
+export interface JournalPayload {
+  ok: boolean;
+  events: JournalEvent[];
+  stats: JournalStats;
+  system: SystemSnapshot;
+}

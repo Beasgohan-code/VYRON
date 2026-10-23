@@ -46,7 +46,7 @@ export const fixtureState = {
     elapsed: 74,
     paused: false,
     source: "youtube",
-    thumbnail: "/app/static/covers/04.jpg",
+    thumbnail: "",
   },
   queue: [
     { id: "d2", index: 1, title: "Neon Skyline", uploader: "VYRON Sessions", duration: 198 },
@@ -136,6 +136,36 @@ export const fixtureApiHealth = {
   endpoints: ["/v1/health", "/v1/search"],
 };
 
+export const fixtureLogs = {
+  ok: true,
+  events: [
+    { seq: 1, ts: 1759999900, level: "info", scope: "boot", message: "VYRON preview online", meta: {} },
+    { seq: 2, ts: 1759999950, level: "warn", scope: "database", message: "MongoDB unavailable", meta: {} },
+    {
+      seq: 3,
+      ts: 1759999990,
+      level: "error",
+      scope: "player",
+      message: "stream start failed in -1001",
+      meta: { type: "StreamError", traceback: "StreamError: boom" },
+    },
+  ],
+  stats: { seq: 3, buffered: 3, counts: { info: 1, warn: 1, error: 1 }, errors: 1, warnings: 1, uptime: 420, file: "data/journal.jsonl" },
+  system: {
+    version: "preview",
+    uptime: 420,
+    storage: "mongo",
+    streaming: true,
+    resolver: true,
+    downloader: true,
+    handlers: 23,
+    chats: 2,
+    playing: 1,
+    watchdog: { checks: 9, reconnects: 0, last: null, last_error: "" },
+    keepalive: { enabled: true, runs: 4, last_ok: 1759999990, last_status: 200 },
+  },
+};
+
 export const json = (payload: unknown) =>
   Promise.resolve({
     ok: true,
@@ -153,6 +183,7 @@ export function stubApi(overrides: Record<string, unknown> = {}) {
     if (url.includes("/api/playlists")) return json({ ok: true, playlists: fixtureState.playlists });
     if (url.includes("/api/search")) return json({ ok: true, results: fixtureHome.trending });
     if (url.includes("/api/action")) return json({ ok: true });
+    if (url.includes("/api/logs")) return json(fixtureLogs);
     if (url.includes("/api/keys")) return json(fixtureKeys);
     if (url.includes("/v1/health")) return json(fixtureApiHealth);
     return json(state);

@@ -65,6 +65,11 @@ async def main() -> None:
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument(
+        "--no-owner",
+        action="store_true",
+        help="do not mint a local owner token for the console",
+    )
+    parser.add_argument(
         "--no-db",
         action="store_true",
         help="skip Mongo/JSON storage (favourites and playlists stay empty)",
@@ -72,6 +77,15 @@ async def main() -> None:
     args = parser.parse_args()
 
     await _warm_services(use_db=not args.no_db)
+
+    # The preview records into the same journal as production, so the owner
+    # console has real events to show while you iterate.
+    from vyron.config import settings
+    from vyron.core.journal import attach, journal
+
+    settings.ensure_dirs()
+    attach(settings.data_dir / "journal.jsonl")
+    journal.info("boot", "preview server starting", port=args.port, host=args.host)
 
     from vyron.utils.health import build_app
 
@@ -83,6 +97,15 @@ async def main() -> None:
 
     logger.info("web app  → http://%s:%s/app/", args.host, args.port)
     logger.info("health   → http://%s:%s/health", args.host, args.port)
+    if not args.no_owner:
+        from vyron.config import settings
+        from vyron.web.auth import make_owner_token
+
+        owner_id = next(iter(settings.owners), 1)
+        token = make_owner_token(settings.bot_token, owner_id)
+        # printed, not logged: the token must never end up in the journal
+        print(f"owner console → http://{args.host}:{args.port}/app/?ot={token}")
+        journal.info("preview", "owner console enabled (token printed to the terminal)")
     logger.info("outside Telegram the app shows a locked state — no placeholder data")
 
     stop = asyncio.Event()
@@ -91,6 +114,7 @@ async def main() -> None:
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
     finally:
+        journal.shutdown("preview stop")
         await runner.cleanup()
         from vyron.runtime import runtime
 

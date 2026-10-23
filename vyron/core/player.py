@@ -23,6 +23,7 @@ from vyron.core import effects as audio_fx
 from vyron.core.queue import ChatState, LoopMode, QueueManager, Track
 from vyron.core.search import MediaError, YouTube
 from vyron.database import Storage
+from vyron.core.journal import journal
 from vyron.ui import cards, keyboards
 from vyron.ui import rich
 from vyron.ui.progress import now as clock
@@ -146,9 +147,19 @@ class Player:
             raise StreamError("The assistant could not join the voice chat.") from exc
         except Exception as exc:
             logger.warning("stream start failed in %s: %s", chat_id, exc)
+            journal.error("player", f"stream start failed in {chat_id}", exc, track=track.id)
             raise StreamError(f"Playback failed: {exc}") from exc
 
         self._in_call.add(int(chat_id))
+        journal.ok(
+            "player",
+            f"streaming “{track.title}”",
+            chat=chat_id,
+            track=track.id,
+            video=video,
+            seek=seek,
+            source=track.source,
+        )
         state.current = track
         state.playing = True
         state.paused = False
@@ -328,6 +339,7 @@ class Player:
 
     async def stop(self, chat_id: int, *, leave: bool = True, announce: bool = False) -> None:
         state = self.queues.get(chat_id)
+        journal.info("player", f"playback stopped in {chat_id}", leave=leave, queued=len(state.queue))
         state.reset_stream()
         state.current = None
         state.queue.clear()
@@ -354,9 +366,11 @@ class Player:
             return False
         try:
             await self.calls.leave_call(chat_id)
+            journal.info("voice", f"left voice chat {chat_id}")
             return True
         except Exception as exc:
             logger.debug("leave failed: %s", exc)
+            journal.warn("voice", f"could not leave voice chat {chat_id}", error=str(exc))
             return False
 
     # ── now playing card ───────────────────────────────────────────────────

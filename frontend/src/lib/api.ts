@@ -5,6 +5,7 @@ import type {
   ApiKeyPayload,
   AppState,
   HomePayload,
+  JournalPayload,
   Playlist,
   Room,
   Track,
@@ -115,6 +116,20 @@ export const api = {
   rooms: () => request<{ rooms: Room[]; preview?: boolean }>("/api/rooms"),
 
   playlists: () => request<{ playlists: Playlist[]; preview?: boolean }>("/api/playlists"),
+
+  /** Owner journal — `since` makes it a cheap live tail. */
+  logs: (options: { since?: number; level?: string; scope?: string; n?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (options.since) params.set("since", String(options.since));
+    if (options.level && options.level !== "all") params.set("level", options.level);
+    if (options.scope) params.set("scope", options.scope);
+    if (options.n) params.set("n", String(options.n));
+    const query = params.toString();
+    return request<JournalPayload>(`/api/logs${query ? `?${query}` : ""}`);
+  },
+
+  logsAction: (action: "clear" | "export") =>
+    request<{ ok: boolean; cleared?: number; file?: string; path?: string }>("/api/logs", { action }),
 
   lyrics: (title: string, artist = "", duration = 0) =>
     request<{ ok: boolean; text?: string; synced?: boolean; lines?: { time: number; text: string }[] }>(

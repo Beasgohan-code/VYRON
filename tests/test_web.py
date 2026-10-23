@@ -537,3 +537,68 @@ def test_api_console_blocks_non_owners_from_minting():
         assert denied.status == 403
 
     asyncio.run(_with_client(scenario))
+
+
+# ── owner journal API ───────────────────────────────────────────────────────
+def test_logs_endpoint_is_owner_only():
+    from vyron.web.auth import make_owner_token
+
+    async def scenario(client):
+        anonymous = await client.get("/api/logs")
+        assert anonymous.status == 403
+        body = await anonymous.json()
+        assert body["ok"] is False
+
+        owner_id = next(iter(settings.owners))
+        token = make_owner_token(TOKEN, owner_id)
+        allowed = await client.get("/api/logs", headers={"X-Owner-Token": token})
+        assert allowed.status == 200
+        payload = await allowed.json()
+        assert payload["ok"] is True
+        assert isinstance(payload["events"], list)
+        assert "system" in payload and "stats" in payload
+
+    asyncio.run(_with_client(scenario))
+
+
+def test_logs_endpoint_records_and_filters():
+    from vyron.core.journal import journal
+    from vyron.web.auth import make_owner_token
+
+    journal.clear()
+    journal.error("player", "unit-test boom")
+    journal.info("boot", "unit-test boot")
+
+    async def scenario(client):
+        owner_id = next(iter(settings.owners))
+        token = make_owner_token(TOKEN, owner_id)
+        headers = {"X-Owner-Token": token}
+
+        everything = await (await client.get("/api/logs?level=all", headers=headers)).json()
+        assert any("unit-test boom" in event["message"] for event in everything["events"])
+
+        errors = await (await client.get("/api/logs?level=error", headers=headers)).json()
+        assert {event["level"] for event in errors["events"]} == {"error"}
+
+        scoped = await (await client.get("/api/logs?scope=boot", headers=headers)).json()
+        assert {event["scope"] for event in scoped["events"]} == {"boot"}
+
+    asyncio.run(_with_client(scenario))
+
+
+def test_logs_action_clear_is_owner_only():
+    from vyron.web.auth import make_owner_token
+
+    async def scenario(client):
+        assert (await client.post("/api/logs", json={"action": "clear"})).status == 403
+
+        owner_id = next(iter(settings.owners))
+        token = make_owner_token(TOKEN, owner_id)
+        response = await client.post(
+            "/api/logs", json={"action": "clear"}, headers={"X-Owner-Token": token}
+        )
+        assert response.status == 200
+        payload = await response.json()
+        assert payload["ok"] is True and "stats" in payload
+
+    asyncio.run(_with_client(scenario))

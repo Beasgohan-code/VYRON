@@ -17,6 +17,7 @@ from aiohttp import web
 
 from vyron.config import settings
 from vyron.core import playlists as pl
+from vyron.core.journal import journal
 from vyron.core.lyrics import parse_lrc
 from vyron.core.queue import LoopMode, Track
 from vyron.runtime import runtime
@@ -771,6 +772,105 @@ def chat_link(chat_id: int, user_id: int) -> str:
     return f"{settings.webapp_url}/app/?t={token}"
 
 
+# ── owner console: journal ──────────────────────────────────────────────────
+_LOG_FILTERS: dict[str, list[str] | None] = {
+    "all": None,
+    "info": ["info", "ok", "warn", "error"],
+    "warn": ["warn", "error"],
+    "error": ["error"],
+}
+
+
+def _system_snapshot() -> dict:
+    """Everything an owner wants on one screen, without a second dashboard."""
+    player = runtime.player
+    from vyron.core import keepalive, watchdog
+
+    chats = 0
+    playing = 0
+    if player is not None:
+        try:
+            chats = len(player.active_chats())
+            playing = sum(
+                1
+                for chat_id in player.active_chats()
+                if getattr(player.queues.get(chat_id), "playing", False)
+            )
+        except Exception:  # pragma: no cover - defensive
+            pass
+    return {
+        "version": runtime.version,
+        "uptime": round(runtime.uptime, 1),
+        "storage": getattr(runtime.storage, "backend", "none") if runtime.storage else "none",
+        "streaming": runtime.streaming_ready,
+        "resolver": runtime.youtube is not None,
+        "downloader": runtime.downloader is not None,
+        "handlers": len(runtime.handlers_loaded),
+        "chats": chats,
+        "playing": playing,
+        "watchdog": dict(watchdog.status()),
+        "keepalive": {
+            key: value
+            for key, value in keepalive.status().items()
+            if key in {"enabled", "runs", "last_ok", "last_status"}
+        },
+    }
+
+
+async def logs(request: web.Request) -> web.Response:
+    """Owner-only journal feed. `?since=<seq>` makes it a cheap live tail."""
+    user = await _identify(request)
+    if not _is_owner(user):
+        return web.json_response({"ok": False, "error": "owner only"}, status=403)
+    query = request.query
+    try:
+        since = max(0, int(query.get("since") or 0))
+    except ValueError:
+        since = 0
+    try:
+        limit = min(400, max(10, int(query.get("n") or 120)))
+    except ValueError:
+        limit = 120
+    level = (query.get("level") or "all").lower()
+    scope = (query.get("scope") or "").strip() or None
+
+    events = journal.events(
+        since=since,
+        limit=limit,
+        levels=_LOG_FILTERS.get(level, None),
+        scope=scope,
+    )
+    stats = journal.stats()
+    return web.json_response(
+        {
+            "ok": True,
+            "events": events,
+            "stats": stats,
+            "system": _system_snapshot(),
+            "filter": {"level": level, "scope": scope, "since": since, "n": limit},
+        }
+    )
+
+
+async def logs_action(request: web.Request) -> web.Response:
+    """`clear` or `export` the journal — owner only, always audited."""
+    user = await _identify(request)
+    if not _is_owner(user):
+        return web.json_response({"ok": False, "error": "owner only"}, status=403)
+    body = await _read_json(request)
+    action_name = str(body.get("action") or "").lower()
+    if action_name == "clear":
+        removed = journal.clear()
+        journal.info("journal", f"journal cleared from the web console ({removed} events)")
+        return web.json_response({"ok": True, "cleared": removed, "stats": journal.stats()})
+    if action_name == "export":
+        path = journal.export()
+        if path is None:
+            return web.json_response({"ok": False, "error": "nothing to export"}, status=404)
+        return web.json_response({"ok": True, "file": path.name, "path": str(path)})
+    return web.json_response({"ok": False, "error": "unknown action"}, status=400)
+
+
 def register(app: web.Application) -> None:
     if not settings.webapp:
         return
@@ -793,6 +893,8 @@ def register(app: web.Application) -> None:
     app.router.add_post("/api/lyrics", lyrics)
     app.router.add_get("/api/keys", api_keys)
     app.router.add_post("/api/keys", api_keys)
+    app.router.add_get("/api/logs", logs)
+    app.router.add_post("/api/logs", logs_action)
     audio.register(app)
     logger.info("web app mounted from %s", WEB_DIR)
 

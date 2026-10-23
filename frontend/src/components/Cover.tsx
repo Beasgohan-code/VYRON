@@ -1,111 +1,143 @@
-import { Music2 } from "lucide-react";
-import { useMemo, useState } from "react";
-import { hashOf, thumbFor } from "../lib/format";
+import { useState } from "react";
+import { hashOf, initials, thumbFor } from "../lib/format";
 
 interface Props {
-  track?: { id?: string; title?: string; uploader?: string; thumbnail?: string | null } | null;
+  track?: { title?: string; id?: string; thumbnail?: string | null } | null;
   className?: string;
-  rounded?: number;
+  /** Corner radius in px, or any CSS length. */
+  rounded?: number | string;
+  /** Show the first letter of the title on top of the artwork. */
+  monogram?: boolean;
 }
 
 /**
- * Artwork, drawn twice over.
+ * Album artwork that never fails.
  *
- * The thumbnail is the real thing when the network has it. When it does not —
- * Telegram's CDN blocked, an offline phone, a track that has no cover — we draw
- * one instead of shipping a folder of placeholder photos: a deterministic mesh
- * gradient derived from the track, with a soft grain and the artist's initial.
- * Same track always yields the same artwork, and it costs one inline <svg>.
+ * A real thumbnail is used when the API has one, but underneath it every cover
+ * is a deterministic SVG: four art directions chosen by the track id, with the
+ * palette derived from the same hash. No image requests, no broken tiles, and
+ * the same track always looks the same.
  */
-export function Cover({ track, className = "", rounded }: Props) {
-  const [source, setSource] = useState<string | null>(() => thumbFor(track));
+export function Cover({ track, className = "", rounded, monogram = false }: Props) {
   const [broken, setBroken] = useState(false);
-  const style = rounded === undefined ? undefined : { borderRadius: rounded };
-
-  const art = useMemo(() => procedural(track), [track?.id, track?.title, track?.uploader]);
-
-  if (broken || !source) {
-    return (
-      <div className={`cover-fallback generated ${className}`} style={{ ...style, ...art.css }} aria-hidden="true">
-        <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice" className="cover-svg">
-          <defs>
-            <radialGradient id={art.idA} cx="26%" cy="18%" r="78%">
-              <stop offset="0%" stopColor={art.a} stopOpacity="0.95" />
-              <stop offset="100%" stopColor={art.a} stopOpacity="0" />
-            </radialGradient>
-            <radialGradient id={art.idB} cx="82%" cy="78%" r="72%">
-              <stop offset="0%" stopColor={art.b} stopOpacity="0.9" />
-              <stop offset="100%" stopColor={art.b} stopOpacity="0" />
-            </radialGradient>
-            <linearGradient id={art.idC} x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0%" stopColor="#05050a" stopOpacity="0.05" />
-              <stop offset="100%" stopColor="#05050a" stopOpacity="0.55" />
-            </linearGradient>
-          </defs>
-          <rect width="100" height="100" fill={art.base} />
-          <rect width="100" height="100" fill={`url(#${art.idA})`} />
-          <rect width="100" height="100" fill={`url(#${art.idB})`} />
-          <path d={art.stroke} fill="none" stroke="rgba(255,255,255,.34)" strokeWidth="0.9" strokeLinecap="round" />
-          <rect width="100" height="100" fill={`url(#${art.idC})`} />
-        </svg>
-        <span className="cover-initial">{art.initial || <Music2 size={16} />}</span>
-      </div>
-    );
-  }
+  const seed = hashOf(String(track?.id ?? track?.title ?? "vyron"));
+  const src = thumbFor(track);
+  const style = seed % 4;
+  const hue = seed % 360;
+  const hue2 = (hue + 48 + (seed % 60)) % 360;
+  const hue3 = (hue + 168) % 360;
+  const name = track?.title ?? "VYRON";
 
   return (
-    <img
-      className={className}
-      style={style}
-      src={source}
-      alt=""
-      loading="lazy"
-      decoding="async"
-      draggable={false}
-      onError={() => {
-        // A broken remote image must not also break the layout: fall back to art.
-        setSource(null);
-        setBroken(true);
-      }}
-    />
+    <span
+      className={`cover ${className}`}
+      data-art={style}
+      style={rounded !== undefined ? { borderRadius: typeof rounded === "number" ? `${rounded}px` : rounded } : undefined}
+      aria-hidden="true"
+    >
+      <svg className="cover-art" viewBox="0 0 100 100" preserveAspectRatio="none" focusable="false">
+        <defs>
+          <linearGradient id={`g1-${seed}`} x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stopColor={`hsl(${hue} 78% 58%)`} />
+            <stop offset="1" stopColor={`hsl(${hue2} 72% 42%)`} />
+          </linearGradient>
+          <radialGradient id={`g2-${seed}`} cx="0.2" cy="0.15" r="0.9">
+            <stop offset="0" stopColor={`hsl(${hue3} 84% 62%)`} stopOpacity="0.95" />
+            <stop offset="0.55" stopColor={`hsl(${hue2} 70% 40%)`} stopOpacity="0.55" />
+            <stop offset="1" stopColor="transparent" stopOpacity="0" />
+          </radialGradient>
+          <radialGradient id={`g3-${seed}`} cx="0.85" cy="0.9" r="0.75">
+            <stop offset="0" stopColor={`hsl(${hue} 90% 68%)`} stopOpacity="0.75" />
+            <stop offset="1" stopColor="transparent" stopOpacity="0" />
+          </radialGradient>
+        </defs>
+
+        <rect width="100" height="100" fill={`hsl(${hue2} 40% 9%)`} />
+        <rect width="100" height="100" fill={`url(#g2-${seed})`} />
+
+        {style === 0 && (
+          <>
+            <circle cx="24" cy="72" r="34" fill={`url(#g1-${seed})`} opacity="0.85" />
+            <circle cx="74" cy="30" r="26" fill={`url(#g3-${seed})`} opacity="0.9" />
+            <rect y="54" width="100" height="46" fill="#000" opacity="0.22" />
+          </>
+        )}
+
+        {style === 1 && (
+          <>
+            <rect width="100" height="100" fill={`url(#g1-${seed})`} opacity="0.55" />
+            {[46, 38, 30, 22, 14, 7].map((r, index) => (
+              <circle
+                key={r}
+                cx="62"
+                cy="42"
+                r={r}
+                fill="none"
+                stroke={`hsl(${(hue + index * 24) % 360} 95% 78%)`}
+                strokeOpacity={0.16 + index * 0.1}
+                strokeWidth={index === 0 ? 1.1 : 0.7}
+              />
+            ))}
+            <circle cx="62" cy="42" r="9" fill={`hsl(${hue3} 92% 70%)`} opacity="0.9" />
+            <path d="M0 78 L100 58 L100 100 L0 100 Z" fill="#000" opacity="0.3" />
+          </>
+        )}
+
+        {style === 2 && (
+          <>
+            <rect width="100" height="100" fill={`url(#g1-${seed})`} opacity="0.6" />
+            <g transform="rotate(-24 50 50)">
+              {[8, 26, 44, 62, 80, 98].map((x, index) => (
+                <rect
+                  key={x}
+                  x={x}
+                  y="-20"
+                  width={index % 2 ? 5 : 11}
+                  height="140"
+                  fill={`hsl(${(hue + index * 40) % 360} 90% ${index % 2 ? 72 : 52}%)`}
+                  opacity={index % 2 ? 0.35 : 0.22}
+                />
+              ))}
+            </g>
+            <circle cx="78" cy="22" r="13" fill={`hsl(${hue3} 96% 74%)`} opacity="0.85" />
+          </>
+        )}
+
+        {style === 3 && (
+          <>
+            <rect width="100" height="100" fill={`url(#g1-${seed})`} opacity="0.35" />
+            <g fill={`hsl(${hue3} 92% 78%)`} opacity="0.5">
+              {Array.from({ length: 7 }, (_, row) =>
+                Array.from({ length: 7 }, (_, column) => (
+                  <circle
+                    key={`${row}-${column}`}
+                    cx={10 + column * 13.5}
+                    cy={10 + row * 13.5}
+                    r={((row * 7 + column) % 3) * 0.9 + 0.8}
+                  />
+                ))
+              )}
+            </g>
+            <circle cx="74" cy="74" r="30" fill={`url(#g3-${seed})`} />
+            <rect width="100" height="100" fill={`url(#g2-${seed})`} opacity="0.45" />
+          </>
+        )}
+
+      </svg>
+
+      {src && !broken && (
+        <img
+          className="cover-img"
+          src={src}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          onError={() => setBroken(true)}
+        />
+      )}
+
+      {monogram && <span className="cover-mono">{initials(name)}</span>}
+      <span className="cover-sheen" />
+    </span>
   );
-}
-
-/* ── procedural artwork ───────────────────────────────────────────────────── */
-const PALETTES: [string, string, string][] = [
-  ["#3b0764", "#7c3aed", "#22d3ee"],
-  ["#0c4a6e", "#0891b2", "#a78bfa"],
-  ["#4c0519", "#e11d48", "#fb923c"],
-  ["#052e16", "#059669", "#a3e635"],
-  ["#451a03", "#d97706", "#f472b6"],
-  ["#1e1b4b", "#4f46e5", "#38bdf8"],
-];
-
-function procedural(track?: Props["track"]) {
-  const seed = hashOf(`${track?.id ?? ""}${track?.title ?? ""}${track?.uploader ?? ""}`);
-  const [base, a, b] = PALETTES[seed % PALETTES.length];
-  const initial = (track?.uploader || track?.title || "?").trim().charAt(0).toUpperCase();
-  const id = `c${seed.toString(36)}`;
-
-  // A few smooth arcs, generated from the same seed: looks like a sleeve, is
-  // never the same twice, and needs no image request.
-  const wobble = (offset: number) => {
-    const swing = ((seed >> (offset * 3)) % 40) - 20;
-    return `M ${-10 + offset * 6} ${88 - offset * 9}` +
-      ` C ${28 + swing} ${44 + offset * 6}, ${64 - swing} ${72 - offset * 5}, ${112} ${12 + offset * 14}`;
-  };
-
-  return {
-    idA: `${id}-a`,
-    idB: `${id}-b`,
-    idC: `${id}-c`,
-    base,
-    a,
-    b,
-    initial,
-    stroke: `${wobble(0)} ${wobble(1)} ${wobble(2)}`,
-    css: {
-      background: `radial-gradient(120% 90% at 20% 10%, ${a}55, transparent 62%), ${base}`,
-    } as React.CSSProperties,
-  };
 }

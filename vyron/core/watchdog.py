@@ -23,6 +23,8 @@ from vyron.runtime import runtime
 
 logger = logging.getLogger(__name__)
 
+from vyron.core.journal import journal
+
 _state: dict[str, object] = {
     "checks": 0,
     "failures": 0,
@@ -57,9 +59,11 @@ async def _restart(client) -> bool:
         await client.start()
         _state["reconnects"] = int(_state["reconnects"]) + 1
         logger.warning("watchdog: reconnected %s", getattr(client, "name", "client"))
+        journal.warn("watchdog", f"reconnected {getattr(client, 'name', 'client')}")
         return True
     except Exception as exc:
         logger.error("watchdog: reconnect failed: %s", exc)
+        journal.error("watchdog", "reconnect failed", exc)
         return False
 
 
@@ -105,6 +109,7 @@ async def check_once(*, bot=None, assistant=None, collect_handlers=None) -> list
 
     if problems:
         logger.warning("watchdog: %s", ", ".join(problems))
+        journal.warn("watchdog", ", ".join(problems))
     return problems
 
 

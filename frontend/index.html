@@ -16,7 +16,36 @@
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div class="boot" aria-hidden="true">
+        <span class="boot-mark">V</span>
+        <span class="boot-word">VYRON</span>
+      </div>
+    </div>
+    <style>
+      html { background: #07070b; }
+      .boot {
+        position: fixed; inset: 0;
+        display: grid; place-content: center; justify-items: center; gap: 14px;
+        background: radial-gradient(70% 60% at 50% 30%, rgba(139, 92, 246, 0.28), transparent 70%), #07070b;
+        animation: boot-out 0.5s 0.9s ease both;
+      }
+      .boot-mark {
+        display: grid; place-items: center;
+        width: 60px; height: 60px; border-radius: 20px;
+        background: linear-gradient(140deg, #8b5cf6, #fb7185);
+        color: #0a0713; font: 800 30px/1 "Bricolage Grotesque", system-ui, sans-serif;
+        box-shadow: 0 20px 50px -20px rgba(139, 92, 246, 0.9);
+        animation: boot-pulse 1.6s ease-in-out infinite;
+      }
+      .boot-word {
+        font: 800 13px/1 "Inter Tight", system-ui, sans-serif;
+        letter-spacing: 0.32em; color: #a5a2b6; text-indent: 0.32em;
+      }
+      @keyframes boot-pulse { 50% { transform: scale(1.06); } }
+      @keyframes boot-out { to { opacity: 0; visibility: hidden; } }
+      @media (prefers-reduced-motion: reduce) { .boot, .boot-mark { animation: none; } }
+    </style>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

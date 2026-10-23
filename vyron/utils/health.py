@@ -61,6 +61,12 @@ async def _health(_request: web.Request) -> web.Response:
 
 def build_app(*, with_webapp: bool = True) -> web.Application:
     app = web.Application()
+    try:
+        from vyron.web.middleware import record_errors
+
+        app.middlewares.append(record_errors)
+    except Exception as exc:  # pragma: no cover - web extras disabled
+        logger.debug("journal middleware unavailable: %s", exc)
     app.router.add_get("/", _index)
     app.router.add_get("/health", _health)
     app.router.add_get("/status", _index)

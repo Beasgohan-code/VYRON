@@ -530,12 +530,16 @@ class MongoStorage(Storage):
 
 
 async def make_storage(settings: Settings) -> Storage:
+    from vyron.core.journal import journal
+
     if settings.mongo_url:
         try:
             storage = MongoStorage(settings)
             await storage.connect()
+            journal.ok("database", "MongoDB connected", database=settings.mongo_db)
             return storage
         except Exception as exc:
+            journal.error("database", f"MongoDB unavailable — falling back to JSON ({exc})")
             logger.warning(
                 "MongoDB unavailable (%s) — falling back to JSON storage. "
                 "Check MONGO_URL/MONGO_DB and that this host can reach the cluster "
@@ -544,6 +548,7 @@ async def make_storage(settings: Settings) -> Storage:
             )
     storage = JsonStorage(settings)
     await storage.connect()
+    journal.warn("database", "using JSON storage (single instance only)")
     return storage
 
 

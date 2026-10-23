@@ -241,6 +241,8 @@ _HELP: dict[str, tuple[str, list[tuple[str, str]]]] = {
             ("/listkey · /revoke · /rotatekey", "manage API keys (owner)"),
             ("/apiusage", "API traffic per key (owner)"),
             ("/apitoken", "owner token for web app + API"),
+            ("/logs [errors|warn|info]", "owner journal: start, stop, errors"),
+            ("/logs export · /logs clear", "download or empty the journal"),
             ("/assistant · /setname", "rebrand the voice-chat account"),
             ("/setbio · /setpfp", "bio and profile picture"),
         ],
@@ -1172,3 +1174,72 @@ __all__ = [
     "warn_card",
     "webapp_card",
 ]
+
+
+# ── owner journal ───────────────────────────────────────────────────────────
+_LOG_GLYPH = {
+    "debug": "·",
+    "info": "›",
+    "ok": "✓",
+    "warn": "!",
+    "error": "×",
+}
+
+
+def logs_card(
+    events: list[dict],
+    stats: dict,
+    *,
+    level: str = "all",
+    scope: str = "",
+) -> str:
+    """The owner journal as a card: newest last, plain enough to scan fast."""
+    import time as _time
+
+    from vyron.ui.theme import E as _E
+
+    uptime = human_time(float(stats.get("uptime") or 0))
+    head = B.kv(
+        [
+            (f"{_E('clock')} Uptime", f"<b>{uptime}</b>"),
+            (f"{_E('note')} Buffered", f"<b>{int(stats.get('buffered') or 0)}</b> / {int(stats.get('seq') or 0)}"),
+            (f"{_E('warn')} Warnings", f"<b>{int(stats.get('warnings') or 0)}</b>"),
+            (f"{_E('close')} Errors", f"<b>{int(stats.get('errors') or 0)}</b>"),
+        ]
+    )
+
+    lines: list[str] = []
+    for event in events[-14:]:
+        stamp = _time.strftime("%H:%M:%S", _time.localtime(float(event.get("ts") or 0)))
+        glyph = _LOG_GLYPH.get(str(event.get("level")), "·")
+        scope_name = esc(str(event.get("scope") or "app"))
+        message = esc(truncate(str(event.get("message") or ""), 110))
+        line = f"<code>{stamp}</code> {glyph} <b>{scope_name}</b> {message}"
+        if event.get("meta", {}).get("type"):
+            line += f" <i>({esc(str(event['meta']['type']))})</i>"
+        lines.append(line)
+
+    body = B.bullets(lines) if lines else "<i>Nothing recorded yet — the journal fills as the bot works.</i>"
+    filters = B.row(
+        B.btn("All", data="v:logs:all", style="primary" if level == "all" else None),
+        B.btn("Info", data="v:logs:info", style="primary" if level == "info" else None),
+        B.btn("Warn", data="v:logs:warn", style="primary" if level == "warn" else None),
+        B.btn("Errors", data="v:logs:error", style="primary" if level == "error" else None),
+        B.btn(f"{_E('check')} Refresh", data=f"v:logs:{level}", style="success"),
+    )
+    title = "journal" + (f" · {scope}" if scope else "") + ("" if level == "all" else f" · {level}")
+    return (
+        B.heading(f"{_E('code')} {small_caps(title)}", 2)
+        + head
+        + B.divider()
+        + body
+        + filters
+        + B.row(
+            B.btn(f"{_E('download')} Export .jsonl", data="v:logs:export", style="link"),
+            B.btn(f"{_E('close')} Clear", data="v:logs:clear", style="danger"),
+        )
+        + B.footer(
+            f"{_E('info')} Newest last {BULLET} warnings and errors include the traceback type "
+            f"{BULLET} also at /app → Owner → Logs"
+        )
+    )
