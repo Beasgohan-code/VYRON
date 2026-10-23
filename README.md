@@ -218,9 +218,13 @@ Videl/Fallen aliases are accepted everywhere they make sense: `/music` (`/start`
 | `/savepl [name]` | save the current track (or the whole queue, or a replied audio file) into a playlist |
 | `/playlists` | list your saved playlists |
 | `/pl <name>` | queue a saved playlist |
-| `/pldel <name>` | delete one |
+| `/pldel <name>` · `/pdelete` | delete one |
+| `/pcreate <name>` | create an empty playlist |
+| `/padd <name>` | add what is playing (or a replied audio file) |
+| `/pview <name>` | numbered tracks — the same numbers `/premove` takes |
+| `/premove <name> <n>` | drop track #n |
 
-Playlists are per-user, capped at 40 lists × 200 tracks, and the same store
+`/pplay` is an alias of `/pl`. Playlists are per-user, capped at 40 lists × 200 tracks, and the same store
 feeds the Library view of the web app. (YouTube imports stay on `/playlist`.)
 
 ### Diagnostics & owner console
@@ -241,12 +245,33 @@ feeds the Library view of the web app. (YouTube imports stay on `/playlist`.)
 | `/setpfp` (reply to a photo) | replace its profile picture |
 | `/delpfp` | clear its profile pictures |
 | `/gblock` · `/gunblock` · `/ublock` · `/uunblock` | aliases of `/block` & `/unblock` |
+| `/doctor` | deployment self-check: config, yt-dlp, cookies, a **live** YouTube resolve, voice engine, storage, web app, music API |
+| `/uistyle rich` · `/uistyle classic` | switch between the rich card UI and the classic (old) HTML UI — persisted |
+| `/uicheck` | render the `/start` card through the active lane and report what happened |
 
 Effect shortcuts: `/bass` `/bassoff` `/nightcore` `/nightcoreoff` `/vaporwave` `/vaporwaveoff`
 `/effecton <name>` · `/effectoff <name|all>`
 
 The bot also announces itself politely when added to a group (with Play / Web app /
 Help buttons) and logs when it is removed.
+
+### Channels
+
+A group can stream into its **linked channel**, or into one you pin explicitly.
+
+| Command | What it does |
+|---|---|
+| `/addchannel @name` | link a channel: it must exist, the bot must be admin there, and you must be one too |
+| `/delchannel` | unlink, stop playback there, and drop the reverse index |
+| `/cplay <song|link>` | queue into the channel's voice chat |
+| `/cplayforce` · `/cvplayforce` | cut in immediately (audio / video) |
+| `/cpause` · `/cresume` · `/cskip` · `/cclear` | channel transport |
+| `/cautoplay` | toggle autoplay for the channel |
+| `/cthumbnail` (reply to a photo) · `/cthumbnail off` | the channel's poster artwork |
+| `/cplayset <id|@name>` · `/cplayset off` | pin a channel without the checks above |
+
+One channel belongs to one group: the reverse index lives in storage, so linking
+a channel that already streams elsewhere is refused instead of silently stolen.
 
 ### Group management
 

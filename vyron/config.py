@@ -89,6 +89,11 @@ class Settings:
 
     # ── yt-dlp ──────────────────────────────────────────────────────────────
     cookies_file: str = field(default_factory=lambda: _env("COOKIES_FILE"))
+    # Paste-able alternative for hosts where you cannot upload a file: the
+    # Netscape cookie text is written to COOKIES_FILE (or a temp file) at boot.
+    cookies_text: str = field(
+        default_factory=lambda: _env("YOUTUBE_COOKIES") or _env("COOKIES_TEXT")
+    )
     proxy: str = field(default_factory=lambda: _env("PROXY"))
     ytdlp_args: str = field(default_factory=lambda: _env("YTDLP_ARGS"))
     search_results: int = field(default_factory=lambda: min(10, max(3, _int("SEARCH_RESULTS", 5))))

@@ -54,6 +54,7 @@ COMMANDS = [
     ("getapi", "mint a music API key"),
     ("apitoken", "owner token for web app + API"),
     ("logs", "owner journal: starts, stops, errors"),
+    ("doctor", "deployment self-check"),
     ("logger", "mirror warnings to a channel"),
     ("effects", "audio effects panel"),
     ("voice", "voice engine status"),

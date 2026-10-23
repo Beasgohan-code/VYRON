@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from pathlib import Path
 import re
 import shlex
 import time
@@ -68,9 +69,38 @@ def youtube_id(text: str) -> str | None:
     return match.group(1) if match else None
 
 
+def _materialise_cookies(settings: Any) -> str:
+    """Turn `YOUTUBE_COOKIES` (env text) into the cookie file yt-dlp wants.
+
+    A datacenter IP is the usual reason YouTube answers "confirm you're not a
+    bot"; the fix is an account's cookies. Uploading a file is awkward on
+    Render, so pasting the Netscape-format text into an env var is supported and
+    written to disk here (0600, outside the repo).
+    """
+    text = (getattr(settings, "cookies_text", "") or "").strip()
+    path = getattr(settings, "cookies_file", "") or ""
+    if not text:
+        return path
+    if path and Path(path).is_file():
+        return path
+    target = Path(path) if path else Path(getattr(settings, "data_dir", ".")) / "cookies.txt"
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        literal = text.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\t", "\t")
+        target.write_text(literal if literal.endswith("\n") else literal + "\n", encoding="utf-8")
+        target.chmod(0o600)
+        settings.cookies_file = str(target)
+        logger.info("wrote YOUTUBE_COOKIES to %s", target)
+        return str(target)
+    except Exception as exc:  # pragma: no cover - a bad cookie never blocks boot
+        logger.warning("could not write the YouTube cookies: %s", exc)
+        return path
+
+
 class YouTube:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        _materialise_cookies(settings)
         self._stream_cache: dict[str, StreamInfo] = {}
         # the player client that last produced a playable URL (None = yt-dlp default)
         self._client_hint: str | None = None

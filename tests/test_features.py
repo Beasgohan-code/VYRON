@@ -169,3 +169,38 @@ def test_a_live_stream_is_not_described_as_zero_seconds():
     # live stream back into a zero-length song
     restored = Track.from_dict(Track(id="x", title="Radio", is_live=True).to_dict())
     assert restored.is_live is True
+
+
+def test_cookies_can_be_pasted_instead_of_uploaded(tmp_path, monkeypatch):
+    """Render has no file upload, so YOUTUBE_COOKIES has to become a file."""
+    from types import SimpleNamespace
+
+    from vyron.core.search import _materialise_cookies
+
+    target = tmp_path / "cookies.txt"
+    settings = SimpleNamespace(
+        cookies_text="# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tSID\tabc\n",
+        cookies_file="",
+        data_dir=str(tmp_path),
+    )
+    path = _materialise_cookies(settings)
+
+    assert path == str(target)
+    assert "SID" in target.read_text()
+    assert settings.cookies_file == str(target)
+    # a second call must not rewrite (or trip over) an existing file
+    target.write_text("kept")
+    assert _materialise_cookies(settings) == str(target)
+    assert target.read_text() == "kept"
+
+
+def test_escaped_newlines_in_the_env_cookie_are_understood(tmp_path):
+    from types import SimpleNamespace
+
+    from vyron.core.search import _materialise_cookies
+
+    settings = SimpleNamespace(
+        cookies_text="a\\tb\\nc", cookies_file="", data_dir=str(tmp_path)
+    )
+    _materialise_cookies(settings)
+    assert (tmp_path / "cookies.txt").read_text().startswith("a\tb\nc")
