@@ -139,7 +139,7 @@ def start_image() -> bytes | None:
         )
 
         # ── feature chips ──────────────────────────────────────────────────
-        chips = (("VOICE CHAT", TEAL), ("FILES", VIOLET), ("MINI APP", MUTED))
+        chips = (("VOICE CHAT", TEAL), ("DOWNLOADS", VIOLET), ("MINI APP", MUTED))
         chip_y = 420
         cursor = text_x
         for label, colour in chips:
@@ -158,6 +158,20 @@ def start_image() -> bytes | None:
 
         # ── hairline + handle ──────────────────────────────────────────────
         draw.line([(text_x, 556), (W - 92, 556)], fill=(255, 255, 255, 26), width=1)
+        _letterspaced(
+            draw,
+            (text_x, 584),
+            "@VYRONMUSICBOT · THREE STEPS",
+            font(14, 600, "@VYRONMUSICBOT"),
+            (150, 148, 172),
+            3,
+        )
+        draw.text(
+            (text_x, 614),
+            "Add to a group, start a voice chat, send /play",
+            font=font(22, 500, "Add to a group"),
+            fill=(196, 194, 214),
+        )
 
         canvas = Image.alpha_composite(canvas, layer).convert("RGB")
         edge = ImageDraw.Draw(canvas)

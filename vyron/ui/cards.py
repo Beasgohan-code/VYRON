@@ -393,9 +393,12 @@ def now_playing_caption(state: ChatState, catalog=None) -> str:
     requester = _requester(track)
     if requester:
         lines.append(f"{E('user')} {requester}")
+    # A bare "100%" at the end of a caption reads like a download figure, so
+    # every flag now says what it is, and mute gets a word instead of a zero.
     flags = [
-        state.volume and f"{state.volume}%",
-        "24/7" if state.always_on else "",
+        f"{E('volume')} {int(state.volume)}%" if state.volume else f"{E('mute')} muted",
+        f"{E('loop')} {state.loop.label}" if getattr(state.loop, "value", "off") != "off" else "",
+        f"{E('clock')} 24/7" if state.always_on else "",
         label("np.queued", "{count} queued", count=len(state.queue)) if state.queue else "",
     ]
     tail = " · ".join(flag for flag in flags if flag)
