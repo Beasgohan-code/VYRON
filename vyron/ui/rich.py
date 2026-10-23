@@ -76,6 +76,45 @@ _RICH_SENT_MAX = 400
 _PHOTO_SENT: dict[tuple[int, int], float] = {}
 _PHOTO_SENT_MAX = 400
 
+# Messages Telegram has told us can never be edited again (deleted, too old,
+# or the bot lost the right to write). Retrying them on every progress tick
+# burns flood quota for nothing, so they are remembered and skipped.
+_DEAD: set[tuple[int, int]] = set()
+_DEAD_MAX = 600
+
+
+def _dead(chat_id: int | str, message_id: int | None) -> bool:
+    return bool(message_id) and (int(chat_id), int(message_id)) in _DEAD
+
+
+def _bury(chat_id: int | str, message_id: int | None, exc: BaseException) -> None:
+    """Remember a permanently uneditable message (and forget its lane)."""
+    from pyrogram.errors import (
+        ChannelInvalid,
+        ChannelPrivate,
+        ChatWriteForbidden,
+        MessageDeleteForbidden,
+        MessageIdInvalid,
+    )
+
+    # "not modified" means the text is already identical — the message is fine,
+    # so it must never be buried.
+    permanent = (
+        MessageIdInvalid,
+        MessageDeleteForbidden,
+        ChatWriteForbidden,
+        ChannelInvalid,
+        ChannelPrivate,
+    )
+    if not isinstance(exc, permanent):
+        return
+    if message_id:
+        _DEAD.add((int(chat_id), int(message_id)))
+        if len(_DEAD) > _DEAD_MAX:
+            _DEAD.clear()
+        _forget(chat_id, message_id)
+        _PHOTO_SENT.pop((int(chat_id), int(message_id)), None)
+
 
 def _remember(chat_id: int, message_id: int | None, stamp: float | None = None) -> None:
     if not message_id:
@@ -414,7 +453,7 @@ async def edit(
     reply_markup=None,
 ):
     """Edit a card in place, preserving its original (rich or HTML) lane."""
-    if not markup or not message_id:
+    if not markup or not message_id or _dead(chat_id, message_id):
         return None
     keyboard = markup_keyboard or reply_markup
     # rich payloads can embed their own <tg-button> rows; don't double up
@@ -460,6 +499,7 @@ async def edit(
     except MessageNotModified:
         return None
     except Exception as exc:
+        _bury(chat_id, message_id, exc)
         logger.debug("card edit failed: %s", exc)
         return None
 
@@ -474,7 +514,7 @@ async def edit_caption(
     reply_markup=None,
 ):
     """Edit the caption of a photo card (Telegram's 1024-character ceiling)."""
-    if not markup or not message_id:
+    if not markup or not message_id or _dead(chat_id, message_id):
         return None
     caption = to_caption(markup)
     if len(caption) > 1024:
@@ -491,6 +531,7 @@ async def edit_caption(
     except MessageNotModified:
         return None
     except Exception as exc:
+        _bury(chat_id, message_id, exc)
         logger.debug("caption edit failed: %s", exc)
         return None
 
