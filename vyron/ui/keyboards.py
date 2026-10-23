@@ -147,13 +147,17 @@ def settings_panel(cfg: dict) -> KM:
     loop = str(cfg.get("loop", "off")).title()
     autoplay = "On" if cfg.get("autoplay", True) else "Off"
     always = "On" if cfg.get("always_on", False) else "Off"
+    poster = "On" if cfg.get("poster", True) else "Off"
     return KM(
         [
             [
                 _btn(f"{G('loop')} Loop: {loop}", "v:set:loop"),
                 _btn(f"{G('spark')} Autoplay: {autoplay}", "v:set:autoplay"),
             ],
-            [_btn(f"{G('clock')} 24/7: {always}", "v:set:always")],
+            [
+                _btn(f"{G('clock')} 24/7: {always}", "v:set:always"),
+                _btn(f"{G('image')} Poster: {poster}", "v:set:poster"),
+            ],
             [_btn(f"{G('back')} Close", "v:close")],
         ]
     )

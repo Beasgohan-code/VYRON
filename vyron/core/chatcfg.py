@@ -34,6 +34,7 @@ DEFAULTS: dict[str, Any] = {
     "voteskip": 0,
     "channel": 0,
     "thumbnail": "",
+    "poster": True,   # generated now-playing artwork
 }
 
 

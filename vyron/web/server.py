@@ -604,6 +604,35 @@ PLAYERLESS_ACTIONS = frozenset(
 )
 
 
+async def _mirror_now_playing(user: WebUser, chat_id: int) -> None:
+    """Echo Mini App playback into the listener's DM.
+
+    Starting a song from the web app used to be silent on the phone. Now the
+    same poster the bot would post in the chat is mirrored to the person who
+    tapped play — so "I pressed play in the app" also shows up in Telegram.
+    """
+    if not settings.np_dm:
+        return
+    bot = getattr(runtime, "bot", None)
+    player = runtime.player
+    if bot is None or player is None or not user.user_id:
+        return
+    if int(user.user_id) == int(chat_id):
+        return  # already a DM with the bot: the card is right there
+    state = player.queues.get(chat_id)
+    if state is None or state.current is None:
+        return
+    title = ""
+    try:
+        chat = await bot.get_chat(chat_id)
+        title = getattr(chat, "title", "") or ""
+    except Exception:  # pragma: no cover - cosmetic
+        title = ""
+    from vyron.ui import nowplaying
+
+    await nowplaying.mirror_to_dm(bot, user.user_id, state, chat_title=title)
+
+
 async def action(request: web.Request) -> web.Response:
     user = await _identify(request)
     denied = _denied(user)
@@ -643,6 +672,7 @@ async def action(request: web.Request) -> web.Response:
                 return web.json_response({"ok": False, "error": "empty query"}, status=400)
             track = await runtime.youtube.resolve(query, requester=(user.user_id, user.name or ""))
             position = await player.enqueue(chat_id, track, play_now=True)
+            await _mirror_now_playing(user, chat_id)
             return ok(position=position, track=_track_json(track))
 
         if name in {"play_now", "play_next"}:
@@ -652,6 +682,7 @@ async def action(request: web.Request) -> web.Response:
             track = await runtime.youtube.resolve(query, requester=(user.user_id, user.name or ""))
             if name == "play_now":
                 await player.play_track(chat_id, track)
+                await _mirror_now_playing(user, chat_id)
                 return ok(track=_track_json(track))
             await player.enqueue(chat_id, track, index=0)
             return ok(track=_track_json(track))
@@ -663,7 +694,9 @@ async def action(request: web.Request) -> web.Response:
         if name == "toggle":
             return ok(changed=await player.toggle(chat_id))
         if name == "skip":
-            return ok(track=_track_json(await player.skip(chat_id, count=int(value or 1))))
+            track = await player.skip(chat_id, count=int(value or 1))
+            await _mirror_now_playing(user, chat_id)
+            return ok(track=_track_json(track))
         if name == "stop":
             await player.stop(chat_id, leave=True)
             return ok()
@@ -686,7 +719,9 @@ async def action(request: web.Request) -> web.Response:
             pair = value if isinstance(value, dict) else {}
             return ok(moved=player.queues.move(chat_id, int(pair.get("from", 0)), int(pair.get("to", 0))))
         if name == "jump":
-            return ok(track=_track_json(await player.jump(chat_id, int(value or 0))))
+            track = await player.jump(chat_id, int(value or 0))
+            await _mirror_now_playing(user, chat_id)
+            return ok(track=_track_json(track))
         if name == "autoplay":
             state_obj.autoplay = not state_obj.autoplay
             await player.persist(chat_id)

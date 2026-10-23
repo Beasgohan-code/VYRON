@@ -156,6 +156,23 @@ Health check → <http://localhost:8080/health> · Mini App → <http://localhos
 | `/importpl [name]` | reply to that file to restore the playlist |
 | `/history` | what was played here recently |
 
+### Now-playing posters
+
+Every track gets a generated 1280×720 image — the cover art with a vinyl disc
+slipping out from behind it, the title and artist in Inter, duration and
+requester chips, and a waveform that fills with the track. The accent colour is
+sampled from the artwork, so no two songs look alike.
+
+- Sent once per track as a photo; the **caption** carries the live clock, so the
+  bot edits a caption every `NP_REFRESH_SECONDS` instead of re-uploading art.
+- `/np` sends the same poster on demand; Pillow missing (or `NP_POSTER=false`)
+  falls back to the classic text card.
+- Titles that do not fit two lines shrink instead of being chopped, and
+  Devanagari/Malayalam scripts fall back to Noto so a Hindi song does not
+  render as boxes (`assets/fonts/`).
+- Starting playback from the Mini App mirrors the poster into that person's DM
+  (`NP_DM`), so the phone shows what the app just started.
+
 ### Starting up
 
 `/start` answers with a picture card — brand art, the live chat/track

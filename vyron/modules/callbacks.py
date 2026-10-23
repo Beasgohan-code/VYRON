@@ -377,7 +377,14 @@ def register(client: Client) -> None:
             if not state or not state.current:
                 await cq.answer("Nothing is playing.", show_alert=True)
                 return
-            await _show(client, cq, cards.now_playing_card(state), keyboards.now_playing(state))
+            # the card follows the message it is edited into: a poster takes a
+            # caption, a text card takes full markup
+            markup = (
+                cards.now_playing_caption(state)
+                if cq.message and rich.is_photo(chat.id, cq.message.id)
+                else cards.now_playing_card(state)
+            )
+            await _show(client, cq, markup, keyboards.now_playing(state))
             await cq.answer()
             return
 
@@ -444,18 +451,25 @@ def register(client: Client) -> None:
 
         # ── settings ───────────────────────────────────────────────────────
         if action == "set":
+            from vyron.core import chatcfg
+
             if arg == "loop":
                 state.loop = state.loop.next()
             elif arg == "autoplay":
                 state.autoplay = not state.autoplay
             elif arg == "always":
                 state.always_on = not state.always_on
+            elif arg == "poster":
+                await chatcfg.set(
+                    chat.id, "poster", not await chatcfg.get(chat.id, "poster", True)
+                )
             await player.persist(chat.id)
             cfg = {
                 "volume": state.volume,
                 "loop": state.loop.value,
                 "autoplay": state.autoplay,
                 "always_on": state.always_on,
+                "poster": await chatcfg.get(chat.id, "poster", True),
             }
             await _show(
                 client,

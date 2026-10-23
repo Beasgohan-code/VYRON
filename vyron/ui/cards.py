@@ -353,6 +353,64 @@ def now_playing_card(state: ChatState, track: Track | None = None) -> str:
     )
 
 
+def now_playing_caption(state: ChatState) -> str:
+    """Caption for the poster: the live clock, nothing the picture already says."""
+    track = state.current
+    if not track:
+        return ""
+
+    elapsed = state.elapsed()
+    total = track.duration or 0
+    bar = progress_bar(elapsed, total, length=18)
+    clock_line = (
+        f"<code>{fmt_duration(elapsed)}</code> · {percentage(elapsed, total)}% · "
+        f"<code>{fmt_duration(total)}</code>"
+        if total
+        else f"<code>{fmt_duration(elapsed)}</code> · live"
+    )
+    status = "paused" if state.paused else "streaming"
+    lines = [f"<code>{bar}</code>", f"{E('live')} {status} · {clock_line}"]
+
+    if state.queue:
+        upcoming = state.queue[0]
+        lines.append(
+            f"{E('queue')} <i>up next</i> {esc(truncate(upcoming.title, 34))}"
+        )
+    requester = _requester(track)
+    if requester:
+        lines.append(f"{E('user')} {requester}")
+    flags = [state.volume and f"{state.volume}%", "24/7" if state.always_on else "", f"{len(state.queue)} queued"]
+    lines.append(f"<i>{' · '.join(flag for flag in flags if flag)}</i>")
+    return "\n".join(lines)
+
+
+def now_playing_dm_caption(
+    track: Track,
+    *,
+    chat_title: str = "",
+    state: ChatState | None = None,
+) -> str:
+    """The "this just started from the app" note that lands in a DM."""
+    where = f" in <b>{esc(truncate(chat_title, 40))}</b>" if chat_title else ""
+    meta = " · ".join(
+        part
+        for part in (
+            esc(truncate(track.uploader or "", 30)),
+            fmt_duration(track.duration) if track.duration else "",
+        )
+        if part
+    )
+    body = (
+        f"{E('play')} <b>Playing{where}</b>\n"
+        f"<blockquote>{esc(truncate(track.title, 60))}"
+        + (f"\n{meta}" if meta else "")
+        + "</blockquote>"
+    )
+    if state is not None:
+        body += "\n" + now_playing_caption(state)
+    return body
+
+
 def queued_card(track: Track, position: int) -> str:
     return (
         f"{E('check')} <b>Added to queue</b>\n"
@@ -558,6 +616,7 @@ def settings_card(cfg: dict, chat_title: str = "") -> str:
             ("loop", f"<b>{loop}</b>"),
             ("autoplay", f"<b>{'on' if autoplay else 'off'}</b>"),
             ("24/7 mode", f"<b>{'on' if always else 'off'}</b>"),
+            ("poster", f"<b>{'on' if cfg.get('poster', True) else 'off'}</b>"),
         ]
     )
     return (
@@ -568,6 +627,7 @@ def settings_card(cfg: dict, chat_title: str = "") -> str:
             B.btn(f"{E('loop')} Loop", data="v:set:loop", style="primary"),
             B.btn(f"{E('spark')} Autoplay", data="v:set:autoplay", style="success"),
             B.btn(f"{E('clock')} 24/7", data="v:set:always"),
+            B.btn(f"{E('image')} Poster", data="v:set:poster"),
         )
         + B.footer(f"{esc(truncate(chat_title, 40) or 'this chat')} · changes apply instantly")
     )

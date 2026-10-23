@@ -48,6 +48,7 @@ def small_caps(text: str) -> str:
 # name -> fallback glyph.  A premium pack can override any key; unknown keys
 # degrade gracefully to the fallback, so packs can ship partial coverage.
 GLYPHS: dict[str, str] = {
+    "image": "🖼️",
     "brand": "🎧",
     "play": "▶️",
     "pause": "⏸️",

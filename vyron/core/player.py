@@ -24,8 +24,7 @@ from vyron.core.queue import ChatState, LoopMode, QueueManager, Track
 from vyron.core.search import MediaError, YouTube
 from vyron.database import Storage
 from vyron.core.journal import journal
-from vyron.ui import cards, keyboards
-from vyron.ui import rich
+from vyron.ui import cards, keyboards, nowplaying, rich
 from vyron.ui.progress import now as clock
 
 logger = logging.getLogger(__name__)
@@ -380,14 +379,8 @@ class Player:
         state = self.queues.get(chat_id)
         if not state.current:
             return
-        markup = cards.now_playing_card(state)
-        keyboard = keyboards.now_playing(state)
-        if edit and state.np_message_id:
-            if await rich.edit(self.bot, chat_id, state.np_message_id, markup, markup_keyboard=keyboard):
-                return
-        message = await rich.send(self.bot, chat_id, markup, markup_keyboard=keyboard, editable=True)
-        if message:
-            state.np_message_id = message.id
+        await nowplaying.announce(self.bot, chat_id, state, edit=edit)
+        if state.np_message_id and state.playing:
             self._start_np_loop(chat_id)
 
     async def refresh_now_playing(self, chat_id: int, *, force: bool = False) -> None:
@@ -396,11 +389,16 @@ class Player:
             return
         if not force and not state.playing:
             return
+        markup = (
+            cards.now_playing_caption(state)
+            if rich.is_photo(chat_id, state.np_message_id)
+            else cards.now_playing_card(state)
+        )
         await rich.edit(
             self.bot,
             chat_id,
             state.np_message_id,
-            cards.now_playing_card(state),
+            markup,
             markup_keyboard=keyboards.now_playing(state),
         )
 

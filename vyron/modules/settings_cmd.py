@@ -15,12 +15,15 @@ def register(client: Client) -> None:
     async def _settings(_: Client, message: Message) -> None:
         if not runtime.player:
             return
+        from vyron.core import chatcfg
+
         state = await runtime.player.restore_settings(message.chat.id)
         cfg = {
             "volume": state.volume,
             "loop": state.loop.value,
             "autoplay": state.autoplay,
             "always_on": state.always_on,
+            "poster": await chatcfg.get(message.chat.id, "poster", True),
         }
         await rich.send(
             client,

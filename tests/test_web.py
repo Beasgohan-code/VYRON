@@ -726,3 +726,43 @@ def test_revoked_owner_token_is_rejected_by_the_api(tmp_path, monkeypatch):
 
     asyncio.run(_with_client(scenario))
     tokens.reset_cache()
+
+
+# ── Mini App playback is mirrored into the DM ───────────────────────────────
+def test_web_playback_mirrors_the_poster_to_the_listener(monkeypatch):
+    from vyron.core.queue import ChatState, Track
+    from vyron.runtime import runtime
+    from vyron.web import server
+    from vyron.ui import nowplaying
+
+    delivered: list[tuple[int, int, str]] = []
+
+    async def fake_mirror(bot, user_id, state, *, chat_title=""):
+        delivered.append((int(user_id), int(state.chat_id), chat_title))
+
+    monkeypatch.setattr(nowplaying, "mirror_to_dm", fake_mirror)
+
+    class _Queues(dict):
+        pass
+
+    class _Player:
+        def __init__(self, state):
+            self.queues = _Queues({-100777: state})
+
+    class _Bot:
+        async def get_chat(self, chat_id):
+            return type("C", (), {"title": "Listening Room"})()
+
+    state = ChatState(chat_id=-100777)
+    state.current = Track(id="x", title="Song", duration=200)
+    monkeypatch.setattr(runtime, "player", _Player(state))
+    monkeypatch.setattr(runtime, "bot", _Bot())
+
+    user = auth.WebUser(user_id=424242, name="Test", source="init")
+    asyncio.run(server._mirror_now_playing(user, -100777))
+    assert delivered == [(424242, -100777, "Listening Room")]
+
+    # a DM already shows the card — never send it twice
+    delivered.clear()
+    asyncio.run(server._mirror_now_playing(user, 424242))
+    assert delivered == []

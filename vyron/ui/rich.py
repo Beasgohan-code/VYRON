@@ -70,6 +70,12 @@ _BR_RE = re.compile(r"<br\s*/?>\s*\n?", re.I)
 _RICH_SENT: dict[tuple[int, int], float] = {}
 _RICH_SENT_MAX = 400
 
+# Photos cannot be edited with edit_message_text — their captions are. Remember
+# which messages are pictures so `edit()` can route without every caller
+# knowing (the now-playing poster is refreshed in place this way).
+_PHOTO_SENT: dict[tuple[int, int], float] = {}
+_PHOTO_SENT_MAX = 400
+
 
 def _remember(chat_id: int, message_id: int | None, stamp: float | None = None) -> None:
     if not message_id:
@@ -84,6 +90,24 @@ def _remember(chat_id: int, message_id: int | None, stamp: float | None = None) 
 
 def _was_rich(chat_id: int, message_id: int) -> bool:
     return (int(chat_id), int(message_id)) in _RICH_SENT
+
+
+def _remember_photo(chat_id: int, message_id: int | None) -> None:
+    if not message_id:
+        return
+    import time as _time
+
+    _PHOTO_SENT[(int(chat_id), int(message_id))] = _time.time()
+    if len(_PHOTO_SENT) > _PHOTO_SENT_MAX:
+        for key in sorted(_PHOTO_SENT, key=_PHOTO_SENT.get)[:50]:
+            _PHOTO_SENT.pop(key, None)
+
+
+def is_photo(chat_id: int | str, message_id: int) -> bool:
+    """Was this message sent with `send_photo` (so it needs a caption edit)?"""
+    if not message_id:
+        return False
+    return (int(chat_id), int(message_id)) in _PHOTO_SENT
 
 
 def _forget(chat_id: int, message_id: int) -> None:
@@ -332,7 +356,7 @@ async def send_photo(
         caption = caption[:1010].rsplit("\n", 1)[0] + "…"
     if photo:
         try:
-            return await client.send_photo(
+            sent = await client.send_photo(
                 chat_id=chat_id,
                 photo=photo,
                 caption=caption,
@@ -343,6 +367,9 @@ async def send_photo(
                 disable_notification=silent,
                 protect_content=protect,
             )
+            if sent is not None and getattr(sent, "id", None):
+                _remember_photo(chat_id, sent.id)
+            return sent
         except Exception as exc:
             logger.debug("photo send failed (%s) — falling back to a text card", exc)
     return await send(
@@ -372,6 +399,15 @@ async def edit(
     keyboard = markup_keyboard or reply_markup
     # rich payloads can embed their own <tg-button> rows; don't double up
     inline_buttons = "<tg-button" in markup
+
+    if is_photo(chat_id, message_id):
+        return await edit_caption(
+            client,
+            chat_id,
+            message_id,
+            markup,
+            markup_keyboard=None if inline_buttons else keyboard,
+        )
 
     if (
         settings.rich_messages
@@ -405,6 +441,37 @@ async def edit(
         return None
     except Exception as exc:
         logger.debug("card edit failed: %s", exc)
+        return None
+
+
+async def edit_caption(
+    client,
+    chat_id: int | str,
+    message_id: int,
+    markup: str,
+    *,
+    markup_keyboard=None,
+    reply_markup=None,
+):
+    """Edit the caption of a photo card (Telegram's 1024-character ceiling)."""
+    if not markup or not message_id:
+        return None
+    caption = to_caption(markup)
+    if len(caption) > 1024:
+        caption = caption[:1008].rsplit("\n", 1)[0] + "…"
+    keyboard = markup_keyboard if markup_keyboard is not None else reply_markup
+    try:
+        return await client.edit_message_caption(
+            chat_id=chat_id,
+            message_id=message_id,
+            caption=caption,
+            parse_mode=ParseMode.HTML,
+            reply_markup=keyboard,
+        )
+    except MessageNotModified:
+        return None
+    except Exception as exc:
+        logger.debug("caption edit failed: %s", exc)
         return None
 
 

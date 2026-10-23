@@ -100,6 +100,11 @@ class Settings:
     bot_profile: bool = field(default_factory=lambda: _flag("BOT_PROFILE", True))
     ephemeral_cards: bool = field(default_factory=lambda: _flag("EPHEMERAL_CARDS", True))
     np_refresh_seconds: int = field(default_factory=lambda: max(5, _int("NP_REFRESH_SECONDS", 12)))
+    # Every track gets a generated poster (cover + vinyl + waveform). Turn off
+    # for a text-only bot or when Pillow is not installed.
+    np_poster: bool = field(default_factory=lambda: _flag("NP_POSTER", True))
+    # Mirror what the Mini App starts into the listener's DM.
+    np_dm: bool = field(default_factory=lambda: _flag("NP_DM", True))
 
     # ── Group management ────────────────────────────────────────────────────
     logger_id: int = field(default_factory=lambda: _int("LOGGER_ID", 0))
