@@ -17,14 +17,14 @@ import {
   VolumeX,
   Wand2,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { Cover } from "../components/Cover";
 import { Equalizer } from "../components/Equalizer";
 import { Reactor } from "../components/Reactor";
 import { Sparks } from "../components/Sparks";
 import { reveal, useTilt } from "../lib/anim";
 import { api } from "../lib/api";
-import { fmtDuration } from "../lib/format";
+import { fmtDuration, hashOf } from "../lib/format";
 import { useApp } from "../lib/store";
 
 interface LyricLine {
@@ -121,8 +121,16 @@ export function PlayerView() {
     node?.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [activeLine]);
 
+  // Every track gets its own ambient tint, derived from its id — no pixel
+  // reads from the artwork (those are CORS-blocked), no network, no flicker.
+  const hue = hashOf(String(track.id ?? track.title ?? "")) % 360;
+  const tint = {
+    "--pv-glow": `hsl(${hue} 68% 52%)`,
+    "--pv-glow-soft": `hsl(${(hue + 42) % 360} 62% 46%)`,
+  } as CSSProperties;
+
   return (
-    <div className="player-view" role="dialog" aria-label="Player" aria-modal="true">
+    <div className="player-view" role="dialog" aria-label="Player" aria-modal="true" style={tint}>
       <div className="pv-backdrop">
         <Cover track={track} />
       </div>
@@ -162,7 +170,12 @@ export function PlayerView() {
 
       <div className="pv-body" ref={bodyRef}>
         <div className="pv-art" ref={artRef}>
-          <Cover track={track} className="pv-cover" />
+          <div
+            className="pv-art-ring"
+            style={{ "--p": `${Math.min(100, Math.max(0, percent))}%` } as CSSProperties}
+          >
+            <Cover track={track} className="pv-cover" />
+          </div>
           {audio.loading && <span className="pv-spinner" aria-hidden="true" />}
         </div>
 

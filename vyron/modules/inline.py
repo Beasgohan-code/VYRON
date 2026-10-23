@@ -19,7 +19,7 @@ from pyrogram.types import (
 from vyron.config import settings
 from vyron.core.search import MediaError
 from vyron.runtime import runtime
-from vyron.ui.progress import fmt_duration, truncate
+from vyron.ui.progress import compact_number, fmt_duration, truncate
 
 logger = logging.getLogger(__name__)
 
@@ -94,9 +94,10 @@ def register(client: Client) -> None:
                 filter(
                     None,
                     [
-                        truncate(track.uploader, 26),
+                        truncate(track.uploader, 26) or track.source,
                         fmt_duration(track.duration),
-                        "autoplay ready" if index == 0 else "",
+                        f"{compact_number(track.views)} plays" if track.views else "",
+                        "top match" if index == 0 else "",
                     ],
                 )
             )

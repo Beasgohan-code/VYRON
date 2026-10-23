@@ -245,6 +245,11 @@ async def index(_: web.Request) -> web.StreamResponse:
     response = web.FileResponse(page)
     # never cache the shell: asset filenames are content-hashed by Vite
     response.headers["Cache-Control"] = "no-cache"
+    # The app is opened with ?t=<token>. Keep that out of Referer headers and
+    # stop browsers from guessing content types.
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
     return response
 
 

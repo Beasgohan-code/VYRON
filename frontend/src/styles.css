@@ -1631,3 +1631,33 @@ html[data-theme="system"] .pv-reactor {
 @media (prefers-reduced-motion: reduce) {
   .skeleton-art, .skeleton-bar { animation: none; }
 }
+
+/* ── player ambience: per-track tint + a progress ring on the artwork ─────── */
+.player-view::after {
+  content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  background:
+    radial-gradient(52% 42% at 24% 30%, color-mix(in srgb, var(--pv-glow, #8b5cf6) 26%, transparent), transparent 70%),
+    radial-gradient(46% 38% at 78% 72%, color-mix(in srgb, var(--pv-glow-soft, #22d3ee) 20%, transparent), transparent 74%);
+  transition: background .6s var(--ease); opacity: .9;
+}
+.pv-art-ring { position: relative; border-radius: 26px; }
+.pv-art-ring::before {
+  content: ""; position: absolute; inset: -13px; border-radius: 34px; padding: 2px;
+  background: conic-gradient(
+    from -90deg,
+    var(--pv-glow, var(--accent)) 0 var(--p, 0%),
+    color-mix(in srgb, var(--pv-glow, var(--accent)) 22%, transparent) var(--p, 0%) 100%
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none; opacity: .85;
+}
+.pv-cover { position: relative; z-index: 1; }
+@media (max-width: 860px) {
+  .pv-art-ring::before { inset: -9px; border-radius: 26px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .player-view::after { transition: none; }
+}
