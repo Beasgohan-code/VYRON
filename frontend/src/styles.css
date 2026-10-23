@@ -1471,3 +1471,83 @@ input[type="range"]:disabled { opacity: .5; }
   background-size: 200% 100%; animation: shimmer 1.4s infinite linear;
 }
 @keyframes shimmer { from { background-position: 140% 0; } to { background-position: -40% 0; } }
+
+/* ── three.js: aurora hero + reactor stage ──────────────────────────────── */
+.hero-aurora {
+  position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  border-radius: inherit; overflow: hidden; opacity: .95;
+  mix-blend-mode: screen;
+  mask-image: radial-gradient(75% 95% at 30% 10%, #000 45%, transparent 100%);
+  -webkit-mask-image: radial-gradient(75% 95% at 30% 10%, #000 45%, transparent 100%);
+}
+.hero-aurora[data-webgl="off"] {
+  background:
+    radial-gradient(420px 220px at 18% 8%, color-mix(in srgb, var(--accent) 42%, transparent), transparent 70%),
+    radial-gradient(360px 200px at 78% 24%, color-mix(in srgb, var(--accent-2) 26%, transparent), transparent 72%);
+  mask-image: none; -webkit-mask-image: none; opacity: .55;
+}
+.hero-copy, .hero-art { position: relative; z-index: 1; }
+
+.pv-reactor {
+  position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  opacity: .9; mix-blend-mode: screen;
+  mask-image: radial-gradient(58% 62% at 30% 52%, #000 35%, transparent 78%);
+  -webkit-mask-image: radial-gradient(58% 62% at 30% 52%, #000 35%, transparent 78%);
+}
+.reactor { position: relative; overflow: hidden; }
+.reactor-fallback {
+  position: absolute; inset: 12%; border-radius: 50%;
+  background: radial-gradient(circle at 38% 34%, color-mix(in srgb, var(--accent-2) 55%, transparent), transparent 62%),
+              radial-gradient(circle at 62% 66%, color-mix(in srgb, var(--accent) 60%, transparent), transparent 66%);
+  filter: blur(28px); opacity: .6; animation: reactor-breathe 6s ease-in-out infinite;
+}
+@keyframes reactor-breathe { 0%,100% { transform: scale(.94); } 50% { transform: scale(1.06); } }
+
+.pv-head-actions { display: flex; align-items: center; gap: 6px; }
+.pv-head .icon-btn.on { color: var(--accent-2); border-color: color-mix(in srgb, var(--accent-2) 42%, transparent); }
+
+/* anime.js embers */
+.sparks { position: absolute; inset: 0; z-index: 1; pointer-events: none; overflow: hidden; }
+.spark {
+  position: absolute; width: 4px; height: 4px; border-radius: 50%;
+  background: radial-gradient(circle, var(--hue, var(--accent)) 0%, transparent 72%);
+  opacity: 0; will-change: transform, opacity;
+  box-shadow: 0 0 8px var(--hue, var(--accent));
+}
+.sparks:not(.on) .spark { animation: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .reactor-fallback { animation: none; }
+  .sparks { display: none; }
+}
+@media (max-width: 860px) {
+  .pv-reactor { opacity: .6; mask-image: radial-gradient(70% 40% at 50% 34%, #000 30%, transparent 80%); }
+}
+
+/* aurora inside the API hero */
+.api-hero { position: relative; overflow: hidden; }
+.api-hero > *:not(.api-aurora) { position: relative; z-index: 1; }
+.api-aurora {
+  position: absolute; inset: 0; z-index: 0; pointer-events: none; opacity: .75;
+  border-radius: inherit; mix-blend-mode: screen;
+  mask-image: linear-gradient(120deg, #000 10%, transparent 78%);
+  -webkit-mask-image: linear-gradient(120deg, #000 10%, transparent 78%);
+}
+.api-aurora[data-webgl="off"] { background: radial-gradient(300px 180px at 8% 0%, color-mix(in srgb, var(--accent-2) 24%, transparent), transparent 70%); }
+.meter b { font-variant-numeric: tabular-nums; }
+
+/* ---- tilt: perspective on the stage, transform left to anime.js ---- */
+.hero { perspective: 1000px; }
+.hero-art {
+  transform-style: preserve-3d; will-change: transform;
+  animation: fade .6s .06s var(--ease) both;
+  cursor: default;
+}
+.hero-art::before {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; z-index: 1;
+  background: radial-gradient(120% 90% at 20% 0%, rgba(255, 255, 255, .16), transparent 58%);
+  opacity: 0; transition: opacity .35s var(--ease); pointer-events: none;
+}
+.hero-art:hover::before { opacity: 1; }
+.pv-body { perspective: 1400px; }
+.pv-art { transform-style: preserve-3d; will-change: transform; }

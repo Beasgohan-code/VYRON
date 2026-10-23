@@ -28,6 +28,7 @@ import {
   VolumeX,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { reveal } from "../lib/anim";
 import { useApp } from "../lib/store";
 import type { View } from "../lib/types";
 
@@ -93,7 +94,11 @@ export function CommandPalette() {
       setCursor(0);
       return;
     }
-    const id = window.setTimeout(() => inputRef.current?.focus(), 30);
+    const id = window.setTimeout(() => {
+      inputRef.current?.focus();
+      const panel = document.querySelector(".palette");
+      if (panel) reveal(panel.querySelectorAll(".palette-item, .palette-group"), { y: 10, delay: 16, duration: 320 });
+    }, 30);
     return () => window.clearTimeout(id);
   }, [open]);
 

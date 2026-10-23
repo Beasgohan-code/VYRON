@@ -7,6 +7,9 @@ import { Cover } from "../components/Cover";
 import { Panel, SectionHead } from "../components/Panel";
 import { TrackCard } from "../components/TrackCard";
 import { Equalizer } from "../components/Equalizer";
+import { Aurora } from "../components/Aurora";
+import { Count } from "../components/Count";
+import { useTilt } from "../lib/anim";
 
 export function HomeView() {
   const {
@@ -28,6 +31,7 @@ export function HomeView() {
   const [miniResults, setMiniResults] = useState<{ title: string; duration?: number; query?: string }[]>([]);
   const [downloadQuery, setDownloadQuery] = useState("");
   const [quality, setQuality] = useState<"audio" | "video">("audio");
+  const artRef = useTilt<HTMLDivElement>(6);
 
   const trending = home?.trending ?? [];
   const shelves = home?.shelves ?? [];
@@ -37,6 +41,7 @@ export function HomeView() {
   return (
     <section className="view active">
       <div className="hero">
+        <Aurora className="hero-aurora" tone="violet" />
         <div className="hero-copy">
           <span className="eyebrow">
             <Sparkles size={13} /> your listening room
@@ -69,22 +74,23 @@ export function HomeView() {
           </div>
           <div className="hero-stats">
             <span>
-              <b>{state?.favorites?.length ?? 0}</b> liked
+              <Count value={state?.favorites?.length ?? 0} /> liked
             </span>
             <span>
-              <b>{playlists.length}</b> playlists
+              <Count value={playlists.length} /> playlists
             </span>
             <span>
-              <b>{rooms.length}</b> live rooms
+              <Count value={rooms.length} /> live rooms
             </span>
           </div>
         </div>
         <div
+          ref={artRef}
           className="hero-art"
           style={{ backgroundImage: `url("${home?.hero.cover || coverFor({ title: "vyron" })}")` }}
           aria-hidden="true"
         >
-          <div className="hero-glow" />
+
           <span className="hero-note">
             <Zap size={14} /> voice-chat streaming · file fallback
           </span>

@@ -8,6 +8,7 @@ import { NowPlayingRail } from "./components/NowPlayingRail";
 import { ShortcutSheet } from "./components/ShortcutSheet";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
+import { reveal } from "./lib/anim";
 import { useApp } from "./lib/store";
 import { ApiView } from "./views/ApiView";
 import { HomeView } from "./views/HomeView";
@@ -22,6 +23,13 @@ import { SearchView } from "./views/SearchView";
 export default function App() {
   const { view, audio, toastMessage, toastTone } = useApp();
   const [shortcuts, setShortcuts] = useState(false);
+
+  /* every view change fades its blocks up, staggered, via anime.js */
+  useEffect(() => {
+    const root = document.querySelector<HTMLElement>(".view.active");
+    if (!root) return;
+    reveal(root.querySelectorAll(":scope > *"), { y: 14, delay: 38, duration: 540 });
+  }, [view]);
 
   /* keyboard shortcuts — ignored while typing */
   useEffect(() => {

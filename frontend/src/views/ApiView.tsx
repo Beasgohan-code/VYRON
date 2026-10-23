@@ -20,7 +20,10 @@ import {
   Trash2,
   Zap,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Aurora } from "../components/Aurora";
+import { Count } from "../components/Count";
+import { reveal } from "../lib/anim";
 import { api } from "../lib/api";
 import { useApp } from "../lib/store";
 import type { ApiHealth, ApiKey, ApiKeyOptions, ApiKeyPayload, ApiScope } from "../lib/types";
@@ -111,6 +114,13 @@ export function ApiView() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const panels = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!payload || !panels.current) return;
+    reveal(panels.current.querySelectorAll(".panel"), { y: 18, delay: 60, duration: 560 });
+  }, [payload]);
 
   const base = payload?.base || window.location.origin;
   const docs = payload?.docs || "/v1/docs";
@@ -277,8 +287,9 @@ await fs.writeFile("track.mp3", file);`,
         </div>
       )}
 
-      <div className="api-grid" aria-busy={!payload}>
+      <div className="api-grid" aria-busy={!payload} ref={panels}>
         <article className="panel api-hero">
+          <Aurora className="api-aurora" tone="cyan" />
           <div className="panel-head">
             <h3>
               <Globe2 size={14} /> Base URL
@@ -334,11 +345,11 @@ await fs.writeFile("track.mp3", file);`,
           <div className="meter-grid">
             <div className="meter">
               <span>Requests</span>
-              <b>{metrics?.requests ?? stats?.requests ?? 0}</b>
+              <Count value={metrics?.requests ?? stats?.requests ?? 0} />
             </div>
             <div className="meter">
               <span>Downloads</span>
-              <b>{metrics?.downloads ?? 0}</b>
+              <Count value={metrics?.downloads ?? 0} />
             </div>
             <div className="meter">
               <span>Served</span>
@@ -346,7 +357,7 @@ await fs.writeFile("track.mp3", file);`,
             </div>
             <div className="meter">
               <span>Throttled</span>
-              <b className={metrics?.rate_limited ? "warn-text" : ""}>{metrics?.rate_limited ?? 0}</b>
+              <Count value={metrics?.rate_limited ?? 0} className={metrics?.rate_limited ? "warn-text" : ""} />
             </div>
             <div className="meter">
               <span>p50</span>

@@ -14,10 +14,14 @@ import {
   Volume1,
   Volume2,
   VolumeX,
+  Wand2,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Cover } from "../components/Cover";
 import { Equalizer } from "../components/Equalizer";
+import { Reactor } from "../components/Reactor";
+import { Sparks } from "../components/Sparks";
+import { reveal, useTilt } from "../lib/anim";
 import { api } from "../lib/api";
 import { fmtDuration } from "../lib/format";
 import { useApp } from "../lib/store";
@@ -33,8 +37,39 @@ export function PlayerView() {
   const [lyrics, setLyrics] = useState<{ lines: LyricLine[]; text: string } | null>(null);
   const [showLyrics, setShowLyrics] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [visuals, setVisuals] = useState(() => {
+    try {
+      return localStorage.getItem("vyron:visuals") !== "0";
+    } catch {
+      return true;
+    }
+  });
   const lyricsBox = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const artRef = useTilt<HTMLDivElement>(8);
   const track = audio.track;
+
+  /* entrance: the artwork and controls rise into place */
+  useEffect(() => {
+    const root = bodyRef.current;
+    if (!root) return;
+    reveal(root.querySelectorAll(".pv-art, .pv-titles, .pv-seek, .pv-controls, .pv-secondary, .pv-side"), {
+      y: 26,
+      delay: 55,
+      duration: 640,
+    });
+  }, [track?.id]);
+
+  const toggleVisuals = () => {
+    setVisuals((value) => {
+      try {
+        localStorage.setItem("vyron:visuals", value ? "0" : "1");
+      } catch {
+        /* private mode */
+      }
+      return !value;
+    });
+  };
 
   useEffect(() => {
     setLyrics(null);
@@ -90,6 +125,10 @@ export function PlayerView() {
       <div className="pv-backdrop">
         <Cover track={track} />
       </div>
+      {visuals && (
+        <Reactor className="pv-reactor" analyser={audio.analyser} playing={audio.playing} size="hero" />
+      )}
+      <Sparks active={audio.playing} />
 
       <header className="pv-head">
         <button type="button" className="icon-btn" aria-label="Close player" onClick={() => audio.setExpanded(false)}>
@@ -99,18 +138,29 @@ export function PlayerView() {
           Playing in the app
           <i>{audio.queue.length} in queue</i>
         </span>
-        <button
-          type="button"
-          className="icon-btn"
-          aria-label="Toggle lyrics"
-          onClick={() => void loadLyrics()}
-        >
-          <Mic2 size={18} />
-        </button>
+        <div className="pv-head-actions">
+          <button
+            type="button"
+            className={`icon-btn ${visuals ? "on" : ""}`}
+            aria-label="Toggle visualiser"
+            aria-pressed={visuals}
+            onClick={toggleVisuals}
+          >
+            <Wand2 size={17} />
+          </button>
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label="Toggle lyrics"
+            onClick={() => void loadLyrics()}
+          >
+            <Mic2 size={18} />
+          </button>
+        </div>
       </header>
 
-      <div className="pv-body">
-        <div className="pv-art">
+      <div className="pv-body" ref={bodyRef}>
+        <div className="pv-art" ref={artRef}>
           <Cover track={track} className="pv-cover" />
           {audio.loading && <span className="pv-spinner" aria-hidden="true" />}
         </div>

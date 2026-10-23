@@ -35,6 +35,8 @@ export interface AudioEngine {
   clear: () => void;
   setExpanded: (value: boolean) => void;
   isCurrent: (track?: Track | null) => boolean;
+  /** Web Audio analyser for the shared <audio> element (null if unsupported). */
+  analyser: () => AnalyserNode | null;
 }
 
 const read = (key: string, fallback: string): string => {
@@ -72,6 +74,8 @@ function streamUrl(track: Track): string {
  */
 export function useAudioEngine(toast?: (message: string, tone?: "info" | "error" | "success") => void): AudioEngine {
   const element = useRef<HTMLAudioElement | null>(null);
+  const contextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
   const [track, setTrack] = useState<Track | null>(null);
   const [queue, setQueue] = useState<Track[]>([]);
   const [playing, setPlaying] = useState(false);
@@ -99,6 +103,43 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
     }
     return element.current;
   }, [volume, muted]);
+
+  /* ── audio analyser (lazy: only the 3D visualiser asks for it) ────────── */
+  const analyser = useCallback((): AnalyserNode | null => {
+    if (analyserRef.current) return analyserRef.current;
+    try {
+      const Ctor =
+        window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!Ctor || !element.current) return null;
+      const context = new Ctor();
+      const source = context.createMediaElementSource(element.current);
+      const node = context.createAnalyser();
+      node.fftSize = 128;
+      node.smoothingTimeConstant = 0.82;
+      source.connect(node);
+      node.connect(context.destination);
+      // A suspended context would silence playback, so nudge it on every play.
+      const wake = () => {
+        if (context.state !== "running") void context.resume().catch(() => undefined);
+      };
+      element.current.addEventListener("play", wake);
+      wake();
+      contextRef.current = context;
+      analyserRef.current = node;
+      return node;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  useEffect(
+    () => () => {
+      analyserRef.current = null;
+      contextRef.current?.close().catch(() => undefined);
+      contextRef.current = null;
+    },
+    []
+  );
 
   const advance = useCallback(
     (auto = false) => {
@@ -355,11 +396,12 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
       clear,
       setExpanded,
       isCurrent: (candidate) => Boolean(candidate) && keyOf(candidate) === keyOf(track),
+      analyser,
     }),
     [
       track, queue, playing, loading, error, position, duration, volume, muted, repeat,
       shuffle, expanded, play, toggle, advance, prev, seek, seekBy, setVolume, cycleRepeat,
-      enqueue, removeAt, jumpTo, clear,
+      enqueue, removeAt, jumpTo, clear, analyser,
     ]
   );
 }
