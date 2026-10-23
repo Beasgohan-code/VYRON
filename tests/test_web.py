@@ -720,5 +720,9 @@ def test_revoked_owner_token_is_rejected_by_the_api(tmp_path, monkeypatch):
         via_query = await client.get(f"/api/keys?ot={owner_token}")
         assert via_query.status == 401
 
+        # ...and through the older `?t=` door as well
+        via_t = await client.post(f"/api/state?t={owner_token}", json={})
+        assert via_t.status == 401
+
     asyncio.run(_with_client(scenario))
     tokens.reset_cache()

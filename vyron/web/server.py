@@ -93,7 +93,9 @@ async def _identify(request: web.Request) -> WebUser:
             if await tokens.accepts(provisional.user_id, provisional.epoch):
                 return provisional
 
-    # A `vown_` token passed as `?t=` follows the same rules as the header.
+    # A `vown_` token can also arrive as `?t=` / `X-Vyron-Token` (older links).
+    # It follows the same generation rule as the header, so a revoked token
+    # cannot sneak back in through the other door.
     owner_epoch = None
     if token.startswith("vown_"):
         from vyron.core import tokens
