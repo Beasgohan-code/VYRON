@@ -93,10 +93,10 @@ jobs:
 
       - name: Smoke the image
         run: |
-          docker run --rm --entrypoint sh vyron:ci -c "
-            set -e
+          docker run --rm --entrypoint sh vyron:ci -c 'set -e
             test -f /app/webapp/dist/index.html
-            test -f /app/webapp/dist/assets/$(ls /app/webapp/dist/assets | grep -m1 '\.js$')
-            python -c 'import vyron, pyrogram, pytgcalls; print("imports ok")'
+            ls /app/webapp/dist/assets | grep -q "\.js$"
+            python -c "import vyron, pyrogram, pytgcalls, aiohttp; print(\"imports ok\")"
             python -m compileall -q /app/vyron
-          "
+            printf "health module: "; python -c "from vyron.utils.health import build_app; print(len(build_app(with_webapp=False).router.routes()), \"routes\")"
+          '
