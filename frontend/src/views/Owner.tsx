@@ -94,6 +94,20 @@ function LogConsole({ toast }: { toast: (message: string, tone?: "info" | "error
   const list = useRef<HTMLDivElement>(null);
   const seq = useRef(0);
 
+  const liveRef = useRef(true);
+
+  /** Merge a batch in, dropping events we already showed. */
+  const append = useCallback((incoming: JournalEvent[], reset = false) => {
+    setEvents((previous) => {
+      const merged = reset ? incoming : [...previous, ...incoming];
+      const seen = new Set<number>();
+      const unique = merged.filter((event) => (seen.has(event.seq) ? false : (seen.add(event.seq), true)));
+      return unique.slice(-400);
+    });
+    const newest = incoming[incoming.length - 1];
+    if (newest) seq.current = Math.max(seq.current, newest.seq);
+  }, []);
+
   const load = useCallback(
     async (reset = false) => {
       try {
@@ -105,40 +119,65 @@ function LogConsole({ toast }: { toast: (message: string, tone?: "info" | "error
         });
         setPayload(data);
         setError(null);
-        setEvents((previous) => {
-          const merged = reset ? data.events : [...previous, ...data.events];
-          const seen = new Set<number>();
-          const unique = merged.filter((event) => (seen.has(event.seq) ? false : (seen.add(event.seq), true)));
-          return unique.slice(-400);
-        });
-        const newest = data.events[data.events.length - 1];
-        if (newest) seq.current = Math.max(seq.current, newest.seq);
         if (reset) {
-          seq.current = data.events[data.events.length - 1]?.seq ?? 0;
+          seq.current = 0;
           setSeconds(0);
         }
+        append(data.events, reset);
       } catch (cause) {
         const message = cause instanceof ApiError ? `${cause.message} (${cause.status})` : "could not reach the journal";
         setError(message);
       }
     },
-    [level, scope]
+    [level, scope, append]
   );
 
+  // Live tail: server-sent events, straight from the journal. Polling every
+  // three seconds was both laggy and expensive on a small host; the stream
+  // replays the backlog on connect and then pushes each event as it happens.
+  // Browsers without EventSource (and the test environment) keep the old
+  // polling path.
   useEffect(() => {
     seq.current = 0;
     setEvents([]);
-    void load(true);
-  }, [load]);
+    setError(null);
+
+    if (typeof EventSource !== "function") {
+      void load(true);
+      return;
+    }
+
+    const source = new EventSource(api.logStreamUrl({ level, scope: scope || undefined }));
+    source.addEventListener("open", () => setError(null));
+    source.addEventListener("log", (message) => {
+      if (!liveRef.current) return;
+      try {
+        append([JSON.parse((message as MessageEvent).data) as JournalEvent]);
+      } catch {
+        /* a malformed frame must not break the console */
+      }
+    });
+    source.addEventListener("hello", (message) => {
+      try {
+        setPayload(JSON.parse((message as MessageEvent).data) as JournalPayload);
+      } catch {
+        /* ignore */
+      }
+    });
+    source.addEventListener("error", () => {
+      setError("live stream reconnecting…");
+    });
+    return () => source.close();
+  }, [level, scope, load, append]);
 
   useEffect(() => {
-    if (!live) return;
-    const timer = window.setInterval(() => void load(false), 3000);
     const ticker = window.setInterval(() => setSeconds((value) => value + 1), 1000);
-    return () => {
-      window.clearInterval(timer);
-      window.clearInterval(ticker);
-    };
+    return () => window.clearInterval(ticker);
+  }, []);
+
+  useEffect(() => {
+    liveRef.current = live;
+    if (live) void load(false); // catch up on whatever happened while paused
   }, [live, load]);
 
   useEffect(() => {

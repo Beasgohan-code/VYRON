@@ -10,6 +10,7 @@
 #
 #      /logs                 inside Telegram (owner only)
 #      GET /api/logs         the Mini App's console (owner token required)
+#      GET /api/logs/stream  live tail (SSE) — the same lines, as they happen
 #      data/journal.jsonl    on disk, rotated at 4 MB
 #
 #  The ring buffer keeps the last 2000 events in memory so the API can serve a
@@ -17,6 +18,7 @@
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import platform
@@ -109,6 +111,46 @@ class Event:
         )
 
 
+class Subscription:
+    """A live tail of the journal, safe to feed from worker threads.
+
+    Every event is copied into an asyncio queue on the subscriber's own loop,
+    so a slow consumer (a phone on 3G, an idle browser tab) can never slow the
+    bot down: when the queue is full the oldest event is dropped.
+    """
+
+    def __init__(self, loop: asyncio.AbstractEventLoop, limit: int = 400) -> None:
+        self.loop = loop
+        self.queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=max(20, limit))
+        self.closed = False
+        self.dropped = 0
+
+    def push(self, payload: dict[str, Any]) -> None:
+        if self.closed:
+            return
+        try:
+            self.loop.call_soon_threadsafe(self._put, payload)
+        except RuntimeError:  # the loop is gone (shutdown or a closed tab)
+            self.closed = True
+
+    def _put(self, payload: dict[str, Any]) -> None:
+        if self.closed:
+            return
+        if self.queue.full():
+            try:
+                self.queue.get_nowait()
+                self.dropped += 1
+            except asyncio.QueueEmpty:  # pragma: no cover - race, harmless
+                pass
+        try:
+            self.queue.put_nowait(payload)
+        except asyncio.QueueFull:  # pragma: no cover - race, harmless
+            pass
+
+    def close(self) -> None:
+        self.closed = True
+
+
 class Journal:
     """Bounded event log — thread safe, JSONL backed, cursor addressable."""
 
@@ -121,6 +163,8 @@ class Journal:
         self._handler: logging.Handler | None = None
         # Optional callback fired for every event (used by the log channel).
         self._sink: Any = None
+        # Live-tail subscribers (the SSE log stream).
+        self._subs: set[Subscription] = set()
         self.started_at = time.time()
         self.installed = False
 
@@ -148,6 +192,12 @@ class Journal:
                 sink(event)
             except Exception:  # a sink must never break the caller
                 pass
+        with self._lock:
+            subscribers = list(self._subs)
+        if subscribers:
+            payload = event.to_dict()
+            for subscription in subscribers:
+                subscription.push(payload)
         return event
 
     def _persist(self, event: Event, path: Path) -> None:
@@ -190,6 +240,24 @@ class Journal:
     def set_sink(self, sink: Any) -> None:
         """Attach (or clear) a callable that receives every recorded event."""
         self._sink = sink
+
+    # ── live tail ──────────────────────────────────────────────────────────
+    def subscribe(self, *, limit: int = 400) -> Subscription:
+        """Register a live subscriber on the *running* loop."""
+        subscription = Subscription(asyncio.get_running_loop(), limit=limit)
+        with self._lock:
+            self._subs.add(subscription)
+        return subscription
+
+    def unsubscribe(self, subscription: Subscription) -> None:
+        subscription.close()
+        with self._lock:
+            self._subs.discard(subscription)
+
+    @property
+    def subscribers(self) -> int:
+        with self._lock:
+            return len(self._subs)
 
     # ── reading ────────────────────────────────────────────────────────────
     def events(
@@ -335,4 +403,4 @@ def attach(path: Path | None) -> Journal:
     return journal
 
 
-__all__ = ["Event", "Journal", "LEVELS", "attach", "journal"]
+__all__ = ["Event", "Journal", "LEVELS", "Subscription", "attach", "journal"]

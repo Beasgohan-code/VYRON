@@ -385,6 +385,12 @@ async def _async_main() -> int:
     except Exception as exc:  # a broken player must not stop the bot
         logger.exception("player background tasks failed: %s", exc)
         journal.error("boot", "player background tasks failed", exc)
+    try:
+        # Warm Home in the background: the first Mini App open should not pay
+        # for seven yt-dlp searches while the user stares at a spinner.
+        runtime.charts.prime()
+    except Exception as exc:  # pragma: no cover - never block boot
+        logger.debug("chart warm-up skipped: %s", exc)
     maintenance.start()
     watchdog.start()
     keepalive.start()

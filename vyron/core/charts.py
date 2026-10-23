@@ -92,7 +92,14 @@ class Charts:
     def __init__(self, youtube: YouTube, *, ttl: int = 1800) -> None:
         self.youtube = youtube
         self.ttl = ttl
+        self.home_ttl = 180  # seconds a built Home payload stays fresh
+        self.shelf_timeout = 12  # a shelf that is slower than this is skipped
         self._cache: dict[str, tuple[float, list[Track]]] = {}
+        # Home is expensive (a playlist read + several searches). One payload
+        # per few minutes is plenty, and a stale one beats a spinner.
+        self._home_cache: tuple[float, dict[str, Any]] | None = None
+        self._home_lock = asyncio.Lock()
+        self._prime_task: asyncio.Task | None = None
         self._lock = asyncio.Lock()
 
     # ── cache plumbing ─────────────────────────────────────────────────────
@@ -185,13 +192,45 @@ class Charts:
         tracks = await self._search(query, limit)
         return self._store(cache_key, tracks)[:limit]
 
-    async def home(self, *, mixes: int = 6, trending: int = 12) -> dict[str, Any]:
-        """Everything the Home view needs, fetched in parallel."""
+    async def home(self, *, mixes: int = 4, trending: int = 12) -> dict[str, Any]:
+        """Everything the Home view needs — cached, bounded, never a spinner."""
+        cached = self._home_cache
+        age = time.time() - cached[0] if cached else 0
+        if cached and age < self.home_ttl:
+            return cached[1]
+        if cached and age < self.home_ttl * 3:
+            # Serve what we have and refresh behind the request.
+            self.prime()
+            return cached[1]
+
+        async with self._home_lock:
+            cached = self._home_cache
+            if cached and time.time() - cached[0] < self.home_ttl:
+                return cached[1]
+            payload = await self._build_home(mixes=mixes, trending=trending)
+            self._home_cache = (time.time(), payload)
+            return payload
+
+    def prime(self) -> None:
+        """Warm the Home payload in the background (called on boot)."""
+        if self._prime_task is not None and not self._prime_task.done():
+            return
+        async def _warm() -> None:
+            payload = await self._build_home(mixes=4, trending=12)
+            self._home_cache = (time.time(), payload)
+
+        self._prime_task = asyncio.ensure_future(_warm())
+
+    async def _build_home(self, *, mixes: int = 4, trending: int = 12) -> dict[str, Any]:
         keys = list(MIXES)[:mixes]
-        trending_tracks, *mix_tracks = await asyncio.gather(
-            self.trending(trending),
-            *(self.mix(key, 8) for key in keys),
+        timeout = max(1.0, float(self.shelf_timeout))
+        results = await asyncio.gather(
+            asyncio.wait_for(self.trending(trending), timeout=timeout * 2),
+            *(asyncio.wait_for(self.mix(key, 8), timeout=timeout) for key in keys),
+            return_exceptions=True,
         )
+        trending_tracks = results[0] if isinstance(results[0], list) else []
+        mix_tracks = [item if isinstance(item, list) else [] for item in results[1:]]
         shelves = [
             Shelf(
                 key=key,
@@ -204,6 +243,7 @@ class Charts:
         ]
         cover = next((t.thumbnail for t in trending_tracks if t.thumbnail), "")
         return {
+            "generated_at": int(time.time()),
             "hero": {
                 "headline": "Music hits different here.",
                 "subline": "Discover, stream, download and listen together — all in one place.",

@@ -31,8 +31,28 @@ _YT_ID_RE = re.compile(r"(?:v=|/shorts/|youtu\.be/|/embed/|/live/)([\w-]{11})")
 _LIST_RE = re.compile(r"[?&]list=([\w-]+)")
 
 
+_SLOT: tuple[asyncio.AbstractEventLoop, asyncio.Semaphore] | None = None
+
+
+def _extract_slot(limit: int = 2) -> asyncio.Semaphore:
+    """A process-wide semaphore bound to the loop that is running now."""
+    global _SLOT
+    loop = asyncio.get_running_loop()
+    if _SLOT is None or _SLOT[0] is not loop or _SLOT[1]._value > max(1, limit):
+        _SLOT = (loop, asyncio.Semaphore(max(1, limit)))
+    return _SLOT[1]
+
+
 class MediaError(RuntimeError):
     """Raised when a search / extraction fails in a user-presentable way."""
+
+
+# Shown when YouTube refuses this server rather than this video. It is the one
+# failure an operator can fix in a minute, so it says what to do.
+FAILURE_HINT = (
+    "YouTube is refusing this server's IP — set COOKIES_FILE (a cookies.txt from a "
+    "logged-in browser) or keep STREAM_FALLBACK=on, then try again"
+)
 
 
 MIME_BY_EXT = {
@@ -102,6 +122,13 @@ class YouTube:
         self.settings = settings
         _materialise_cookies(settings)
         self._stream_cache: dict[str, StreamInfo] = {}
+        # One resolve per track at a time: the app asks for a stream and starts
+        # playback at the same moment, and doing the whole client ladder twice
+        # is how a 12-second failure became a 45-second one.
+        self._inflight: dict[str, asyncio.Task[StreamInfo]] = {}
+        # A track that just failed will fail again for a while. Remember it, so
+        # the next tap answers instantly instead of grinding the ladder again.
+        self._failures: dict[str, float] = {}
         # the player client that last produced a playable URL (None = yt-dlp default)
         self._client_hint: str | None = None
 
@@ -202,8 +229,12 @@ class YouTube:
         return info
 
     async def _async_extract(self, target: str, **extra: Any) -> dict[str, Any]:
+        # yt-dlp is CPU-bound Python: on a small host, ten "parallel" searches
+        # starve the event loop and every web request in the same second looks
+        # slow. Two extractions at a time keeps the bot responsive.
         try:
-            return await asyncio.to_thread(self._extract, target, **extra)
+            async with _extract_slot(getattr(self.settings, "extract_concurrency", 2)):
+                return await asyncio.to_thread(self._extract, target, **extra)
         except MediaError:
             raise
         except Exception as exc:  # yt-dlp raises a zoo of exception types
@@ -393,6 +424,33 @@ class YouTube:
         if cached and not refresh and cached.expires_at > time.time():
             return cached
 
+        if not refresh:
+            blocked_until = self._failures.get(key, 0.0)
+            if blocked_until > time.time():
+                raise MediaError(FAILURE_HINT)
+            running = self._inflight.get(key)
+            if running is not None:
+                # Share the answer instead of running the ladder again.
+                return await asyncio.shield(running)
+
+        task = asyncio.ensure_future(self._resolve_stream(track, video=video, refresh=refresh))
+        if not refresh:
+            self._inflight[key] = task
+        try:
+            return await asyncio.shield(task)
+        except MediaError:
+            ttl = max(5, int(getattr(self.settings, "stream_failure_ttl", 60)))
+            self._failures[key] = time.time() + ttl
+            raise
+        finally:
+            if self._inflight.get(key) is task:
+                self._inflight.pop(key, None)
+
+    async def _resolve_stream(
+        self, track: Track, *, video: bool = False, refresh: bool = False
+    ) -> StreamInfo:
+        """The actual work: cached URL → client ladder → public mirror."""
+        key = f"{track.id}:{'v' if video else 'a'}"
         target = track.url or track.watch_url
         if not target:
             raise MediaError("Track has no URL to stream.")
@@ -408,16 +466,26 @@ class YouTube:
             selector = "bestaudio[ext=m4a]/bestaudio[acodec!=none]/best"
 
         last_error: Exception | None = None
+        same_error = 0
         for client in self._client_ladder():
             try:
                 info = await self._async_extract(target, format=selector, **self._client_opts(client))
                 result = self._stream_from_info(info, track, video=video, target=target)
             except Exception as exc:  # MediaError, DownloadError, KeyError…
+                message = str(exc)
+                # Two identical answers mean the client ladder is not the
+                # problem (a dead video, a blocked IP). Stopping there turns a
+                # six-client, 24-second stall into a two-client, 4-second one.
+                same_error = same_error + 1 if last_error is not None and str(last_error) == message else 1
                 last_error = exc
                 logger.info("resolve via %s failed for %s: %s", client, track.id, exc)
+                if same_error >= 2:
+                    logger.info("resolve for %s is deterministic, stopping the ladder", track.id)
+                    break
                 continue
             self._remember_client(client)
             self._stream_cache[key] = result
+            self._failures.pop(key, None)
             return result
 
         # Last tier: a public Invidious/Piped mirror. yt-dlp failing is a
@@ -430,10 +498,14 @@ class YouTube:
             return fallback
 
         self._stream_cache.pop(key, None)
+        reason = f"{type(last_error).__name__}: {last_error}" if last_error else ""
+        if reason and any(
+            word in reason.lower()
+            for word in ("bot", "403", "sign in", "extracted", "unavailable", "confirm")
+        ):
+            raise MediaError(f"no playable stream for this track ({reason}). {FAILURE_HINT}")
         raise MediaError(
-            f"no playable stream for this track ({type(last_error).__name__}: {last_error})"
-            if last_error
-            else "no playable stream for this track"
+            f"no playable stream for this track ({reason})" if reason else "no playable stream for this track"
         )
 
     async def _public_fallback(self, track: Track, *, video: bool = False) -> StreamInfo | None:

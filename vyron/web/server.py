@@ -28,6 +28,10 @@ from vyron.web.auth import WebUser, make_token, resolve_user, verify_owner_token
 logger = logging.getLogger(__name__)
 
 _LYRICS_CACHE: dict[str, tuple[float, dict]] = {}
+# Telegram round-trips are the slowest thing on a small host: a chat title does
+# not change often enough to fetch on every state request.
+_TITLE_CACHE: dict[int, tuple[float, str]] = {}
+_PLAYLIST_CACHE: dict[int, tuple[float, list[dict]]] = {}
 
 _WEBAPP_ROOT = Path(
     getattr(settings, "webapp_dir", Path(__file__).resolve().parent.parent.parent / "webapp")
@@ -143,6 +147,26 @@ def _chat_id(user: WebUser) -> int:
     return user.chat_id or user.user_id
 
 
+async def _none(value=None):
+    return value
+
+
+async def _chat_title(chat_id: int) -> str:
+    """Chat title with a 10-minute cache and a hard timeout."""
+    cached = _TITLE_CACHE.get(chat_id)
+    if cached and time.time() - cached[0] < 600:
+        return cached[1]
+    if runtime.bot is None:
+        return ""
+    try:
+        chat = await asyncio.wait_for(runtime.bot.get_chat(chat_id), timeout=3)
+        title = chat.title or chat.first_name or ""
+    except Exception:
+        return cached[1] if cached else ""
+    _TITLE_CACHE[chat_id] = (time.time(), title)
+    return title
+
+
 # ── static shell ────────────────────────────────────────────────────────────
 async def index(_: web.Request) -> web.StreamResponse:
     page = WEB_DIR / "index.html"
@@ -188,18 +212,14 @@ async def state(request: web.Request) -> web.Response:
             ),
         )
 
-    chat_title = ""
-    if runtime.bot and user.chat_id:
-        try:
-            chat = await runtime.bot.get_chat(user.chat_id)
-            chat_title = chat.title or chat.first_name or ""
-        except Exception:
-            chat_title = ""
-
-    favorites = await runtime.storage.favorites(user.user_id, 50) if runtime.storage else []
-    history = await runtime.storage.history(user.user_id, 20) if runtime.storage else []
-    playlists = [pl.summary(entry) for entry in await pl.list_playlists(user.user_id)]
-    counters = await runtime.storage.counters() if runtime.storage else {}
+    chat_title, favorites, history, playlist_rows, counters = await asyncio.gather(
+        _chat_title(user.chat_id) if user.chat_id else _none(),
+        runtime.storage.favorites(user.user_id, 50) if runtime.storage else _none([]),
+        runtime.storage.history(user.user_id, 20) if runtime.storage else _none([]),
+        pl.list_playlists(user.user_id),
+        runtime.storage.counters() if runtime.storage else _none({}),
+    )
+    playlists = [pl.summary(entry) for entry in playlist_rows]
 
     return web.json_response(
         {
@@ -570,12 +590,14 @@ async def playlists_route(request: web.Request) -> web.Response:
         return denied
     if not user.authenticated:
         return web.json_response({"ok": True, "playlists": []})
-    return web.json_response(
-        {
-            "ok": True,
-            "playlists": [pl.summary(entry) for entry in await pl.list_playlists(user.user_id)],
-        }
-    )
+    cached = _PLAYLIST_CACHE.get(user.user_id)
+    if cached is None or time.time() - cached[0] > 20:
+        cached = (
+            time.time(),
+            [pl.summary(entry) for entry in await pl.list_playlists(user.user_id)],
+        )
+        _PLAYLIST_CACHE[user.user_id] = cached
+    return web.json_response({"ok": True, "playlists": cached[1], "cached": True})
 
 
 # ── actions ─────────────────────────────────────────────────────────────────
@@ -756,6 +778,8 @@ async def action(request: web.Request) -> web.Response:
             return ok(saved=saved)
 
         # ── playlists ─────────────────────────────────────────────────────
+        if name in {"playlist_create", "playlist_delete", "playlist_add", "playlist_remove"}:
+            _PLAYLIST_CACHE.pop(user.user_id, None)
         if name == "playlist_create":
             entry = await pl.create(user.user_id, str(value or "New playlist"))
             return ok(playlist=pl.summary(entry))
@@ -941,6 +965,258 @@ async def logs(request: web.Request) -> web.Response:
     )
 
 
+
+
+# ── live log stream (SSE) ───────────────────────────────────────────────────
+
+LIVE_PAGE = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>VYRON · live logs</title>
+<style>
+  :root { --bg:#07080c; --panel:#0d0f16; --line:#1b1f2b; --text:#e7eaf3; --dim:#8b93a7;
+          --ok:#3ddc97; --warn:#ffcc66; --err:#ff6b6b; --accent:#8b7bff; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--text);
+    font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; }
+  header { position:sticky; top:0; display:flex; flex-wrap:wrap; gap:8px; align-items:center;
+    padding:12px 14px; background:rgba(7,8,12,.92); backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--line); z-index:2; }
+  .brand { font-weight:700; letter-spacing:.14em; font-size:11px; color:var(--dim); }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--err); box-shadow:0 0 10px var(--err); }
+  .dot.on { background:var(--ok); box-shadow:0 0 10px var(--ok); }
+  button, input { font:inherit; color:var(--text); background:var(--panel); border:1px solid var(--line);
+    border-radius:10px; padding:6px 10px; }
+  button { cursor:pointer; }
+  button[aria-pressed="true"] { border-color:var(--accent); color:#fff; background:#171533; }
+  #list { padding:10px 12px 40px; }
+  .row { display:grid; grid-template-columns:64px 58px 96px 1fr; gap:10px; padding:5px 6px;
+    border-radius:8px; border-left:2px solid transparent; }
+  .row:hover { background:#0b0d14; }
+  .row.warn { border-left-color:var(--warn); }
+  .row.error { border-left-color:var(--err); }
+  .row.ok { border-left-color:var(--ok); }
+  .time { color:var(--dim); }
+  .lvl { text-transform:uppercase; font-size:10.5px; letter-spacing:.08em; }
+  .lvl.warn { color:var(--warn); } .lvl.error { color:var(--err); } .lvl.ok { color:var(--ok); }
+  .lvl.info { color:#6ea8ff; } .lvl.debug { color:var(--dim); }
+  .scope { color:var(--dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .msg { white-space:pre-wrap; word-break:break-word; }
+  .meta { display:none; margin:4px 0 0; padding:8px 10px; border-radius:8px; background:#0a0c12;
+    color:#a9b2c7; white-space:pre-wrap; }
+  .row.open .meta { display:block; }
+  .row.clickable { cursor:pointer; }
+  #empty { color:var(--dim); padding:24px 14px; }
+  @media (max-width:640px) { .row { grid-template-columns:54px 1fr; } .scope { display:none; } }
+</style>
+</head>
+<body>
+<header>
+  <span class="dot" id="dot"></span>
+  <span class="brand">VYRON · LIVE</span>
+  <button id="pause" aria-pressed="false">pause</button>
+  <button data-level="all" aria-pressed="true">all</button>
+  <button data-level="info" aria-pressed="false">info+</button>
+  <button data-level="warn" aria-pressed="false">warn+</button>
+  <button data-level="error" aria-pressed="false">errors</button>
+  <input id="scope" placeholder="scope filter" size="10">
+  <button id="clear">clear view</button>
+  <button id="save">download</button>
+  <span class="brand" id="stats"></span>
+</header>
+<div id="list"></div>
+<div id="empty">waiting for events…</div>
+<script>
+(function(){
+  var params = new URLSearchParams(location.search);
+  var token = params.get('ot') || params.get('t') || '';
+  var level = 'all', scope = '', paused = false, keep = [], source = null;
+  var list = document.getElementById('list');
+  var empty = document.getElementById('empty');
+  var dot = document.getElementById('dot');
+  var statsEl = document.getElementById('stats');
+
+  function fmtTime(ts){
+    var d = new Date((ts || 0) * 1000);
+    return d.toTimeString().slice(0,8);
+  }
+  function add(ev){
+    if (paused) { keep.push(ev); return; }
+    var row = document.createElement('div');
+    row.className = 'row ' + (ev.level || 'info') + (ev.meta && Object.keys(ev.meta).length ? ' clickable' : '');
+    var meta = ev.meta && Object.keys(ev.meta).length;
+    row.innerHTML = '<span class="time">' + fmtTime(ev.ts) + '</span>' +
+      '<span class="lvl ' + (ev.level || 'info') + '">' + (ev.level || 'info') + '</span>' +
+      '<span class="scope">' + (ev.scope || 'app') + '</span>' +
+      '<span class="msg"></span>';
+    row.querySelector('.msg').textContent = ev.message || '';
+    if (meta) {
+      var pre = document.createElement('pre');
+      pre.className = 'meta';
+      pre.textContent = JSON.stringify(ev.meta, null, 2);
+      row.querySelector('.msg').appendChild(pre);
+      row.addEventListener('click', function(){ row.classList.toggle('open'); });
+    }
+    list.appendChild(row);
+    while (list.childElementCount > 1200) { list.removeChild(list.firstChild); }
+    empty.style.display = 'none';
+    if (nearBottom()) window.scrollTo(0, document.body.scrollHeight);
+  }
+  function nearBottom(){
+    return window.innerHeight + window.scrollY >= document.body.scrollHeight - 120;
+  }
+  function connect(){
+    if (source) { source.close(); }
+    var url = '/api/logs/stream?level=' + encodeURIComponent(level) +
+      (scope ? '&scope=' + encodeURIComponent(scope) : '') +
+      (token ? '&ot=' + encodeURIComponent(token) : '');
+    source = new EventSource(url);
+    source.addEventListener('open', function(){ dot.classList.add('on'); });
+    source.addEventListener('error', function(){ dot.classList.remove('on'); });
+    source.addEventListener('log', function(message){
+      try { add(JSON.parse(message.data)); } catch (e) {}
+    });
+    source.addEventListener('hello', function(message){
+      try {
+        var data = JSON.parse(message.data);
+        var counts = (data.stats && data.stats.counts) || {};
+        statsEl.textContent = (counts.error || 0) + ' errors · ' + (counts.warn || 0) + ' warnings';
+      } catch (e) {}
+    });
+  }
+  document.querySelectorAll('[data-level]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      level = btn.getAttribute('data-level');
+      document.querySelectorAll('[data-level]').forEach(function(other){
+        other.setAttribute('aria-pressed', String(other === btn));
+      });
+      connect();
+    });
+  });
+  document.getElementById('pause').addEventListener('click', function(){
+    paused = !paused;
+    this.setAttribute('aria-pressed', String(paused));
+    this.textContent = paused ? 'resume' : 'pause';
+    if (!paused) { keep.splice(0).forEach(add); }
+  });
+  document.getElementById('scope').addEventListener('change', function(){
+    scope = this.value.trim(); connect();
+  });
+  document.getElementById('clear').addEventListener('click', function(){
+    list.innerHTML = ''; empty.style.display = 'block';
+  });
+  document.getElementById('save').addEventListener('click', function(){
+    var text = Array.from(list.children).map(function(row){
+      return row.querySelector('.time').textContent + ' ' +
+        row.querySelector('.lvl').textContent + ' ' +
+        row.querySelector('.scope').textContent + ' ' +
+        row.querySelector('.msg').firstChild.textContent;
+    }).join('\n');
+    var blob = new Blob([text], {type:'text/plain'});
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'vyron-logs.txt';
+    a.click();
+  });
+  connect();
+})();
+</script>
+</body>
+</html>"""
+
+
+async def _sse(response: web.StreamResponse, event: str, payload: dict) -> None:
+    import json as _json
+
+    body = f"event: {event}\ndata: {_json.dumps(payload, ensure_ascii=False, default=str)}\n\n"
+    await response.write(body.encode("utf-8"))
+
+
+def _passes(event: dict, levels: set[str] | None, scope: str | None) -> bool:
+    if levels is not None and event.get("level") not in levels:
+        return False
+    if scope and event.get("scope") != scope:
+        return False
+    return True
+
+
+async def logs_stream(request: web.Request) -> web.StreamResponse:
+    """Server-sent events: the journal, live, for the owner's console.
+
+    A render host showing "server failure" is only half a diagnosis; this
+    stream is the other half — the same lines the process logs, as they happen,
+    with the backlog replayed first so nothing is missed on reconnect.
+    """
+    user = await _identify(request)
+    if not _is_owner(user):
+        return web.json_response({"ok": False, "error": "owner only"}, status=403)
+
+    level = (request.query.get("level") or "all").lower()
+    levels = set(_LOG_FILTERS.get(level) or []) or None
+    scope = (request.query.get("scope") or "").strip() or None
+    try:
+        since = max(0, int(request.query.get("since") or 0))
+    except ValueError:
+        since = 0
+
+    response = web.StreamResponse(
+        status=200,
+        headers={
+            "Content-Type": "text/event-stream; charset=utf-8",
+            "Cache-Control": "no-store",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+    await response.prepare(request)
+    await response.write(b"retry: 3000\n\n")
+
+    subscription = journal.subscribe(limit=600)
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + 240  # browsers reconnect; proxies like short streams
+    try:
+        for event in journal.events(limit=200, since=since):
+            if _passes(event, levels, scope):
+                await _sse(response, "log", event)
+        await _sse(
+            response,
+            "hello",
+            {
+                "seq": journal.stats().get("seq", 0),
+                "stats": journal.stats(),
+                "system": _system_snapshot(),
+                "subscribers": journal.subscribers,
+            },
+        )
+        while loop.time() < deadline:
+            try:
+                payload = await asyncio.wait_for(subscription.queue.get(), timeout=15)
+            except asyncio.TimeoutError:
+                await response.write(b": ping\n\n")  # keep-alive comment
+                continue
+            if not _passes(payload, levels, scope):
+                continue
+            await _sse(response, "log", payload)
+    except (ConnectionResetError, asyncio.CancelledError):
+        pass
+    finally:
+        journal.unsubscribe(subscription)
+    return response
+
+
+def _live_page() -> str:
+    """A tiny, dependency-free viewer for the stream (works on a phone)."""
+    return LIVE_PAGE
+
+
+async def logs_live(_request: web.Request) -> web.Response:
+    return web.Response(text=_live_page(), content_type="text/html", charset="utf-8")
+
+
+
 async def logs_action(request: web.Request) -> web.Response:
     """`clear` or `export` the journal — owner only, always audited."""
     user = await _identify(request)
@@ -984,6 +1260,8 @@ def register(app: web.Application) -> None:
     app.router.add_get("/api/keys", api_keys)
     app.router.add_post("/api/keys", api_keys)
     app.router.add_get("/api/logs", logs)
+    app.router.add_get("/api/logs/stream", logs_stream)
+    app.router.add_get("/logs/live", logs_live)
     app.router.add_post("/api/logs", logs_action)
     audio.register(app)
     logger.info("web app mounted from %s", WEB_DIR)

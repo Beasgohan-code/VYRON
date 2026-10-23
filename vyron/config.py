@@ -75,6 +75,13 @@ class Settings:
     autoplay_default: bool = field(default_factory=lambda: _flag("AUTOPLAY", True))
     autoleave_24_7: bool = field(default_factory=lambda: _flag("ALWAYS_ON", False))
     stream_cache_ttl: int = field(default_factory=lambda: max(60, _int("STREAM_CACHE_TTL", 1800)))
+    # How long a track that just failed stays "known bad" — long enough to stop
+    # a tap-happy listener from re-running the whole resolver, short enough that
+    # a transient 403 heals by itself.
+    stream_failure_ttl: int = field(default_factory=lambda: max(5, _int("STREAM_FAILURE_TTL", 60)))
+    # yt-dlp is CPU-bound: two extractions at a time keeps the event loop (and
+    # therefore the Mini App) responsive on a small host.
+    extract_concurrency: int = field(default_factory=lambda: max(1, _int("EXTRACT_CONCURRENCY", 2)))
     # ShizuMusic's core idea: download the track first, then stream the local
     # file. Immune to 403s, expiring URLs and mid-song drops — the usual reason
     # a hosted deployment "plays nothing". Costs the first few seconds.

@@ -777,6 +777,8 @@ The interesting optional ones:
 | `YOUTUBE_PROXY` / `YOUTUBE_PROXY_FILE` | – | proxy for the engine (falls back to `PROXY`) |
 | `YOUTUBE_COOKIES` / `YOUTUBE_COOKIES_FILE` | – | cookies for the engine (falls back to `COOKIES_FILE`) |
 | `DOWNLOAD_CLEANUP_SECONDS` | `900` | how long a temp download folder may live |
+| `STREAM_FAILURE_TTL` | `60` | how long a track that just failed answers instantly instead of retrying |
+| `EXTRACT_CONCURRENCY` | `2` | yt-dlp extractions allowed at once (the rest queue, so web requests stay fast) |
 | `MONGO_URL` | – | persistence (JSON file otherwise) |
 | `PREMIUM_EMOJI_FILE` | `./emoji.json` | custom emoji pack |
 | `RICH_MESSAGES` | `true` | rich cards (set `false` for plain HTML) |
@@ -800,9 +802,19 @@ Everything the process does is recorded once, in one place:
 | Where | What |
 | --- | --- |
 | `/logs` (bot, owner DM) | newest events, filter by level or scope, `/logs export`, `/logs clear` |
-| Mini App → **Owner → Journal** | live tail (3 s poll), level/scope filters, copy, export, clear |
+| Mini App → **Owner → Journal** | live tail over SSE, level/scope filters, pause, export, clear |
+| `GET /api/logs/stream` | **live** `text/event-stream`, backlog replayed first, owner only |
+| `/logs/live` | a phone-sized terminal in the browser — filters, pause, download |
 | `GET /api/logs` | `?since=<seq>` cursor, owner token required |
 | `data/journal.jsonl` | rotated at 4 MB, greppable offline |
+
+The stream is the honest answer to "the host says *server failure*": it is the
+same lines the process logs, pushed the moment they are written, with the last
+200 events replayed on connect so a reconnect never loses the reason. Open
+`/app/?ot=<owner token>` → **Owner → Journal**, or `/logs/live?ot=<owner token>`
+in any browser. Filters run server-side (`?level=warn`, `?scope=stream`), and
+the connection closes after four minutes so no proxy can cache it — the browser
+reconnects and gets the gap.
 
 Recorded automatically: boot and shutdown (version, storage backend, streaming
 readiness, handler count), stream start/stop per chat, voice-chat join/leave,
@@ -814,9 +826,9 @@ and slow API requests.
 
 ```bash
 pip install pytest pytest-asyncio
-python -m pytest tests -q      # 160 passed
+python -m pytest tests -q      # 443 passed
 
-cd frontend && npm test        # 5 component tests (vitest + jsdom)
+cd frontend && npm test        # 18 component tests (vitest + jsdom)
 ```
 
 Covered offline: duration parsing, progress bars, loop semantics, queue

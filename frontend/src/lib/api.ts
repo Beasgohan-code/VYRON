@@ -170,6 +170,23 @@ export const api = {
     return request<JournalPayload>(`/api/logs${query ? `?${query}` : ""}`);
   },
 
+  /** SSE endpoint — the journal, live. EventSource cannot send headers, so the
+   *  credentials ride in the query string (initData / signed token / owner
+   *  token), exactly what `_identify` already accepts. */
+  logStreamUrl: (options: { level?: string; scope?: string } = {}) => {
+    const params = new URLSearchParams();
+    if (options.level && options.level !== "all") params.set("level", options.level);
+    if (options.scope) params.set("scope", options.scope);
+    const init = telegram()?.initData ?? "";
+    if (init) params.set("init_data", init);
+    const tok = token();
+    if (tok) params.set("t", tok);
+    const owner = ownerToken();
+    if (owner) params.set("ot", owner);
+    const query = params.toString();
+    return `/api/logs/stream${query ? `?${query}` : ""}`;
+  },
+
   logsAction: (action: "clear" | "export") =>
     request<{ ok: boolean; cleared?: number; file?: string; path?: string }>("/api/logs", { action }),
 
