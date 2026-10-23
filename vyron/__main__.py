@@ -172,6 +172,32 @@ async def _start_client(client, label: str, *, attempts: int = 8) -> None:
             await asyncio.sleep(min(wait, 3600))
 
 
+async def _hold_alive(reason: str) -> int:
+    """Stay up (and keep the port open) instead of crash-looping on Render.
+
+    An exit here is what turns one bad env var into a deploy that never
+    finishes and a login attempt every few seconds. Logging the reason once
+    and idling is the sane failure mode for a hosted bot.
+    """
+    logger.error("starting in degraded mode — %s", reason)
+    logger.error("the process stays up so the platform keeps the logs; fix the")
+    logger.error("reason above in the dashboard and redeploy when ready.")
+    journal.error("boot", f"degraded: {reason}")
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, stop.set)
+        except (NotImplementedError, RuntimeError):  # pragma: no cover
+            pass
+    while not stop.is_set():
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=1800)
+        except asyncio.TimeoutError:
+            logger.error("still degraded — %s", reason)
+    return 0
+
+
 async def _async_main() -> int:
     setup_logging(settings.log_level)
     print(banner_text())
@@ -186,43 +212,71 @@ async def _async_main() -> int:
         webapp=settings.webapp,
     )
 
-    problems = settings.validate()
-    if problems:
-        for problem in problems:
-            logger.error("config: %s", problem)
-            journal.error("config", problem)
-        logger.error("Copy .env.example to .env and fill it in — see README.md")
-        return 1
-    for note in settings.warnings():
-        logger.warning("config: %s", note)
-        journal.warn("config", note)
-
-    # validate the session *before* dialling Telegram: a truncated paste is the
-    # most common deploy mistake and should fail here, with the reason.
-    problem = session_problem(settings.session_string)
-    if problem:
-        logger.error("config: %s", problem)
-        journal.error("config", problem)
-        logger.error(
-            "generate a fresh session with `python -m vyron.tools.session` "
-            "(README → Create the assistant session)"
-        )
-        return 1
-
-    # open the HTTP port first: Render/Koyeb polls it while the bot dials Telegram
-    runner = await health.start(settings.port)
     runtime.settings = settings
     runtime.version = __version__
     runtime.started_at = time.time()
 
+    # open the HTTP port before anything can fail: Render/Koyeb polls it while
+    # the bot dials Telegram, and a port that never opens reads as "server
+    # failure" even when the real problem is one missing env var.
+    runner = await health.start(settings.port)
+
+    problems = settings.validate()
+    runtime.boot_problems = list(problems)
+    for problem in problems:
+        logger.error("config: %s", problem)
+        journal.error("config", problem)
+    for note in settings.warnings():
+        logger.warning("config: %s", note)
+        journal.warn("config", note)
+
+    # A bot with no credentials cannot do anything at all — but exiting turns
+    # that into a restart loop that hides the message. Hold the port instead.
+    fatal = [p for p in problems if not p.startswith("STRING_SESSION")]
+    if fatal:
+        reason = "cannot log in to Telegram: " + "; ".join(fatal)[:300]
+        logger.error("Copy .env.example to .env and fill it in — see README.md")
+        await _hold_alive(reason)
+        if runner is not None:
+            await runner.cleanup()
+        return 0
+
+    # A *bad* session is not fatal any more: the bot runs, downloads work, and
+    # /play explains what to fix. Validate it before dialling Telegram so the
+    # log says "truncated paste", not "AuthKeyUnregistered" ten lines later.
+    problem = session_problem(settings.session_string) if settings.session_string else ""
+    if problem:
+        logger.error("config: %s", problem)
+        journal.error("config", problem)
+        logger.error(
+            "streaming will stay off until this is fixed — generate a fresh "
+            "session with `python -m vyron.tools.session`"
+        )
+        runtime.boot_problems.append(problem)
+
     bot = build_bot(settings)
-    assistant = build_assistant(settings)
+    assistant = None if problem else build_assistant(settings)
     runtime.bot = bot
     runtime.assistant = assistant
 
     logger.info("starting bot client…")
-    await _start_client(bot, "bot")
-    me = await bot.get_me()
+    try:
+        await _start_client(bot, "bot")
+        me = await bot.get_me()
+    except Exception as exc:
+        # Invalid token, blocked network, or a FloodWait longer than the retry
+        # window. Either way: say it once, keep the port open, don't loop.
+        reason = f"bot login failed ({type(exc).__name__}: {exc})"
+        logger.exception(reason)
+        journal.error("boot", reason)
+        logger.error(
+            "check BOT_TOKEN, and that API_ID/API_HASH belong to the same app as "
+            "the bot. The deployment stays up; fix the variable and redeploy."
+        )
+        await _hold_alive(reason)
+        if runner is not None:
+            await runner.cleanup()
+        return 0
     logger.info("connected as @%s", me.username)
 
     calls = None
@@ -255,7 +309,16 @@ async def _async_main() -> int:
             "no voice engine — /play will refuse until STRING_SESSION is set and valid"
         )
 
-    await runtime.build_services()
+    try:
+        await runtime.build_services()
+    except Exception as exc:
+        reason = f"services failed to start ({type(exc).__name__}: {exc})"
+        logger.exception(reason)
+        journal.error("boot", reason)
+        await _hold_alive(reason)
+        if runner is not None:
+            await runner.cleanup()
+        return 0
 
     # the interface style is a deployment choice the owner can flip at runtime
     from vyron.modules import uistyle
@@ -295,7 +358,16 @@ async def _async_main() -> int:
             if resumed:
                 logger.info("resumed %d 24/7 chat(s)", resumed)
 
-    loaded = register_all(bot)
+    try:
+        loaded = register_all(bot)
+    except Exception as exc:
+        reason = f"handler registration failed ({type(exc).__name__}: {exc})"
+        logger.exception(reason)
+        journal.error("boot", reason)
+        await _hold_alive(reason)
+        if runner is not None:
+            await runner.cleanup()
+        return 0
     runtime.handlers_loaded = loaded
     await _set_commands(bot)
     await _setup_menu_button(bot)
@@ -308,7 +380,11 @@ async def _async_main() -> int:
             "music api → %s/v1/docs  (keys: /getapi · owner login: /apitoken)", base
         )
 
-    await runtime.player.start_background()
+    try:
+        await runtime.player.start_background()
+    except Exception as exc:  # a broken player must not stop the bot
+        logger.exception("player background tasks failed: %s", exc)
+        journal.error("boot", "player background tasks failed", exc)
     maintenance.start()
     watchdog.start()
     keepalive.start()
@@ -394,6 +470,30 @@ def run() -> None:
             )
         else:
             logger.error("the traceback above is the exact failure; nothing was masked")
+
+        # Last resort: keep the port (and the deployment) up with a JSON
+        # explanation instead of exiting into a Render restart loop.
+        try:
+            from vyron.utils import health as health_module
+
+            # bind the message now: `exc` is cleared when the except block ends
+            reason = f"startup failed: {type(exc).__name__}: {exc}"
+
+            async def _serve_degraded() -> None:
+                runner = await health_module.start_degraded(settings.port, reason)
+                if runner is None:
+                    return
+                while True:
+                    await asyncio.sleep(3600)
+
+            logger.error(
+                "serving a degraded /health on port %s so the platform keeps the "
+                "logs; fix the reason above and redeploy",
+                settings.port,
+            )
+            asyncio.run(_serve_degraded())
+        except Exception:  # pragma: no cover - the explanation above still holds
+            pass
         sys.exit(1)
 
 

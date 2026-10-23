@@ -22,6 +22,7 @@ async def _index(_request: web.Request) -> web.Response:
             "version": runtime.version,
             "uptime": round(runtime.uptime, 1),
             "streaming": runtime.streaming_ready,
+            "problems": list(runtime.boot_problems),
             "active_players": len(runtime.player.active_chats()) if runtime.player else 0,
             "storage": runtime.storage.backend if runtime.storage else "none",
         }
@@ -43,6 +44,8 @@ async def _health(_request: web.Request) -> web.Response:
             # `status` keeps Eldian-style monitors ({"status": "ok"}) happy too.
             "status": "ok",
             "ready": ready,
+            "degraded": bool(runtime.boot_problems) or not runtime.streaming_ready,
+            "problems": list(runtime.boot_problems),
             "streaming": runtime.streaming_ready,
             "uptime": round(runtime.uptime, 1),
             "watchdog": {
@@ -85,6 +88,49 @@ def build_app(*, with_webapp: bool = True) -> web.Application:
     return app
 
 
+async def start_degraded(port: int, reason: str, problems: list[str] | None = None) -> web.AppRunner | None:
+    """Serve *only* /health, with the reason, instead of exiting.
+
+    A music bot that crashes on a missing env var takes the whole deployment
+    down with it: Render shows "server failure", restarts, and floods Telegram
+    with a fresh login attempt every time. Answering this port with a JSON
+    explanation keeps the service alive, the logs honest, and the health check
+    green while the operator fixes the variable.
+    """
+    if not port:
+        return None
+    details = [problem for problem in (problems or []) if problem] or [reason]
+    app = web.Application()
+
+    async def _degraded(_request: web.Request) -> web.Response:
+        return web.json_response(
+            {
+                "ok": True,
+                "status": "degraded",
+                "ready": False,
+                "service": "vyron",
+                "version": runtime.version,
+                "reason": reason,
+                "problems": details,
+                "hint": "fix the env var(s) above in the dashboard, then redeploy",
+            }
+        )
+
+    app.router.add_get("/", _degraded)
+    app.router.add_get("/health", _degraded)
+    app.router.add_get("/status", _degraded)
+    runner = web.AppRunner(app, access_log=None)
+    try:
+        await runner.setup()
+        site = web.TCPSite(runner, host="0.0.0.0", port=port)
+        await site.start()
+        logger.error("degraded mode on 0.0.0.0:%s — %s", port, reason)
+        return runner
+    except Exception as exc:  # pragma: no cover
+        logger.error("degraded server could not start on %s: %s", port, exc)
+        return None
+
+
 async def start(port: int) -> web.AppRunner | None:
     """Start the health + web-app server on 0.0.0.0:<port>."""
     if not port:
@@ -105,4 +151,4 @@ async def start(port: int) -> web.AppRunner | None:
         return None
 
 
-__all__ = ["build_app", "start"]
+__all__ = ["build_app", "start", "start_degraded"]

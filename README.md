@@ -838,3 +838,24 @@ MIT © [Beasgohan-code](https://github.com/Beasgohan-code) — fork it, improve 
 **VYRON** · built for the voice chat you actually use
 
 </div>
+
+## When a deploy goes wrong
+
+A hosted bot must not turn one bad environment variable into a restart loop:
+Render shows *server failure*, restarts the container, and every restart is a
+fresh Telegram login attempt. VYRON therefore fails **soft**:
+
+1. The HTTP port opens **before** the configuration is validated, so the
+   platform's health check has something to talk to no matter what.
+2. A missing `BOT_TOKEN` / `API_ID` / `API_HASH` logs the reason, then idles in
+   degraded mode — `/health` answers `{"status": "degraded", "problems": […]}`
+   and the process stays up so the logs survive.
+3. A missing or malformed `STRING_SESSION` is **not** fatal: the bot runs,
+   search and downloads work, `/play` explains what to fix.
+4. Storage falling back from Mongo to the JSON file, a handler failing to
+   register, or the player's background tasks crashing are all logged and
+   survived rather than re-raised at boot.
+
+`/health` (and `/v1/health`) report `degraded`, `problems` and `streaming`, so
+the dashboard and the API tell the same story the logs do.
+
