@@ -9,7 +9,7 @@ import { TrackCard } from "../components/TrackCard";
 import { Equalizer } from "../components/Equalizer";
 import { Aurora } from "../components/Aurora";
 import { Count } from "../components/Count";
-import { useTilt } from "../lib/anim";
+import { useStagger, useTilt } from "../lib/anim";
 
 export function HomeView() {
   const {
@@ -32,6 +32,7 @@ export function HomeView() {
   const [downloadQuery, setDownloadQuery] = useState("");
   const [quality, setQuality] = useState<"audio" | "video">("audio");
   const artRef = useTilt<HTMLDivElement>(6);
+  const heroRef = useStagger<HTMLDivElement>(1, ".hero-copy > *");
 
   const trending = home?.trending ?? [];
   const shelves = home?.shelves ?? [];
@@ -40,7 +41,7 @@ export function HomeView() {
 
   return (
     <section className="view active">
-      <div className="hero">
+      <div className="hero" ref={heroRef}>
         <Aurora className="hero-aurora" tone="violet" />
         <div className="hero-copy">
           <span className="eyebrow">
