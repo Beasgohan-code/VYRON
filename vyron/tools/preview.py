@@ -104,7 +104,7 @@ async def main() -> None:
         owner_id = next(iter(settings.owners), 1)
         token = make_owner_token(settings.bot_token, owner_id)
         # printed, not logged: the token must never end up in the journal
-        print(f"owner console → http://{args.host}:{args.port}/app/?ot={token}")
+        print(f"owner console → http://{args.host}:{args.port}/app/?ot={token}", flush=True)
         journal.info("preview", "owner console enabled (token printed to the terminal)")
     logger.info("outside Telegram the app shows a locked state — no placeholder data")
 
