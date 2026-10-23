@@ -355,6 +355,14 @@ async def send_photo(
     if len(caption) > 1024:  # Telegram's caption ceiling
         caption = caption[:1010].rsplit("\n", 1)[0] + "…"
     if photo:
+        # Pyrogram only accepts a path, a file id or a *binary file object* —
+        # raw bytes would raise "Invalid file" and cost us the poster.
+        if isinstance(photo, (bytes, bytearray)):
+            import io as _io
+
+            buffer = _io.BytesIO(photo)
+            buffer.name = "vyron-poster.jpg"  # type: ignore[attr-defined]
+            photo = buffer
         try:
             sent = await client.send_photo(
                 chat_id=chat_id,

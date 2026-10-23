@@ -158,6 +158,9 @@ Health check → <http://localhost:8080/health> · Mini App → <http://localhos
 
 ### Now-playing posters
 
+![What /play posts](assets/poster-example.jpg)
+
+
 Every track gets a generated 1280×720 image — the cover art with a vinyl disc
 slipping out from behind it, the title and artist in Inter, duration and
 requester chips, and a waveform that fills with the track. The accent colour is

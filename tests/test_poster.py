@@ -187,3 +187,56 @@ def test_settings_surface_the_poster_switch():
     markup = cards.settings_card({"volume": 70, "poster": False})
     assert 'data="v:set:poster"' in markup
     assert "off" in rich.to_plain_text(markup).lower()
+
+
+def test_bytes_are_wrapped_before_they_reach_pyrogram():
+    """Pyrogram rejects raw bytes — the poster must be sent as a file object."""
+    from vyron.ui import rich
+
+    class Bot:
+        def __init__(self):
+            self.photos = []
+
+        async def send_photo(self, **kwargs):
+            self.photos.append(kwargs)
+            return type("M", (), {"id": 3})()
+
+    bot = Bot()
+    asyncio.run(rich.send_photo(bot, 1, b"\xff\xd8poster", "<b>hi</b>"))
+    sent = bot.photos[0]["photo"]
+    assert isinstance(sent, io.IOBase)
+    assert sent.read() == b"\xff\xd8poster"
+
+
+def test_a_poster_refresh_edits_the_caption_in_place(monkeypatch):
+    from vyron.ui import nowplaying
+
+    async def fake_poster(state, track):
+        return b"\xff\xd8fake"
+
+    monkeypatch.setattr(nowplaying, "poster", fake_poster)
+
+    class Bot:
+        def __init__(self):
+            self.captions: list[dict] = []
+            self.texts: list[dict] = []
+
+        async def send_photo(self, **kwargs):
+            return type("M", (), {"id": 61})()
+
+        async def edit_message_caption(self, **kwargs):
+            self.captions.append(kwargs)
+            return object()
+
+        async def edit_message_text(self, **kwargs):  # pragma: no cover
+            self.texts.append(kwargs)
+            return object()
+
+    bot = Bot()
+    state = _state()
+    asyncio.run(nowplaying.announce(bot, 1, state))
+    assert state.np_message_id == 61
+    rich._remember_photo(1, 61)
+    asyncio.run(nowplaying.announce(bot, 1, state, edit=True))
+    assert bot.captions, "the live clock must be a caption edit"
+    assert not bot.texts
