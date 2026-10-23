@@ -203,6 +203,16 @@ _HELP: dict[str, tuple[str, list[tuple[str, str]]]] = {
             ("/playlists · /pl <name>", "list and queue your playlists"),
             ("/song · /vsong", "get an MP3 or MP4 in the chat"),
             ("/locks · /antiflood", "content locks and flood control"),
+            ("/gadmin", "the group manager panel"),
+            ("/rules · /setrules", "read or set this chat's rules"),
+            ("/chatinfo", "id, members, slow mode, invites"),
+            ("/settitle · /setdesc", "rename the chat"),
+            ("/setgphoto · /delgphoto", "chat picture from a reply"),
+            ("/slowmode 30s|off", "space out messages"),
+            ("/invitelink · /revokeinvite", "rotate the invite link"),
+            ("/approve · /approved", "exempt trusted members"),
+            ("/zombies [kick]", "clean up deleted accounts"),
+            ("/report", "flag a message to the admins"),
         ],
     ),
     "power": (
@@ -1150,5 +1160,265 @@ def logs_card(
         + B.footer(
             f"{_E('info')} Newest last {BULLET} warnings and errors include the traceback type "
             f"{BULLET} also at /app → Owner → Logs"
+        )
+    )
+
+
+# ── group management ────────────────────────────────────────────────────────
+_TONES = {
+    "ok": ("check", "success"),
+    "warn": ("warn", "danger"),
+    "error": ("cross", "danger"),
+    "info": ("info", "primary"),
+}
+
+
+def notice_card(
+    title: str,
+    detail: str = "",
+    *,
+    tone: str = "ok",
+    icon: str | None = None,
+    extra: Iterable[tuple[str, str]] = (),
+    footer: str = "",
+    actions: str = "",
+) -> str:
+    """One-line confirmation with context — the shape every group action uses."""
+    glyph_name, style = _TONES.get(tone, _TONES["ok"])
+    glyph = E(icon or glyph_name)
+    body = f"{glyph} <b>{title}</b>"
+    if detail:
+        body += "\n" + detail
+    markup = B.heading(f"{glyph} {small_caps(title)}", 2)
+    if detail:
+        markup += B.note(detail)
+    pairs = [(f"{E('info')} {key}", value) for key, value in extra]
+    if pairs:
+        markup += B.kv(pairs)
+    if actions:
+        markup += B.divider() + actions
+    if footer:
+        markup += B.footer(footer)
+    return markup
+
+
+def rules_card(title: str, rules: str, *, admins: int = 0, can_edit: bool = False) -> str:
+    """``/rules`` — the chat's own rulebook, readable by everyone."""
+    body = (
+        B.heading(f"{E('note')} {small_caps('rules')} {DASH} {esc(truncate(title, 34))}", 2)
+        + B.note(esc(rules) if rules else (
+            "<b>No rules yet.</b>\nAn admin can set them with "
+            "<code>/setrules 1. Be kind 2. No spam</code>."
+        ))
+    )
+    if can_edit:
+        body += B.row(
+            B.btn(f"{E('tools')} Edit", data="v:noop", style="link"),
+            B.btn(f"{E('check')} Got it", data="v:close", style="success"),
+        )
+    else:
+        body += B.row(B.btn(f"{E('check')} Got it", data="v:close", style="success"))
+    return body + B.footer(
+        f"{E('shield')} {admins} admins enforce these {BULLET} /report to flag a message"
+    )
+
+
+def chat_info_card(info: dict) -> str:
+    """``/chatinfo`` — everything about this group on one screen."""
+    pairs = [
+        (f"{E('chat')} Title", f"<b>{esc(truncate(str(info.get('title') or 'this chat'), 40))}</b>"),
+        (f"{E('code')} ID", f"<code>{info.get('id')}</code>"),
+        (f"{E('link')} Username", f"@{esc(info['username'])}" if info.get("username") else "<i>private</i>"),
+        (f"{E('user')} Members", f"<b>{compact_number(int(info.get('members') or 0))}</b>"
+                                + (f" {BULLET} {compact_number(int(info.get('online') or 0))} online"
+                                   if info.get("online") else "")),
+        (f"{E('crown')} Admins", f"<b>{int(info.get('admins') or 0)}</b>"),
+        (f"{E('clock')} Slow mode", f"<b>{slow_label(int(info.get('slowmode') or 0))}</b>"),
+        (f"{E('bolt')} Created", f"<b>{esc(str(info.get('created') or '—'))}</b>"),
+        (f"{E('shield')} Protected", "on" if info.get("protected") else "off"),
+        (f"{E('chat')} Forum", "on" if info.get("forum") else "off"),
+        (f"{E('cloud')} Data centre", f"DC{info.get('dc')}" if info.get("dc") else "—"),
+    ]
+    if info.get("linked"):
+        pairs.append((f"{E('link')} Linked channel", esc(str(info["linked"]))))
+    if info.get("pinned"):
+        pairs.append((f"{E('star')} Pinned", esc(truncate(str(info["pinned"]), 44))))
+    body = (
+        B.heading(f"{E('info')} {small_caps('chat info')}", 2)
+        + B.kv(pairs)
+    )
+    if info.get("description"):
+        body += B.note(f"<b>About</b>\n{esc(truncate(str(info['description']), 220))}")
+    if info.get("invite"):
+        body += B.row(
+            B.btn(f"{E('link')} Open invite", url=str(info["invite"]), style="primary"),
+            B.btn(f"{E('close')} Close", data="v:close", style="danger"),
+        )
+    else:
+        body += B.row(B.btn(f"{E('close')} Close", data="v:close", style="danger"))
+    return body + B.footer(f"{E('shield')} /gadmin for every management command")
+
+
+def slow_label(seconds: int) -> str:
+    if seconds <= 0:
+        return "off"
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m"
+    return f"{seconds // 3600}h"
+
+
+def group_admin_card(
+    *,
+    rules: str = "",
+    slowmode: int = 0,
+    captcha: bool = False,
+    approved: int = 0,
+    locked: int = 0,
+    warn_limit: int = 3,
+    bot_admin: bool = True,
+) -> str:
+    """``/gadmin`` — the map of every group tool this bot ships."""
+    health = (
+        f"{E('check')} admin rights ok" if bot_admin else f"{E('warn')} promote me to admin"
+    )
+    state = B.kv(
+        [
+            (f"{E('note')} Rules", "<b>set</b>" if rules else "<i>not set</i>"),
+            (f"{E('clock')} Slow mode", f"<b>{slow_label(slowmode)}</b>"),
+            (f"{E('shield')} Locks on", f"<b>{locked}</b>"),
+            (f"{E('user')} Approved", f"<b>{approved}</b>"),
+            (f"{E('warn')} Warn limit", f"<b>{warn_limit}</b>"),
+            (f"{E('shield')} Captcha", "<b>on</b>" if captcha else "<i>off</i>"),
+            (f"{E('bolt')} Bot rights", health),
+        ]
+    )
+    sections = B.details(
+        f"{E('shield')} <b>Moderation</b>",
+        B.bullets(
+            [
+                "<code>/ban</code> · <code>/unban</code> · <code>/kick</code> — reply or pass an id",
+                "<code>/mute</code> · <code>/unmute</code> · <code>/tmute 10m</code>",
+                "<code>/warn</code> · <code>/warns</code> · <code>/resetwarns</code> · <code>/setwarnlimit 3</code>",
+                "<code>/purge</code> · <code>/del</code> · <code>/cleanup</code>",
+            ]
+        ),
+        open=True,
+    )
+    sections += B.details(
+        f"{E('tools')} <b>Group settings</b>",
+        B.bullets(
+            [
+                "<code>/settitle</code> · <code>/setdesc</code> · <code>/setgphoto</code> — chat identity",
+                "<code>/slowmode 30</code> · <code>/slowmode off</code>",
+                "<code>/setrules …</code> · <code>/rules</code> · <code>/clearrules</code>",
+                "<code>/invitelink</code> · <code>/revokeinvite</code>",
+                "<code>/pin</code> · <code>/unpin</code> · <code>/unpinall</code> · <code>/pinned</code>",
+            ]
+        ),
+    )
+    sections += B.details(
+        f"{E('wave')} <b>Protection</b>",
+        B.bullets(
+            [
+                "<code>/locks</code> — media, links, forwards, stickers, bots, commands, NSFW",
+                "<code>/antiflood 7</code> — rate limit with automatic mute",
+                "<code>/approve</code> — exempt a trusted user from locks and flood",
+                "<code>/zombies</code> — find (and kick) deleted accounts",
+                "<code>/report</code> — ping the admins about a message",
+                "<code>/captcha</code> — one-tap human check for new members",
+            ]
+        ),
+    )
+    sections += B.details(
+        f"{E('play')} <b>Playback control</b>",
+        B.bullets(
+            [
+                "<code>/settings</code> — volume, loop, autoplay, 24/7",
+                "<code>/effecton bass</code> — audio effects for the call",
+                "<code>/voteskip</code> — let members skip with votes",
+                "<code>/247</code> · <code>/always</code> — keep the stream alive",
+            ]
+        ),
+    )
+    return (
+        B.heading(f"{E('crown')} {small_caps('group manager')}", 2)
+        + B.note("Every tool below works on a reply or a user id.")
+        + state
+        + B.divider()
+        + sections
+        + B.row(
+            B.btn(f"{E('shield')} Locks", data="v:lock:panel", style="primary"),
+            B.btn(f"{E('wave')} Anti-flood", data="v:lock:flood", style="success"),
+            B.btn(f"{E('close')} Close", data="v:close", style="danger"),
+        )
+        + B.footer(f"{E('info')} admins only {BULLET} owners bypass every check")
+    )
+
+
+def zombies_card(found: list[tuple[str, str]], *, scanned: int, kicked: int = 0, capped: bool = False) -> str:
+    """``/zombies`` — deleted accounts still sitting in the member list."""
+    rows = "".join(
+        f"<tr><td>{esc(name)}</td><td><code>{uid}</code></td></tr>" for name, uid in found[:20]
+    )
+    table = f"<table><tr><th>account</th><th>id</th></tr>{rows}</table>" if rows else ""
+    headline = (
+        f"{E('check')} All clean — no deleted accounts in {scanned} members"
+        if not found
+        else f"{E('bolt')} {len(found)} deleted account{'s' if len(found) != 1 else ''} of {scanned} scanned"
+    )
+    body = B.heading(f"{E('bolt')} {small_caps('zombies')}", 2) + B.note(headline)
+    if table:
+        body += table
+    if kicked:
+        body += B.note(f"{E('shield')} kicked <b>{kicked}</b> of them")
+    if found:
+        body += B.row(
+            B.btn(f"{E('bolt')} Kick all", data="v:noop", style="danger"),
+            B.btn(f"{E('check')} Keep", data="v:close", style="success"),
+        )
+    if capped:
+        body += B.footer(f"{E('info')} scanned the first {scanned} members — Telegram caps the listing")
+    return body
+
+
+def approved_card(entries: list[tuple[str, str]], *, limit: int = 30) -> str:
+    """``/approved`` — users exempt from locks and anti-flood."""
+    if not entries:
+        return (
+            B.heading(f"{E('user')} {small_caps('approved users')}", 2)
+            + B.note("Nobody yet. <code>/approve</code> on a reply adds someone.")
+            + B.row(B.btn(f"{E('close')} Close", data="v:close", style="danger"))
+        )
+    rows = "".join(
+        f"<tr><td>{esc(name)}</td><td><code>{uid}</code></td></tr>" for name, uid in entries[:limit]
+    )
+    return (
+        B.heading(f"{E('user')} {small_caps('approved users')}", 2)
+        + B.note(f"{len(entries)} exempt from locks and anti-flood")
+        + f"<table><tr><th>user</th><th>id</th></tr>{rows}</table>"
+        + B.row(B.btn(f"{E('close')} Close", data="v:close", style="danger"))
+        + B.footer(f"{E('info')} /unapprove on a reply or id removes one")
+    )
+
+
+def captcha_card(mention: str, *, seconds: int = 120, user_id: int = 0) -> str:
+    """New-member gate: one tap proves there is a human behind the account."""
+    return (
+        B.heading(f"{E('shield')} {small_caps('verify to speak')}", 2)
+        + B.note(
+            f"Welcome {mention}! Tap the button below within "
+            f"<b>{slow_label(seconds)}</b> to unlock the chat."
+        )
+        + B.row(
+            B.btn(
+                f"{E('check')} I am human",
+                data=f"v:captcha:{user_id or 'self'}",
+                style="success",
+            )
+        )
+        + B.footer(
+            f"{E('info')} still muted? the button stays live {BULLET} ask an admin if it fails"
         )
     )

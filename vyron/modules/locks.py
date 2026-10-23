@@ -7,11 +7,12 @@ from __future__ import annotations
 import logging
 import re
 import time
+from datetime import datetime, timedelta, timezone
 from collections import defaultdict, deque
 
 from pyrogram import Client, filters
 from pyrogram.errors import RPCError
-from pyrogram.types import ChatPrivileges, Message
+from pyrogram.types import ChatPermissions, Message
 
 from vyron.core import chatcfg
 from vyron.runtime import runtime
@@ -192,6 +193,10 @@ def register(client: Client) -> None:
             return
         if await _is_admin(client, chat_id, user.id):
             return
+        # approved users are trusted: no locks, no flood limiter
+        approved = await chatcfg.get(chat_id, "approved", []) or []
+        if any(str(user.id) == str(entry) for entry in approved):
+            return
 
         locks = await _locks(chat_id)
         for name, enabled in locks.items():
@@ -244,8 +249,8 @@ def register(client: Client) -> None:
             await client.restrict_chat_member(
                 chat_id,
                 user.id,
-                ChatPrivileges(can_send_messages=False),
-                until_date=int(time.time()) + 60,
+                ChatPermissions(can_send_messages=False),
+                until_date=datetime.now(timezone.utc) + timedelta(seconds=60),
             )
         except Exception:
             pass

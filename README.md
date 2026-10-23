@@ -217,11 +217,28 @@ Help buttons) and logs when it is removed.
 
 ### Group management
 
-`/ban` · `/unban` · `/kick` · `/mute` · `/unmute` · `/warn` · `/warns` · `/resetwarns`
-`/setwarnlimit 3` · `/purge` (reply) · `/pin` · `/unpin` · `/promote` · `/demote`
-`/setwelcome …` · `/setgoodbye …` · `/admins`
+`/gadmin` is the map — every tool below on one card, with the live state of the
+chat (rules, slow mode, locks, approvals, captcha, bot rights).
 
-Placeholders: `{mention}` `{first}` `{chat}` `{id}` `{count}`
+| Area | Commands |
+| --- | --- |
+| Members | `/ban` `/unban` `/kick` `/mute` `/tmute 10m` `/unmute` `/warn` `/warns` `/resetwarns` `/setwarnlimit 3` |
+| Rank | `/promote` `/demote` — rights are granted explicitly, never all-or-nothing |
+| Messages | `/purge` (reply) `/del` `/cleanup` `/pin` `/unpin` `/unpinall` `/pinned` |
+| Chat identity | `/settitle` `/setdesc` (reply works) `/setgphoto` (reply to a photo) `/delgphoto` |
+| Access | `/invitelink` `/revokeinvite` `/slowmode 30s\|off` `/captcha on\|off` |
+| Rules | `/rules` (everyone) `/setrules …` `/clearrules` |
+| Safety | `/approve` `/unapprove` `/approved` — exempt trusted members from locks and anti-flood |
+| Cleanup | `/zombies [kick]` — find deleted accounts, kick them with one flag |
+| Reports | `/report [reason]` — reply to a message; pings the admins, rate-limited per user |
+| Info | `/chatinfo` — id, members, online, admins, slow mode, DC, invite, pinned |
+| Welcome | `/setwelcome …` `/setgoodbye …` `/admins` |
+
+Placeholders for welcome/goodbye: `{mention}` `{first}` `{chat}` `{id}` `{count}`
+
+Restricting a member uses `ChatPermissions` with a real `until_date`, and
+promoting uses `ChatAdministratorRights` — the two are *not* interchangeable,
+so the fakes in `tests/test_moderation.py` validate the exact call shape.
 
 ### Locks & effects
 

@@ -74,6 +74,14 @@ def register(client: Client) -> None:
             await cq.answer("Only group admins can control playback.", show_alert=True)
             return
 
+        # captcha buttons belong to a person, not to the player: handle them
+        # before the player check so a booting bot can still verify people.
+        if action == "captcha":
+            from vyron.modules.groupadmin import verify_captcha
+
+            await verify_captcha(client, cq, chat.id, arg)
+            return
+
         player = runtime.player
         if player is None:
             await cq.answer("Player is still starting up…")

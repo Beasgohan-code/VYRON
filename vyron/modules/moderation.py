@@ -6,19 +6,27 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 
 from pyrogram import Client, filters
 from pyrogram.enums import ChatMembersFilter, ParseMode
 from pyrogram.errors import RPCError
-from pyrogram.types import ChatPrivileges, Message
+from pyrogram.types import ChatAdministratorRights, ChatPermissions, Message
 
 from vyron.core import chatcfg
 from vyron.runtime import runtime
 from vyron.ui import blocks as B
-from vyron.ui import rich
+from vyron.ui import cards, rich
+from vyron.ui.progress import fmt_duration
 from vyron.ui.progress import truncate
 from vyron.ui.theme import E
-from vyron.utils.helpers import command_args, display_name, is_chat_admin, is_owner
+from vyron.utils.helpers import (
+    command_args,
+    display_name,
+    is_chat_admin,
+    is_owner,
+    parse_duration,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -144,23 +152,52 @@ def register(client: Client) -> None:
     async def _mute(_: Client, message: Message) -> None:
         if not await _require_admin(client, message):
             return
+
+        # `/tmute 10m` — the duration can follow the id, or be the only argument
+        # when the command replies to the person being muted.
+        seconds = 0
+        args = command_args(message).split()
+        if message.command[0].lower() == "tmute":
+            candidate = args[-1] if args else ""
+            if message.reply_to_message or len(args) > 1:
+                seconds = parse_duration(candidate) or 0
+                if seconds:
+                    args = args[:-1]
+
         target = await _resolve_id(client, _target(message))
         if not target:
-            await rich.send(client, message.chat.id, f"{E('info')} Reply to a user or pass an id.")
+            await rich.send(
+                client,
+                message.chat.id,
+                B.note("Reply to a user or pass an id — <code>/tmute 10m</code> for a timed mute."),
+            )
             return
         try:
             await client.restrict_chat_member(
                 message.chat.id,
                 target,
-                ChatPrivileges(can_send_messages=False),
-            )
-            await rich.send(
-                client,
-                message.chat.id,
-                B.row(B.btn(f"{E('mute')} Muted", data="v:noop", style="danger")),
+                ChatPermissions(can_send_messages=False),
+                until_date=(
+                    datetime.now(timezone.utc) + timedelta(seconds=seconds)
+                    if seconds
+                    else None
+                ),
             )
         except RPCError as exc:
             await rich.send(client, message.chat.id, f"{E('warn')} {rich.esc(exc)}")
+            return
+        window = f"for {fmt_duration(seconds)}" if seconds else "until unmuted"
+        await rich.send(
+            client,
+            message.chat.id,
+            cards.notice_card(
+                "Muted",
+                f"<code>{target}</code> is muted {window}.",
+                tone="warn",
+                icon="mute",
+            ),
+            reply_to=message.id,
+        )
 
     @client.on_message(filters.command("unmute") & BOT_ADMIN)
     async def _unmute(_: Client, message: Message) -> None:
@@ -174,7 +211,7 @@ def register(client: Client) -> None:
             await client.restrict_chat_member(
                 message.chat.id,
                 target,
-                ChatPrivileges(
+                ChatPermissions(
                     can_send_messages=True,
                     can_send_media_messages=True,
                     can_send_other_messages=True,
@@ -202,7 +239,7 @@ def register(client: Client) -> None:
             await client.promote_chat_member(
                 message.chat.id,
                 target,
-                ChatPrivileges(
+                ChatAdministratorRights(
                     can_change_info=True,
                     can_delete_messages=True,
                     can_invite_users=True,
@@ -232,7 +269,7 @@ def register(client: Client) -> None:
             await client.promote_chat_member(
                 message.chat.id,
                 target,
-                ChatPrivileges(
+                ChatAdministratorRights(
                     can_change_info=False,
                     can_delete_messages=False,
                     can_invite_users=False,

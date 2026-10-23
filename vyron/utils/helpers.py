@@ -104,6 +104,28 @@ def is_owner(user_id: int) -> bool:
     return uid in settings.owners or acl.is_sudo(uid)
 
 
+_DURATION_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+
+
+def parse_duration(text: str | None) -> int | None:
+    """``10m`` → 600 · ``2h`` → 7200 · ``45`` → 45 s · ``off`` → 0.
+
+    Returns ``None`` when the string is not a duration, so callers can tell
+    "no argument" apart from "invalid argument".
+    """
+    text = (text or "").strip().lower()
+    if not text:
+        return None
+    if text in {"off", "0", "none", "disable"}:
+        return 0
+    suffix = text[-1]
+    if suffix in _DURATION_UNITS and text[:-1].isdigit():
+        return int(text[:-1]) * _DURATION_UNITS[suffix]
+    if text.isdigit():
+        return int(text)
+    return None
+
+
 async def is_chat_admin(client, chat_id: int, user_id: int) -> bool:
     if is_owner(user_id):
         return True
