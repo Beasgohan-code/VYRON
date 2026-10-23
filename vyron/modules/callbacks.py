@@ -198,22 +198,6 @@ def register(client: Client) -> None:
             await cq.answer("Resumed" if await player.resume(chat.id) else "Nothing is paused")
             return
 
-        if action == "timer":
-            from vyron.modules.convenience import TIMERS
-
-            if arg == "off":
-                removed = TIMERS.cancel(chat.id)
-                await cq.answer("Timer cancelled" if removed else "No timer running")
-            return
-
-        if action == "replay":
-            if not state or not state.current:
-                await cq.answer("Nothing is playing.", show_alert=True)
-                return
-            await player.seek(chat.id, 0)
-            await cq.answer("Replaying from the start")
-            return
-
         if action == "skip":
             track = await player.skip(chat.id)
             await cq.answer(

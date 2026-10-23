@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { MobileTabBar, MiniPlayer } from "./components/MobileChrome";
+import { PlayBar } from "./components/PlayBar";
 import { Modal } from "./components/Modal";
 import { NowPlayingRail } from "./components/NowPlayingRail";
 import { Sidebar } from "./components/Sidebar";
@@ -11,10 +12,11 @@ import { PlaylistsView } from "./views/PlaylistsView";
 import { ProfileView } from "./views/ProfileView";
 import { QueueView } from "./views/QueueView";
 import { RoomsView } from "./views/RoomsView";
+import { PlayerView } from "./views/PlayerView";
 import { SearchView } from "./views/SearchView";
 
 export default function App() {
-  const { view, act, toastMessage, toastTone } = useApp();
+  const { view, audio, toastMessage, toastTone } = useApp();
 
   /* keyboard shortcuts — ignored while typing */
   useEffect(() => {
@@ -28,13 +30,17 @@ export default function App() {
       }
       if (event.code === "Space") {
         event.preventDefault();
-        void act("toggle");
+        audio.toggle();
       }
-      if (event.key.toLowerCase() === "n") void act("skip", 1);
+      if (event.key === "ArrowRight") audio.seekBy(5);
+      if (event.key === "ArrowLeft") audio.seekBy(-5);
+      if (event.key.toLowerCase() === "n") audio.next();
+      if (event.key.toLowerCase() === "m") audio.toggleMute();
+      if (event.key === "Escape") audio.setExpanded(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [act]);
+  }, [audio]);
 
   return (
     <div className="app">
@@ -59,8 +65,10 @@ export default function App() {
         <NowPlayingRail />
       </aside>
 
+      <PlayBar />
       <MiniPlayer />
       <MobileTabBar />
+      {audio.expanded && <PlayerView />}
       <Modal />
 
       <div className={`toast ${toastMessage ? "show" : ""} ${toastTone}`} role="status" aria-live="polite">

@@ -59,8 +59,6 @@ COMMANDS = [
     ("savepl", "save the queue as a playlist"),
     ("suggest", "tracks like this one"),
     ("whoami", "your id, role and chat"),
-    ("timer", "sleep timer for the voice chat"),
-    ("random", "play something unexpected"),
     ("stats", "bot statistics"),
     ("help", "all commands"),
 ]

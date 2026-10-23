@@ -87,6 +87,12 @@ export const api = {
 
   playlists: () => request<{ playlists: Playlist[]; preview?: boolean }>("/api/playlists"),
 
+  lyrics: (title: string, artist = "", duration = 0) =>
+    request<{ ok: boolean; text?: string; synced?: boolean; lines?: { time: number; text: string }[] }>(
+      "/api/lyrics",
+      { title, artist, duration }
+    ),
+
   action: <T = ActionResult>(action: string, value?: unknown) =>
     request<T & ActionResult>("/api/action", { action, value }),
 };

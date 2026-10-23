@@ -13,31 +13,50 @@ const TABS: { view: View; label: string; icon: typeof Home }[] = [
 ];
 
 export function MiniPlayer() {
-  const { state, act, setView } = useApp();
-  const now = state?.now;
+  const { state, audio, setView } = useApp();
+  const local = audio.track;
+  const remote = state?.now;
+  const now = local ?? remote;
   if (!now) return null;
+
+  const isLocal = Boolean(local);
+  const playing = isLocal ? audio.playing : !remote?.paused;
+  const elapsed = isLocal ? audio.position : (remote?.elapsed ?? 0);
 
   return (
     <div className="mini-player" role="region" aria-label="Now playing">
-      <button type="button" className="mini-main" onClick={() => setView("queue")}>
+      <button
+        type="button"
+        className="mini-main"
+        onClick={() => (isLocal ? audio.setExpanded(true) : setView("queue"))}
+      >
         <Cover track={now} className="mini-cover" />
         <span className="mini-text">
           <b>{now.title}</b>
           <span>
             {now.uploader || "unknown"}
-            {now.duration ? ` · ${fmtDuration(now.elapsed)}` : ""}
+            {now.duration ? ` · ${fmtDuration(elapsed)}` : ""}
+            {isLocal ? " · in app" : " · in call"}
           </span>
+        </span>
+        <span className="mini-progress" aria-hidden="true">
+          <i style={{ width: `${now.duration ? Math.min(100, (elapsed / now.duration) * 100) : 0}%` }} />
         </span>
       </button>
       <button
         type="button"
         className="mini-play"
-        aria-label={now.paused ? "Play" : "Pause"}
-        onClick={() => void act("toggle")}
+        aria-label={playing ? "Pause" : "Play"}
+        onClick={() => (isLocal ? audio.toggle() : setView("queue"))}
       >
-        {now.paused ? <Play size={16} fill="currentColor" /> : <Pause size={16} fill="currentColor" />}
+        {playing ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}
       </button>
-      <button type="button" className="mini-skip" aria-label="Skip" onClick={() => void act("skip", 1)}>
+      <button
+        type="button"
+        className="mini-skip"
+        aria-label="Next"
+        onClick={() => (isLocal ? audio.next() : setView("queue"))}
+      >
         <SkipForward size={16} />
       </button>
     </div>

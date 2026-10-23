@@ -10,17 +10,22 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from pathlib import Path
 
 from aiohttp import web
 
 from vyron.config import settings
 from vyron.core import playlists as pl
+from vyron.core.lyrics import parse_lrc
 from vyron.core.queue import LoopMode, Track
 from vyron.runtime import runtime
+from vyron.web import stream as audio
 from vyron.web.auth import WebUser, make_token, resolve_user
 
 logger = logging.getLogger(__name__)
+
+_LYRICS_CACHE: dict[str, tuple[float, dict]] = {}
 
 _WEBAPP_ROOT = Path(
     getattr(settings, "webapp_dir", Path(__file__).resolve().parent.parent.parent / "webapp")
@@ -44,6 +49,7 @@ def _demo_track(index: int, title: str, uploader: str, duration: int) -> dict:
         "source": "youtube",
         "url": "",
         "query": f"{title} {uploader}",
+        "stream": f"/api/stream/demo{index:02d}",
     }
 
 
@@ -144,6 +150,7 @@ DEMO = {
 def _track_json(track: Track | None, *, index: int | None = None) -> dict | None:
     if track is None:
         return None
+    audio.remember(track)
     payload = {
         "id": track.id,
         "title": track.title,
@@ -155,6 +162,7 @@ def _track_json(track: Track | None, *, index: int | None = None) -> dict | None
         "video": track.is_video,
         "url": track.watch_url,
         "query": f"{track.title} {track.uploader}".strip(),
+        "stream": f"/api/stream/{track.id}",
     }
     if index is not None:
         payload["index"] = index
@@ -365,6 +373,85 @@ async def search(request: web.Request) -> web.Response:
     return web.json_response(
         {"ok": True, "query": query, "results": [_track_json(track, index=i) for i, track in enumerate(tracks, 1)]}
     )
+
+
+def _demo_lyrics(span: int) -> list[dict]:
+    """Placeholder synced lyrics used by the anonymous browser preview."""
+    words = (
+        "city lights are bleeding through the window",
+        "we were never meant to slow down",
+        "hold the night a little longer",
+        "every echo pulls me back to you",
+        "static on the radio, still dancing",
+        "nothing here is heavy when you sing",
+        "keep the volume up until the morning",
+        "we are golden in the afterglow",
+        "run the tape again from the beginning",
+        "all the quiet parts are yours",
+        "tell me what the sky is playing",
+        "one more chorus, then we go",
+    )
+    step = span / (len(words) + 1)
+    return [{"time": round(step * (index + 1), 2), "text": line} for index, line in enumerate(words)]
+
+
+async def lyrics(request: web.Request) -> web.Response:
+    """Lyrics for the in-app player. LRCLIB, cached in memory for a while."""
+    user = await _identify(request)
+    denied = _denied(user)
+    if denied:
+        return denied
+    body = await _read_json(request)
+    title = str(body.get("title") or request.query.get("title") or "").strip()
+    artist = str(body.get("artist") or request.query.get("artist") or "").strip()
+    duration = int(float(body.get("duration") or request.query.get("duration") or 0))
+    if not title:
+        return web.json_response({"ok": False, "error": "title is required"}, status=400)
+
+    key = f"{title.lower()}|{artist.lower()}|{duration // 30}"
+    cached = _LYRICS_CACHE.get(key)
+    if cached and cached[0] > time.time():
+        return web.json_response({"ok": True, **cached[1], "cached": True})
+
+    if _is_preview(user):
+        # The browser preview has no bot runtime and no outbound network: serve a
+        # deterministic lyric sheet so the player's synced-lyrics panel can be
+        # exercised without credentials.
+        span = max(30, duration or 180)
+        lines = _demo_lyrics(span)
+        payload = {
+            "title": title,
+            "artist": artist,
+            "text": "\n".join(line["text"] for line in lines),
+            "synced": True,
+            "lines": lines,
+            "demo": True,
+        }
+        return web.json_response({"ok": True, **payload})
+
+    client = runtime.lyrics
+    if client is None:
+        return web.json_response({"ok": False, "error": "lyrics service not ready"}, status=503)
+    try:
+        result = await client.timed(title, artist, duration) if duration else await client.find(title, artist)
+    except Exception as exc:
+        logger.debug("lyrics lookup failed: %s", exc)
+        result = None
+    if result is None:
+        return web.json_response({"ok": False, "error": "no lyrics found"}, status=404)
+
+    payload = {
+        "title": title,
+        "artist": artist,
+        "text": result.as_text(),
+        "synced": bool(result.has_sync),
+        "lines": parse_lrc(result.synced),
+    }
+    _LYRICS_CACHE[key] = (time.time() + 3600, payload)
+    if len(_LYRICS_CACHE) > 200:
+        for stale in list(_LYRICS_CACHE)[:50]:
+            _LYRICS_CACHE.pop(stale, None)
+    return web.json_response({"ok": True, **payload})
 
 
 async def mix(request: web.Request) -> web.Response:
@@ -699,6 +786,8 @@ def register(app: web.Application) -> None:
     app.router.add_post("/api/search", search)
     app.router.add_post("/api/action", action)
     app.router.add_post("/api/auth", authenticate)
+    app.router.add_post("/api/lyrics", lyrics)
+    audio.register(app)
     logger.info("web app mounted from %s", WEB_DIR)
 
 

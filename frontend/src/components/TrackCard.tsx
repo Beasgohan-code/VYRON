@@ -1,4 +1,4 @@
-import { MoreHorizontal, Play } from "lucide-react";
+import { MoreHorizontal, Play, Radio } from "lucide-react";
 import { useApp } from "../lib/store";
 import type { Track } from "../lib/types";
 import { Cover } from "./Cover";
@@ -13,7 +13,7 @@ interface Props {
 }
 
 export function TrackCard({ track, rank, mix, badge, onMixClick, delay = 0 }: Props) {
-  const { play, openModal } = useApp();
+  const { play, cast, openModal, audio } = useApp();
 
   return (
     <article
@@ -39,10 +39,26 @@ export function TrackCard({ track, rank, mix, badge, onMixClick, delay = 0 }: Pr
           aria-label={`Play ${track.title}`}
           onClick={(event) => {
             event.stopPropagation();
-            void play(track.query ?? `${track.title} ${track.uploader ?? ""}`, "play_now");
+            void play(track, "play_now");
           }}
         >
-          <Play size={16} fill="currentColor" />
+          {audio.isCurrent(track) && audio.playing ? (
+            <span className="pause-glyph">❚❚</span>
+          ) : (
+            <Play size={16} fill="currentColor" />
+          )}
+        </button>
+        <button
+          type="button"
+          className="mini-action cast"
+          aria-label={`Play ${track.title} in the voice chat`}
+          title="Play in the voice chat"
+          onClick={(event) => {
+            event.stopPropagation();
+            void cast(track, "play_now");
+          }}
+        >
+          <Radio size={14} />
         </button>
         <button
           type="button"

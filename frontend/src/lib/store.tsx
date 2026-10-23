@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { ApiError, api, haptic, notify, telegram } from "./api";
+import { resolveTrack, useAudioEngine, type AudioEngine } from "./audio";
 import type { AppState, HomePayload, Playlist, Room, Track, View } from "./types";
 
 export type ThemeName = "beat" | "telegram" | "system";
@@ -55,7 +56,7 @@ interface Store {
   closeModal: () => void;
   /* actions */
   act: <T = Record<string, unknown>>(action: string, value?: unknown) => Promise<(T & { preview?: boolean }) | null>;
-  play: (query: string | undefined, mode?: "play" | "play_now") => Promise<void>;
+  play: (value: string | Track | undefined, mode?: "play" | "play_now") => Promise<void>;
   runSearch: (query: string, remember?: boolean) => Promise<void>;
   loadMix: (key: string) => Promise<void>;
   refreshState: () => Promise<void>;
@@ -63,6 +64,9 @@ interface Store {
   refreshPlaylists: () => Promise<void>;
   recent: string[];
   rememberSearch: (term: string) => void;
+  /* in-app playback (Spotify-style) */
+  audio: AudioEngine;
+  cast: (value: string | Track | undefined, mode?: "play" | "play_now") => Promise<void>;
   /* playback helpers */
   dragging: boolean;
   setDragging: (value: boolean) => void;
@@ -240,13 +244,41 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [refreshState, toast]
   );
 
+  /* ── in-app playback ─────────────────────────────────────────────────── */
+  const audio = useAudioEngine(toast);
+
   const play = useCallback(
-    async (value: string | undefined, mode: "play" | "play_now" = "play") => {
-      const clean = (value ?? "").trim();
+    async (value: string | Track | undefined, mode: "play" | "play_now" = "play") => {
+      const clean = typeof value === "string" ? value.trim() : value;
       if (!clean) return;
-      toast(mode === "play_now" ? "Starting…" : "Adding to queue…");
+      try {
+        const track = await resolveTrack(clean);
+        if (!track) {
+          toast("Nothing playable for that", "error");
+          return;
+        }
+        if (mode === "play_now" || !audio.track) {
+          audio.play(track);
+        } else {
+          audio.enqueue(track);
+        }
+      } catch (error) {
+        toast(error instanceof Error ? error.message : "Could not play that", "error");
+      }
+    },
+    [audio, toast]
+  );
+
+  /** Send playback to the Telegram voice chat instead of this device. */
+  const cast = useCallback(
+    async (value: string | Track | undefined, mode: "play" | "play_now" = "play_now") => {
+      const clean =
+        typeof value === "string" ? value.trim() : (value?.query ?? value?.title ?? "").trim();
+      if (!clean) return;
+      toast(mode === "play_now" ? "Sending to the call…" : "Adding to the call queue…");
       const payload = await act(mode, clean);
-      if (payload) toast(mode === "play_now" ? "Playing now" : "Added to queue", "success");
+      if (payload?.preview) return;
+      if (payload) toast(mode === "play_now" ? "Playing in the call" : "Queued in the call", "success");
     },
     [act, toast]
   );
@@ -348,6 +380,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       refreshPlaylists,
       recent,
       rememberSearch,
+      audio,
+      cast,
       dragging,
       setDragging,
     }),
@@ -356,6 +390,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       selectedPlaylist, openPlaylist, theme, setTheme, accent, setAccent, normalise, setNormalise,
       toastMessage, toast, toastTone, modal, openModal, closeModal, act, play, runSearch, loadMix,
       refreshState, refreshRooms, refreshPlaylists, recent, rememberSearch, dragging,
+      audio, cast,
     ]
   );
 

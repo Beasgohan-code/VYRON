@@ -1,5 +1,6 @@
 import {
   Download,
+  Headphones,
   Heart,
   ListPlus,
   Pause,
@@ -18,7 +19,7 @@ import { Cover } from "./Cover";
 import { Panel } from "./Panel";
 
 export function NowPlayingRail() {
-  const { state, act, dragging, setDragging, openModal, setView, toast } = useApp();
+  const { state, act, audio, dragging, setDragging, openModal, setView, toast } = useApp();
   const now = state?.now ?? null;
   const settings = state?.settings;
   const waveRef = useRef<HTMLDivElement>(null);
@@ -154,6 +155,27 @@ export function NowPlayingRail() {
             }}
           >
             <Heart size={17} />
+          </button>
+        </div>
+
+        <div className="np-handoff">
+          <button
+            type="button"
+            className="pill-btn accent wide"
+            disabled={!now && !(state?.queue?.length ?? 0)}
+            onClick={() => {
+              const list = [now, ...(state?.queue ?? [])].filter(
+                (item): item is NonNullable<typeof item> => Boolean(item)
+              );
+              const first = list[0];
+              if (!first) return;
+              audio.play(first, list);
+              audio.setExpanded(true);
+              toast("Playing on this device", "success");
+            }}
+          >
+            <Headphones size={15} />
+            {audio.track ? "Open in-app player" : "Play on this device"}
           </button>
         </div>
 

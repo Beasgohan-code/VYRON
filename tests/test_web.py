@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import hashlib
 import hmac
 import json
@@ -282,3 +283,90 @@ def test_frontend_sources_exist():
 
     built = root / "webapp" / "dist" / "index.html"
     assert built.is_file(), "webapp/dist not built"
+
+
+# ── in-app audio ───────────────────────────────────────────────────────────
+def test_track_registry_is_bounded_and_looked_up():
+    from vyron.core.queue import Track
+    from vyron.web import stream as audio
+
+    for index in range(audio.MAX_REGISTRY + 25):
+        audio.remember(Track(id=f"reg{index}", title=f"t{index}"))
+
+    assert audio.registry_size() <= audio.MAX_REGISTRY
+    assert audio.lookup("reg9999") is None
+    newest = audio.lookup(f"reg{audio.MAX_REGISTRY + 24}")
+    assert newest is not None and newest.title.startswith("t")
+
+
+def test_registry_ignores_untitled_entries():
+    from vyron.core.queue import Track
+    from vyron.web import stream as audio
+
+    before = audio.registry_size()
+    audio.remember(None, Track(id="", title="no id"))
+    assert audio.registry_size() == before
+
+
+def test_demo_audio_is_a_valid_wav_and_is_cached(tmp_path, monkeypatch):
+    import wave
+
+    from vyron.web import stream as audio
+
+    monkeypatch.setattr(
+        audio, "settings", dataclasses.replace(audio.settings, data_dir=tmp_path)
+    )
+    path = audio.demo_audio("demo03")
+    assert path.is_file() and path.stat().st_size > 2048
+    with wave.open(str(path)) as handle:
+        assert handle.getnchannels() == 1
+        assert handle.getframerate() == 16000
+        assert handle.getnframes() > 16000 * 10
+
+    # second call reuses the file instead of re-synthesising
+    stamp = path.stat().st_mtime_ns
+    assert audio.demo_audio("demo03").stat().st_mtime_ns == stamp
+
+
+def test_stream_route_serves_demo_audio_to_an_anonymous_visitor(tmp_path, monkeypatch):
+    """The preview must be able to play without Telegram or network access."""
+    from vyron.web import stream as audio
+
+    monkeypatch.setattr(
+        audio, "settings", dataclasses.replace(audio.settings, data_dir=tmp_path, webapp_allow_anon=True)
+    )
+
+    async def scenario():
+        app = build_app(with_webapp=False)
+        audio.register(app)
+        async with TestClient(TestServer(app)) as client:
+            response = await client.get("/api/stream/demo05")
+            assert response.status == 200
+            assert response.content_type == "audio/wav"
+            body = await response.read()
+            assert body[:4] == b"RIFF" and len(body) > 40_000
+
+            info = await client.get("/api/audio/demo05")
+            payload = await info.json()
+            assert payload["ok"] and payload["demo"] is True
+
+    asyncio.run(scenario())
+
+
+def test_stream_rejects_unknown_tracks(tmp_path, monkeypatch):
+    from vyron.web import stream as audio
+
+    monkeypatch.setattr(
+        audio, "settings", dataclasses.replace(audio.settings, data_dir=tmp_path, webapp_allow_anon=True)
+    )
+
+    async def scenario():
+        app = build_app(with_webapp=False)
+        audio.register(app)
+        async with TestClient(TestServer(app)) as client:
+            response = await client.get("/api/stream/does-not-exist")
+            assert response.status == 404
+            body = await response.json()
+            assert body["ok"] is False
+
+    asyncio.run(scenario())

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 
 import aiohttp
@@ -34,6 +35,30 @@ class LyricsResult:
         if len(body) > max_chars:
             body = body[:max_chars].rsplit("\n", 1)[0] + "\n…"
         return body
+
+
+_LRC_TAG = re.compile(r"\[(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?\]")
+
+
+def parse_lrc(text: str | None) -> list[dict]:
+    """``[01:23.45] line`` → ``[{"time": 83.45, "text": "line"}]`` (sorted)."""
+    if not text:
+        return []
+    lines: list[dict] = []
+    for raw in str(text).replace("\r\n", "\n").split("\n"):
+        matches = list(_LRC_TAG.finditer(raw))
+        if not matches:
+            continue
+        body = raw[matches[-1].end():].strip()
+        if not body:
+            continue
+        for match in matches:
+            minutes, seconds, fraction = match.groups()
+            millis = int((fraction or "0").ljust(3, "0")[:3])
+            stamp = int(minutes) * 60 + int(seconds) + millis / 1000
+            lines.append({"time": round(stamp, 2), "text": body})
+    lines.sort(key=lambda item: item["time"])
+    return lines
 
 
 class LyricsClient:

@@ -1,4 +1,4 @@
-import { MoreHorizontal, Play, Plus } from "lucide-react";
+import { MoreHorizontal, Play, Plus, Radio } from "lucide-react";
 import { fmtDuration } from "../lib/format";
 import { useApp } from "../lib/store";
 import type { Track } from "../lib/types";
@@ -11,11 +11,10 @@ interface Props {
 }
 
 export function ResultRow({ track, index }: Props) {
-  const { play, openModal } = useApp();
-  const query = track.query ?? `${track.title} ${track.uploader ?? ""}`;
+  const { play, cast, openModal, audio } = useApp();
 
   return (
-    <li className="result" onClick={() => void play(query, "play_now")}>
+    <li className={`result ${audio.isCurrent(track) ? "current" : ""}`} onClick={() => void play(track, "play_now")}>
       {index !== undefined && <span className="idx">{index}</span>}
       <Cover track={track} />
       <div className="info">
@@ -33,10 +32,14 @@ export function ResultRow({ track, index }: Props) {
           aria-label="Play now"
           onClick={(event) => {
             event.stopPropagation();
-            void play(query, "play_now");
+            void play(track, "play_now");
           }}
         >
-          <Play size={14} fill="currentColor" />
+          {audio.isCurrent(track) && audio.playing ? (
+            <span className="pause-glyph">❚❚</span>
+          ) : (
+            <Play size={14} fill="currentColor" />
+          )}
         </button>
         <button
           type="button"
@@ -44,10 +47,21 @@ export function ResultRow({ track, index }: Props) {
           aria-label="Add to queue"
           onClick={(event) => {
             event.stopPropagation();
-            void play(query, "play");
+            void play(track, "play");
           }}
         >
           <Plus size={14} />
+        </button>
+        <button
+          type="button"
+          className="mini-action cast"
+          aria-label="Play in the voice chat"
+          onClick={(event) => {
+            event.stopPropagation();
+            void cast(track, "play_now");
+          }}
+        >
+          <Radio size={14} />
         </button>
         <button
           type="button"

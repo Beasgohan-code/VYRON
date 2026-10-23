@@ -37,7 +37,7 @@ Rich cards · premium emoji · instant search · zero-clutter controls
 | 🎛️ **Audio effects** | bass, treble, nightcore, vaporwave, 8D, echo, karaoke, loudness, speed — as a rich toggle panel. |
 | 📡 **Channel play** | `/cplay` streams into the linked channel's voice chat. |
 | 🔎 **Inline mode** | `@VyronMusicBot <song>` returns shareable results in any chat. |
-| 🌐 **Mini App** | A full player UI served by the bot: now playing, queue, search, volume, settings. |
+| 🌐 **Mini App** | A Spotify-style web player served by the bot: local playback with queue/shuffle/repeat, synced lyrics, plus full control of the voice-chat stream. |
 
 ### Built on the *new* Telegram Bot API
 
@@ -257,9 +257,18 @@ WEBAPP_URL=https://your-deployment        # Render/Koyeb URL
   persisted locally and driven by CSS custom properties; glass panels, ranked
   trending cards, "made for you" mix shelves, mood chips, cover mosaics,
   skeleton loaders and micro-animations.
+- **In-app player** — a real audio engine (`src/lib/audio.tsx`): queue, shuffle,
+  repeat-one/all, seek, volume with mute, Media Session metadata (lockscreen and
+  Android/desktop media keys), plus a persistent desktop dock (`PlayBar`) and a
+  full-screen *now playing* view with blurred cover art, synced lyrics and an
+  "up next" list. `Space` toggles, `←`/`→` seek 5 s, `n` skips, `m` mutes.
+- **Two outputs, one app** — every row can `▶` locally or 📻 into the voice chat;
+  the Queue view has *This device* / *Voice chat* tabs so a group stream and your
+  own playback can be inspected side by side.
 - **Backend** — `vyron/web/` (`aiohttp`) exposes `/api/state`, `/api/action`,
-  `/api/home`, `/api/search`, `/api/mix`, `/api/rooms` and `/api/playlists` over
-  the *same* `Player` the bot uses, so chat and app never disagree.
+  `/api/home`, `/api/search`, `/api/mix`, `/api/rooms`, `/api/playlists`,
+  `/api/lyrics` and streaming audio at `/api/stream/{id}` (HTTP Range, so seeking
+  works) over the *same* `Player` the bot uses, so chat and app never disagree.
 - **Auth** — Telegram `initData` (HMAC-verified) or a signed chat token, so the
   app can control a *group* player opened from a `/app` link.
 - **Swap the UI** — `frontend/` is self-contained; any bundle dropped in
