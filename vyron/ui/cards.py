@@ -80,8 +80,8 @@ def start_card(
     """
     served = int(stats.get("chats", 0) or 0)
     tracks = int(stats.get("tracks", 0) or 0)
-    mode = "streaming" if streaming else "file mode"
-    tone = "live" if streaming else "warn"
+    mode = "voice chat" if streaming else "file mode"
+    tone = "ok" if streaming else "warn"
 
     headline = (
         f"<b>{esc(truncate(name, 40))}</b> — voice chat, files and a Mini App."
@@ -90,6 +90,8 @@ def start_card(
     )
     status = B.meta_line(
         B.pill(mode, tone),
+        B.pill("paused", "warn") if live and live.get("paused") else
+        (B.pill("playing", "live") if live else ""),
         f"{served} chats" if served else "",
         f"{tracks} tracks played" if tracks else "",
     )
