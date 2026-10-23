@@ -40,7 +40,14 @@ EFFECTS: dict[str, Effect] = {
         "rotating stereo",
     ),
     "echo": Effect("echo", "Echo", "aecho=0.8:0.9:1000:0.3", "spacey tail"),
-    "reverb": Effect("reverb", "Reverb", "afreqshift=shift=0:order=0", "subtle ambience"),
+    # `afreqshift=shift=0` was a no-op: the effect existed on the panel and did
+    # nothing at all. A short multi-tap echo is what people mean by "reverb".
+    "reverb": Effect(
+        "reverb",
+        "Reverb",
+        "aecho=0.8:0.86:60|120:0.35|0.22",
+        "room tail",
+    ),
     "karaoke": Effect(
         "karaoke",
         "Karaoke",

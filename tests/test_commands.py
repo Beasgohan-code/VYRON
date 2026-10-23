@@ -91,3 +91,53 @@ def test_core_commands_are_present():
 def test_commands_are_lowercase():
     bad = [name for name in _commands() if name != name.lower()]
     assert bad == []
+
+
+def test_the_bot_menu_only_lists_commands_that_exist():
+    """Telegram shows this menu to users; a stale entry is a dead button.
+
+    `/whoami` sat in it long after the handler was deleted, so the check walks
+    the *real* registrations (the same objects pyrogram's dispatcher matches)
+    instead of re-parsing source.
+    """
+    from vyron.__main__ import COMMANDS
+    from vyron.modules import register_all
+
+    found: set[str] = set()
+
+    class Recorder:
+        def _capture(self, flt):
+            stack = [flt]
+            while stack:
+                node = stack.pop()
+                commands = getattr(node, "commands", None)
+                if commands:
+                    found.update(c if isinstance(c, str) else c.value for c in commands)
+                for attr in ("base", "other"):
+                    child = getattr(node, attr, None)
+                    if child is not None:
+                        stack.append(child)
+            return lambda fn: fn
+
+        def on_message(self, flt, *_a, **_k):
+            return self._capture(flt)
+
+        def on_callback_query(self, flt, *_a, **_k):
+            return self._capture(flt)
+
+        def __getattr__(self, _name):
+            return lambda *_a, **_k: (lambda fn: fn)
+
+    register_all(Recorder())
+    listed = {name for name, _desc in COMMANDS}
+    assert listed <= found, f"menu promises unregistered commands: {sorted(listed - found)}"
+
+
+def test_removed_commands_stay_removed():
+    """The owner deleted these on purpose — never bring them back."""
+    from vyron.__main__ import COMMANDS
+
+    registered = set(_commands())
+    for gone in ("speedtest", "whoami", "emojis", "dj", "random", "daemons", "replay", "timer"):
+        assert gone not in registered, f"/{gone} is back"
+        assert gone not in {name for name, _ in COMMANDS}, f"/{gone} is back in the menu"

@@ -187,12 +187,14 @@ Telegram `file_id` after the first send, so later starts cost nothing.
 ### Tools
 
 `/lyrics` · `/fav` · `/favs` · `/history` · `/settings` · `/247` · `/stats` · `/ping` · `/id`
-`/song` · `/vsong` · `/repo` · `/playforce` · `/language` · `/logger` · `/voice`
+`/song` · `/vsong` · `/repo` · `/playforce` · `/language` · `/logger` · `/voice` · `/thumbnail`
 
 `/playforce` clears the queue and cuts in immediately (admins, or the owner),
 `/language` switches this chat between English, हिन्दी, മലയാളം and ਪੰਜਾਬੀ, and
-`/logger` mirrors warnings and errors into `LOGGER_ID`, and `/voice` shows the
-live state of the streaming engine (assistant account, active calls, quality).
+`/logger` mirrors warnings and errors into `LOGGER_ID`, `/voice` shows the live
+state of the streaming engine (assistant account, active calls, quality), and
+`/thumbnail` lets a group put its own picture behind the now-playing poster —
+reply to a photo with it, `/thumbnail off` goes back to the cover.
 
 Videl/Fallen aliases are accepted everywhere they make sense: `/music` (`/start`),
 `/listpl`, `/loadpl`, `/rmplaylist`, `/deleteplaylist`, `/delpl`,

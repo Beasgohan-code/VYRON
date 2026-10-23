@@ -141,3 +141,107 @@ def test_owner_tools_refuse_a_group_chat(wired):
     query = _dispatch(client, "v:token:revoke", chat_type=ChatType.SUPERGROUP)
     assert edited == []
     assert query.answers[-1][1] is True
+
+
+# ── pickers: /suggest suggestions and saved playlists ──────────────────────
+class FakePlayer:
+    def __init__(self) -> None:
+        from types import SimpleNamespace
+
+        from vyron.core.queue import ChatState
+
+        self.queued: list = []
+        self.queues = SimpleNamespace(get=lambda chat_id: ChatState(chat_id=chat_id))
+
+    async def enqueue(self, chat_id, track, **_kwargs):
+        self.queued.append(track)
+        return len(self.queued)
+
+
+def test_a_suggestion_button_queues_the_track(wired, monkeypatch):
+    from vyron.core import pending
+    from vyron.core.queue import Track
+    from vyron.runtime import runtime
+
+    client, _tokens, _edited = wired
+    player = FakePlayer()
+    monkeypatch.setattr(runtime, "player", player)
+
+    tracks = [Track(id="a", title="First", duration=100), Track(id="b", title="Second", duration=120)]
+    pending.put(424242, 11, settings.owner_id, "lofi", tracks)
+
+    query = _dispatch(client, "v:p:1")
+
+    assert [track.id for track in player.queued] == ["b"]
+    assert "Queued" in query.answers[-1][0]
+
+
+def test_a_stale_suggestion_list_says_so(wired, monkeypatch):
+    from vyron.runtime import runtime
+
+    client, _tokens, _edited = wired
+    monkeypatch.setattr(runtime, "player", FakePlayer())
+
+    query = _dispatch(client, "v:p:4")
+
+    assert query.answers[-1][1] is True  # alert
+    assert "expired" in query.answers[-1][0].lower()
+
+
+def test_queue_it_queues_a_saved_playlist(wired, monkeypatch):
+    from vyron.core import playlists as store
+    from vyron.core.queue import Track
+    from vyron.runtime import runtime
+
+    client, _tokens, _edited = wired
+    player = FakePlayer()
+    monkeypatch.setattr(runtime, "player", player)
+
+    playlist = asyncio.run(store.create(settings.owner_id, "road trip"))
+    asyncio.run(
+        store.add_tracks(
+            settings.owner_id,
+            playlist["id"],
+            [Track(id="x", title="One", duration=90), Track(id="y", title="Two", duration=95)],
+        )
+    )
+
+    query = _dispatch(client, f"v:pl:{playlist['id']}")
+
+    assert len(player.queued) == 2
+    assert "Queued 2" in query.answers[-1][0]
+
+
+def test_the_broad_router_steps_aside_for_dedicated_ones(wired):
+    """`v:logs:` and `v:unblock:` own their ack — answering twice breaks them."""
+    client, _tokens, _edited = wired
+
+    logs = _dispatch(client, "v:logs:all")
+    unblock = _dispatch(client, "v:unblock:123")
+
+    assert logs.answers == []
+    assert unblock.answers == []
+
+
+# ── per-chat artwork from the settings panel ───────────────────────────────
+def test_the_settings_panel_can_show_artwork(wired):
+    client, _tokens, edited = wired
+
+    query = _dispatch(client, "v:thumb:show")
+
+    assert "backdrop" in edited[-1]
+    assert "/thumbnail" in edited[-1]
+    assert query.answers[-1][0]
+
+
+def test_artwork_can_be_removed_from_the_panel(wired):
+    from vyron.core import chatcfg
+    from vyron.runtime import runtime
+
+    client, _tokens, _edited = wired
+    asyncio.run(chatcfg.set(424242, "thumbnail", "file-id"))
+
+    _dispatch(client, "v:thumb:off")
+
+    assert asyncio.run(chatcfg.get(424242, "thumbnail", "")) == ""
+    assert runtime.storage is not None

@@ -29,6 +29,26 @@ def test_ffmpeg_parameters_with_seek():
     assert effects.ffmpeg_parameters([]) is None
 
 
+def test_every_effect_actually_does_something():
+    """A no-op filter is worse than a missing one: it lies on the panel.
+
+    `reverb` used to be `afreqshift=shift=0`, which changes nothing at all.
+    """
+    for name, effect in effects.EFFECTS.items():
+        assert effect.filters.strip(), f"{name} has an empty filter chain"
+        assert "shift=0" not in effect.filters.replace(" ", ""), (
+            f"{name} is a no-op filter"
+        )
+        assert effect.label and effect.note
+
+
+def test_reverb_has_a_real_tail():
+    chain = effects.ffmpeg_filter(["reverb"])
+    assert chain and chain.startswith("aecho=")
+    delays = chain.split(":")[2].split("|")
+    assert all(float(d) > 0 for d in delays)
+
+
 def test_parse_effects():
     accepted, rejected = effects.parse("bass, nightcore nonsense")
     assert accepted == ["bass", "nightcore"] and rejected == ["nonsense"]

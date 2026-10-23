@@ -55,6 +55,7 @@ COMMANDS = [
     ("logger", "mirror warnings to a channel"),
     ("effects", "audio effects panel"),
     ("voice", "voice engine status"),
+    ("thumbnail", "per-chat poster artwork"),
     ("locks", "content locks & anti-flood"),
     ("warn", "warn a member"),
     ("warns", "member warnings"),
@@ -80,7 +81,6 @@ COMMANDS = [
     ("fav", "save the current track"),
     ("savepl", "save the queue as a playlist"),
     ("suggest", "tracks like this one"),
-    ("whoami", "your id, role and chat"),
     ("stats", "bot statistics"),
     ("help", "all commands"),
 ]

@@ -242,9 +242,34 @@ def _rounded(image, radius: int):
     return mask
 
 
-def _background(art, accent) -> "Image.Image":
-    backdrop = art.resize((W, H), Image.LANCZOS).filter(ImageFilter.GaussianBlur(46))
-    backdrop = Image.blend(backdrop, Image.new("RGB", (W, H), (5, 6, 10)), 0.58)
+def _backdrop(image_bytes: bytes | None):
+    """Cover-crop an arbitrary picture to the poster's 16:9 canvas."""
+    if not image_bytes:
+        return None
+    try:
+        image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        scale = max(W / image.width, H / image.height)
+        size = (max(W, round(image.width * scale)), max(H, round(image.height * scale)))
+        image = image.resize(size, Image.LANCZOS)
+        left = (image.width - W) // 2
+        top = (image.height - H) // 2
+        return image.crop((left, top, left + W, top + H))
+    except Exception as exc:  # pragma: no cover - never break playback for art
+        logger.debug("custom backdrop decode failed: %s", exc)
+        return None
+
+
+def _background(
+    art,
+    accent,
+    backdrop=None,
+    dim: float = 0.58,
+    blur: int = 46,
+    glow_strength: float = 0.28,
+) -> "Image.Image":
+    base = backdrop if backdrop is not None else art.resize((W, H), Image.LANCZOS)
+    backdrop = base.filter(ImageFilter.GaussianBlur(blur))
+    backdrop = Image.blend(backdrop, Image.new("RGB", (W, H), (5, 6, 10)), dim)
 
     glow = Image.new("RGB", (W, H), (0, 0, 0))
     draw = ImageDraw.Draw(glow)
@@ -252,7 +277,7 @@ def _background(art, accent) -> "Image.Image":
     draw.ellipse((700, 260, 1560, 1120), fill=tuple(int(c * 0.30) for c in accent))
     glow = glow.filter(ImageFilter.GaussianBlur(190))
     backdrop = Image.blend(backdrop, Image.new("RGB", (W, H), (0, 0, 0)), 0.10)
-    backdrop = Image.blend(backdrop, glow, 0.28)
+    backdrop = Image.blend(backdrop, glow, glow_strength)
 
     # left-to-right shade keeps the type readable without flattening the art
     shade = Image.new("L", (1, 1))
@@ -260,7 +285,16 @@ def _background(art, accent) -> "Image.Image":
     for x in range(W):
         strip.putpixel((x, 0), int(120 * max(0.0, 1 - x / (W * 0.62))))
     shade = strip.resize((W, H))
-    return Image.composite(_gradient((W, H), (3, 4, 8), (0, 0, 0)), backdrop, shade)
+    backdrop = Image.composite(_gradient((W, H), (3, 4, 8), (0, 0, 0)), backdrop, shade)
+    if blur < 46:
+        # A photo brings its own detail; darken the right-hand type column so
+        # the title never fights the artwork.
+        column = Image.new("L", (W, 1))
+        for x in range(W):
+            column.putpixel((x, 0), int(150 * max(0.0, (x - W * 0.42) / (W * 0.58))))
+        column = column.resize((W, H))
+        backdrop = Image.composite(Image.new("RGB", (W, H), (3, 4, 8)), backdrop, column)
+    return backdrop
 
 
 def _vinyl(size: int, accent) -> "Image.Image":
@@ -327,14 +361,35 @@ def _bars(seed_text: str, count: int) -> list[int]:
     return heights
 
 
-def render(state: ChatState, track: Track, cover: bytes | None = None) -> bytes | None:
-    """Render the poster; returns JPEG bytes or ``None`` when Pillow is absent."""
+def render(
+    state: ChatState,
+    track: Track,
+    cover: bytes | None = None,
+    backdrop: bytes | None = None,
+) -> bytes | None:
+    """Render the poster; returns JPEG bytes or ``None`` when Pillow is absent.
+
+    ``backdrop`` is the chat's custom artwork (`/thumbnail`): it replaces the
+    blurred cover behind the type, while the colour accent and the cover tile
+    still come from the song, so the poster stays recognisably *this* track in
+    a room that has its own branding.
+    """
     if not PIL_AVAILABLE or track is None:
         return None
     try:
         art = _cover(cover, 360)
-        accent, accent2 = _accent_from(art)
-        canvas = _background(art, accent).convert("RGB")
+        custom = _backdrop(backdrop)
+        # With no cover art there is no song colour to pull, so the custom
+        # artwork supplies the palette instead of a grey placeholder.
+        accent, accent2 = _accent_from(art if cover or custom is None else custom)
+        if custom:
+            # A chat's own artwork should still be recognisable: less blur,
+            # less dimming, and a softer colour wash on top of it.
+            canvas = _background(
+                art, accent, backdrop=custom, dim=0.46, blur=22, glow_strength=0.16
+            ).convert("RGB")
+        else:
+            canvas = _background(art, accent).convert("RGB")
         layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         draw = ImageDraw.Draw(layer)
 
@@ -444,7 +499,7 @@ def render(state: ChatState, track: Track, cover: bytes | None = None) -> bytes 
             draw.rounded_rectangle(
                 (cursor, top, cursor + bar_w, wave_y + height // 3),
                 radius=2,
-                fill=accent if played else (255, 255, 255, 92),
+                fill=accent if played else (accent[0], accent[1], accent[2], 70),
             )
             cursor += bar_w + gap
 
@@ -480,7 +535,12 @@ def render(state: ChatState, track: Track, cover: bytes | None = None) -> bytes 
         return None
 
 
-async def now_playing(state: ChatState, track: Track) -> bytes | None:
+async def now_playing(
+    state: ChatState,
+    track: Track,
+    *,
+    backdrop: bytes | None = None,
+) -> bytes | None:
     """Fetch the cover art and render the poster off the event loop.
 
     The render is ~120 ms of pure CPU work; on a busy bot that is long enough to
@@ -491,7 +551,7 @@ async def now_playing(state: ChatState, track: Track) -> bytes | None:
     cover = await fetch_bytes(track.thumbnail, limit=1_400_000) if track.thumbnail else None
     import asyncio
 
-    return await asyncio.to_thread(render, state, track, cover)
+    return await asyncio.to_thread(render, state, track, cover, backdrop)
 
 
 __all__ = ["PIL_AVAILABLE", "font", "now_playing", "render"]

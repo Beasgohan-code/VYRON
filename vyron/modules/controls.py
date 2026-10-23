@@ -13,7 +13,6 @@ from vyron.runtime import runtime
 from vyron.ui import cards, keyboards, nowplaying, rich
 from vyron.ui.theme import E
 from vyron.utils.helpers import command_args, parse_seek
-from vyron.utils import thumbnails
 
 logger = logging.getLogger(__name__)
 
@@ -167,8 +166,12 @@ def register(client: Client) -> None:
         keyboard = keyboards.now_playing(state)
         # The generated poster, with the live clock as its caption. Falls back
         # to the text card when Pillow (or the render) is unavailable.
+        # Same code path as the auto-posted poster, so `/np` shows the chat's
+        # own artwork and hits the same memoised render.
         art = (
-            await thumbnails.now_playing(state, state.current)
+            await nowplaying.poster(
+                state, state.current, bot=message._client, chat_id=message.chat.id
+            )
             if await nowplaying.allowed(message.chat.id)
             else None
         )

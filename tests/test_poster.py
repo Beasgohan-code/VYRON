@@ -119,7 +119,7 @@ def test_announce_posts_the_poster_and_remembers_the_message(monkeypatch):
     if not thumbnails.PIL_AVAILABLE:
         pytest.skip("Pillow is not installed")
 
-    async def fake_poster(state, track):
+    async def fake_poster(state, track, **_):
         return b"\xff\xd8fake"
 
     monkeypatch.setattr(nowplaying, "poster", fake_poster)
@@ -135,7 +135,7 @@ def test_announce_posts_the_poster_and_remembers_the_message(monkeypatch):
 def test_announce_falls_back_to_the_text_card(monkeypatch):
     from vyron.ui import nowplaying
 
-    async def no_poster(state, track):
+    async def no_poster(state, track, **_):
         return None
 
     monkeypatch.setattr(nowplaying, "poster", no_poster)
@@ -151,7 +151,7 @@ def test_poster_is_cached_per_track(monkeypatch):
 
     calls = {"n": 0}
 
-    async def counting(state, track):
+    async def counting(state, track, **_):
         calls["n"] += 1
         return b"\xff\xd8cached"
 
@@ -211,7 +211,7 @@ def test_bytes_are_wrapped_before_they_reach_pyrogram():
 def test_a_poster_refresh_edits_the_caption_in_place(monkeypatch):
     from vyron.ui import nowplaying
 
-    async def fake_poster(state, track):
+    async def fake_poster(state, track, **_):
         return b"\xff\xd8fake"
 
     monkeypatch.setattr(nowplaying, "poster", fake_poster)

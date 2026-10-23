@@ -28,6 +28,11 @@ logger = logging.getLogger(__name__)
 _CACHE: "OrderedDict[str, bytes]" = OrderedDict()
 _CACHE_MAX = 24
 
+# Chat artwork (`/thumbnail`) is a Telegram file id; the bytes are fetched once
+# and kept, because a poster is re-rendered for every track in that chat.
+_ART: "OrderedDict[str, bytes]" = OrderedDict()
+_ART_MAX = 12
+
 
 def _key(track: Track) -> str:
     return f"{track.id}|{track.title}|{track.uploader}|{track.duration}"
@@ -49,11 +54,50 @@ async def allowed(chat_id: int) -> bool:
         return True
 
 
-async def poster(state: ChatState, track: Track) -> bytes | None:
+async def chat_art(chat_id: int, bot=None) -> bytes | None:
+    """The custom artwork this chat set with `/thumbnail`, if any."""
+    from vyron.core import chatcfg
+
+    try:
+        file_id = await chatcfg.get(int(chat_id), "thumbnail", "")
+    except Exception:  # pragma: no cover - config must never break playback
+        return None
+    if not file_id:
+        return None
+    cached = _ART.get(str(file_id))
+    if cached is not None:
+        _ART.move_to_end(str(file_id))
+        return cached
+    if bot is None:
+        from vyron.runtime import runtime  # local: runtime imports the player
+
+        bot = getattr(runtime, "bot", None)
+    client = bot
+    if client is None:
+        return None
+    try:
+        data = await client.download_media(str(file_id), in_memory=True)
+        blob = data.getvalue() if hasattr(data, "getvalue") else bytes(data or b"")
+    except Exception as exc:
+        logger.debug("custom thumbnail download failed: %s", exc)
+        return None
+    if not blob:
+        return None
+    _ART[str(file_id)] = blob
+    while len(_ART) > _ART_MAX:
+        _ART.popitem(last=False)
+    return blob
+
+
+async def poster(state: ChatState, track: Track, *, bot=None, chat_id: int | None = None) -> bytes | None:
     """The rendered poster for *track*, memoised (bytes, JPEG)."""
     if not enabled() or track is None:
         return None
-    key = _key(track)
+    target = int(chat_id or (state.chat_id if state else 0) or 0)
+    backdrop = await chat_art(target, bot) if target else None
+    # The artwork is part of the identity of the picture, so it belongs in the
+    # cache key; a chat that changes its backdrop gets a fresh render.
+    key = _key(track) if not backdrop else f"{_key(track)}|art{hash(backdrop) & 0xFFFFFFFF}"
     cached = _CACHE.get(key)
     if cached is not None:
         _CACHE.move_to_end(key)
@@ -63,7 +107,7 @@ async def poster(state: ChatState, track: Track) -> bytes | None:
     # clock lives in the caption so nothing has to be re-uploaded.
     snapshot = ChatState(chat_id=state.chat_id if state else 0, current=track)
     snapshot.started_at = 0.0
-    image = await thumbnails.now_playing(snapshot, track)
+    image = await thumbnails.now_playing(snapshot, track, backdrop=backdrop)
     if image:
         _CACHE[key] = image
         while len(_CACHE) > _CACHE_MAX:
@@ -97,7 +141,7 @@ async def announce(
         if await rich.edit(bot, chat_id, state.np_message_id, markup, markup_keyboard=keyboard):
             return
 
-    image = await poster(state, track) if await allowed(chat_id) else None
+    image = await poster(state, track, bot=bot, chat_id=chat_id) if await allowed(chat_id) else None
     message = None
     if image:
         message = await rich.send_photo(
@@ -131,7 +175,9 @@ async def mirror_to_dm(bot, user_id: int, state: ChatState, *, chat_title: str =
     caption = cards.now_playing_dm_caption(
         track, chat_title=chat_title, state=state, catalog=catalog
     )
-    image = await poster(state, track)
+    # The mirrored poster shows the *room* it is playing in — the DM inherits
+    # the group's artwork, not whatever the listener set in private.
+    image = await poster(state, track, bot=bot, chat_id=int(state.chat_id or user_id))
     try:
         if image:
             await rich.send_photo(bot, int(user_id), image, caption)

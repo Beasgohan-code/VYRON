@@ -214,6 +214,7 @@ _HELP: dict[str, tuple[str, list[tuple[str, str]]]] = {
             ("/settings", "per-chat defaults"),
             ("/language", "English · हिन्दी · മലയാളം · ਪੰਜਾਬੀ"),
             ("/voice", "voice engine: on/off, calls, quality"),
+            ("/thumbnail", "your own artwork behind the poster"),
             ("/logger", "mirror warnings to a channel (owner)"),
             ("/247", "toggle 24/7 mode"),
             ("/app", "open the player web app"),
@@ -1344,6 +1345,55 @@ _TONES = {
     "error": ("cross", "danger"),
     "info": ("info", "primary"),
 }
+
+
+def thumbnail_card(has_custom: bool, *, can_edit: bool = True) -> str:
+    """``/thumbnail`` — what the now-playing poster uses as its backdrop."""
+    mode = "your artwork" if has_custom else "the song cover"
+    hint = (
+        f"{E('image')} Reply to a photo with <code>/thumbnail</code> to use it here — "
+        "the cover and colours still come from the track."
+        if can_edit
+        else f"{E('shield')} A group admin can set this — reply to a photo with "
+        "<code>/thumbnail</code>."
+    )
+    body = (
+        B.heading(f"{E('image')} {small_caps('chat artwork')}", 2)
+        + B.kv(
+            [
+                (f"{E('image')} backdrop", f"<b>{mode}</b>"),
+                (f"{E('spark')} accent", "<i>from the song</i>"),
+                (f"{E('chat')} scope", "<i>this chat only</i>"),
+            ]
+        )
+        + B.note(hint)
+    )
+    if has_custom and can_edit:
+        body += B.row(
+            B.btn(f"{E('close')} Remove artwork", data="v:thumb:off", style="danger"),
+            B.btn(f"{E('back')} Close", data="v:close"),
+        )
+    else:
+        body += B.row(B.btn(f"{E('close')} Close", data="v:close"))
+    return body + B.footer(f"{E('info')} every new track re-renders the poster")
+
+
+def thumbnail_set_card() -> str:
+    return (
+        B.heading(f"{E('check')} {small_caps('artwork saved')}", 2)
+        + B.note(
+            "New posters in this chat will use it as the backdrop. The cover, the "
+            "vinyl and the colours stay tied to the track."
+        )
+        + B.footer(f"{E('info')} /thumbnail off reverts to the song cover")
+    )
+
+
+def thumbnail_cleared_card() -> str:
+    return (
+        B.heading(f"{E('image')} {small_caps('back to the cover')}", 2)
+        + B.note("The next poster in this chat uses the track's own artwork again.")
+    )
 
 
 def notice_card(

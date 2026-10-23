@@ -74,6 +74,36 @@ def register(client: Client) -> None:
             await cq.answer("Only group admins can control playback.", show_alert=True)
             return
 
+        # These prefixes have their own routers (extras.py, logs_cmd.py). Answer
+        # here too and Telegram rejects the second ack, so step aside entirely.
+        if action in {"logs", "unblock"}:
+            return
+
+        # ── per-chat artwork (independent of playback) ─────────────────────
+        if action == "thumb":
+            from vyron.core import chatcfg
+
+            actor = cq.from_user.id if cq.from_user else 0
+            allowed = (
+                chat.type == ChatType.PRIVATE
+                or is_owner(actor)
+                or await is_chat_admin(client, chat.id, actor)
+            )
+            if not allowed:
+                await cq.answer("Only group admins can change the artwork.", show_alert=True)
+                return
+            if arg == "off":
+                await chatcfg.set(chat.id, "thumbnail", "")
+                await _show(client, cq, cards.thumbnail_cleared_card())
+                await cq.answer("Artwork removed")
+                return
+            file_id = str(await chatcfg.get(chat.id, "thumbnail", "") or "")
+            await _show(client, cq, cards.thumbnail_card(bool(file_id), can_edit=True))
+            await cq.answer(
+                "Reply to a photo with /thumbnail" if not file_id else "Custom artwork"
+            )
+            return
+
         # captcha buttons belong to a person, not to the player: handle them
         # before the player check so a booting bot can still verify people.
         if action == "captcha":
@@ -599,6 +629,54 @@ def register(client: Client) -> None:
                 {"streamed": "Starting", "queued": "Queued", "error": "Could not stream that"}.get(
                     outcome, "Done"
                 )
+            )
+            return
+
+        # ── /suggest picker: queue one of the suggestions ──────────────────
+        if action == "p":
+            entry = pending.get(chat.id, cq.message.id)
+            if not entry or not arg.isdigit() or int(arg) >= len(entry.tracks):
+                await cq.answer("That list expired — run /suggest again.", show_alert=True)
+                return
+            if runtime.player is None:
+                await cq.answer("Playback is not ready yet.", show_alert=True)
+                return
+            track = entry.tracks[int(arg)]
+            try:
+                position = await runtime.player.enqueue(chat.id, track)
+            except Exception as exc:
+                await cq.answer(f"Could not queue that: {truncate(str(exc), 60)}", show_alert=True)
+                return
+            await cq.answer(
+                f"Queued · {truncate(track.title, 26)}"
+                if position > 0
+                else "Already in the queue"
+            )
+            return
+
+        # ── saved playlist: queue the whole thing ──────────────────────────
+        if action == "pl":
+            from vyron.core import playlists as playlists_store
+
+            if runtime.player is None:
+                await cq.answer("Playback is not ready yet.", show_alert=True)
+                return
+            actor = cq.from_user.id if cq.from_user else 0
+            name = ""
+            queued = 0
+            if arg:
+                name, tracks = await playlists_store.as_tracks(actor, arg)
+                for track in tracks:
+                    try:
+                        if await runtime.player.enqueue(chat.id, track) > 0:
+                            queued += 1
+                    except Exception:
+                        continue
+            if not name:
+                await cq.answer("That playlist is gone — send /playlists.", show_alert=True)
+                return
+            await cq.answer(
+                f"Queued {queued} from {truncate(name, 22)}" if queued else "Already queued"
             )
             return
 

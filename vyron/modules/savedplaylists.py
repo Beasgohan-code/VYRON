@@ -109,7 +109,7 @@ def register(client: Client) -> None:
                     (f"{E('queue')} total", f"<b>{len(playlist.get('tracks', [])) + added}</b>"),
                 ]
             )
-            + B.row(B.btn(f"{E('play')} Queue it", data="v:pl", style="primary"),
+            + B.row(B.btn(f"{E('play')} Queue it", data=f"v:pl:{playlist['id']}", style="primary"),
                     B.btn(f"{E('close')} Done", data="v:close"))
             if added
             else B.note(f"{E('info')} Those tracks are already in <b>{rich.esc(playlist['name'])}</b>."),
