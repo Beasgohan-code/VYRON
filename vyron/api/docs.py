@@ -101,6 +101,7 @@ SECTIONS = [
     ("auth", "Authentication"),
     ("scopes", "Scopes"),
     ("endpoints", "Endpoints"),
+    ("download", "Download API"),
     ("errors", "Errors"),
     ("limits", "Rate limits"),
     ("metrics", "Metrics"),
@@ -277,6 +278,19 @@ PAGE = Template("""<!doctype html>
     <h3>Node / fetch</h3>
     $node_sample
 
+    <h2 id="download">Download API — <code>/vyron</code></h2>
+    <p>When a client only wants a file, skip the library. Two endpoints on this same
+    URL download a track by id or by plain text and stream it straight back:</p>
+    $vyron_curl
+    <table><thead><tr><th>Method</th><th>Path</th><th>Body</th></tr></thead><tbody>
+      <tr><td><span class="verb post">POST</span></td><td><code>/vyron/v1/track/by-video-id</code></td><td><code>{"video_id": "dQw4w9WgXcQ"}</code></td></tr>
+      <tr><td><span class="verb post">POST</span></td><td><code>/vyron/v1/track/by-query</code></td><td><code>{"query": "kesariya arijit singh"}</code></td></tr>
+      <tr><td><span class="verb get">GET</span></td><td><code>/vyron/health</code></td><td>engine status, format, retry and cookie state</td></tr>
+    </tbody></table>
+    <div class="note">Same keys, scopes and rate limits as <code>/v1</code> — one key works
+    everywhere. Each response is a temp file that is deleted as soon as it has been sent, and
+    only two downloads run at once so the bot's voice chat always keeps its share.</div>
+
     <h2 id="errors">Errors</h2>
     <p>Everything fails with the same envelope, including a <code>request_id</code> you can quote
     in a bug report:</p>
@@ -362,6 +376,12 @@ async def render(request: web.Request) -> web.Response:
         "    for chunk in r.iter_content(1 << 16):\n"
         "        fh.write(chunk)"
     )
+    vyron_curl = _code(
+        'curl -X POST "' + site + "/vyron" + '/v1/track/by-video-id" \\\n'
+        '  -H "X-API-Key: vyrn_xxxxxxxx" \\\n'
+        '  -H "Content-Type: application/json" \\\n'
+        '  -d \'{"video_id":"dQw4w9WgXcQ"}\' --output track.m4a'
+    )
     node_sample = _code(
         'const res = await fetch("' + base + '/tracks", {\n'
         "  method: 'POST',\n"
@@ -409,6 +429,7 @@ async def render(request: web.Request) -> web.Response:
         error_rows=_error_rows(),
         changelog_rows=_changelog_rows(),
         curl_download=curl_download,
+        vyron_curl=vyron_curl,
         curl_stream=curl_stream,
         python_sample=python_sample,
         node_sample=node_sample,
