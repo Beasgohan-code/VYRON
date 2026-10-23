@@ -78,14 +78,16 @@ export const demoHome = {
   ],
 };
 
-const json = (payload: unknown) =>
+export const json = (payload: unknown) =>
   Promise.resolve({
     ok: true,
     status: 200,
     json: async () => payload,
   } as Response);
 
-beforeEach(() => {
+/** Fake the whole API — pass overrides to test a variant of the state. */
+export function stubApi(overrides: Record<string, unknown> = {}) {
+  const state = { ...demoState, ...overrides };
   vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
     const url = String(input);
     if (url.includes("/api/home")) return json(demoHome);
@@ -93,8 +95,12 @@ beforeEach(() => {
     if (url.includes("/api/playlists")) return json({ ok: true, playlists: demoState.playlists });
     if (url.includes("/api/search")) return json({ ok: true, results: demoHome.trending });
     if (url.includes("/api/action")) return json({ ok: true });
-    return json(demoState);
+    return json(state);
   }));
+}
+
+beforeEach(() => {
+  stubApi();
 });
 
 afterEach(() => {

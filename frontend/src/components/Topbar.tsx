@@ -1,11 +1,18 @@
 import { Bell, Search } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { initials } from "../lib/format";
 import { useApp } from "../lib/store";
 
 export function Topbar() {
   const { runSearch, setView, state, toast, view } = useApp();
   const [value, setValue] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const focus = () => inputRef.current?.focus();
+    window.addEventListener("vyron:focus-search", focus);
+    return () => window.removeEventListener("vyron:focus-search", focus);
+  }, []);
   const user = state?.user ?? {};
 
   return (
@@ -23,6 +30,7 @@ export function Topbar() {
       >
         <Search size={16} />
         <input
+          ref={inputRef}
           value={value}
           onChange={(event) => setValue(event.target.value)}
           placeholder="Search songs, artists or paste a link…"

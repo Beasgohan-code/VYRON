@@ -11,7 +11,7 @@ import {
   Users,
   Volume2,
 } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fmtDuration } from "../lib/format";
 import { useApp } from "../lib/store";
 import { Cover } from "./Cover";
@@ -34,8 +34,22 @@ export function NowPlayingRail() {
     }
   }, []);
 
+  /* the API is polled, so tick the clock locally between fetches */
+  const [drift, setDrift] = useState(0);
+  useEffect(() => {
+    setDrift(0);
+  }, [now?.elapsed, now?.title]);
+
   const total = now?.duration ?? 0;
-  const elapsed = now?.elapsed ?? 0;
+  const live = Boolean(now && !now.paused);
+  useEffect(() => {
+    if (!live) return;
+    const timer = window.setInterval(() => setDrift((value) => value + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [live, now?.title]);
+
+  const raw = (now?.elapsed ?? 0) + drift;
+  const elapsed = total ? Math.min(total, raw) : raw;
   const percent = total ? Math.min(100, (elapsed / total) * 100) : 0;
 
   return (
@@ -43,9 +57,16 @@ export function NowPlayingRail() {
       <article className="panel np-card">
         <div className="np-head">
           <span className="tag">Now playing</span>
-          <span className={`np-state ${now && !now.paused ? "on" : ""}`}>
-            <i />
-            {now ? (now.paused ? "paused" : "live") : "idle"}
+          <span className="np-flags">
+            {state && state.streaming === false && (
+              <span className="tag ghost" title="No assistant session — tracks arrive as files">
+                file mode
+              </span>
+            )}
+            <span className={`np-state ${now && !now.paused ? "on" : ""}`}>
+              <i />
+              {now ? (now.paused ? "paused" : "live") : "idle"}
+            </span>
           </span>
         </div>
 

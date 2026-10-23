@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import App from "./App";
 import { AppProvider } from "./lib/store";
+import { stubApi } from "./test-setup";
 
 function nav(label: string): HTMLElement {
   const sidebar = document.querySelector(".nav") as HTMLElement;
@@ -76,6 +77,25 @@ describe("VYRON Player", () => {
 
     await waitFor(() => expect(screen.getByText("Slow Motion")).toBeInTheDocument());
     expect(localStorage.getItem("vyron:recent")).toContain("neon");
+  });
+
+  it("badges file mode when there is no assistant session", async () => {
+    stubApi({ streaming: false });
+    mount();
+
+    await waitFor(() => expect(screen.getByText("Now playing")).toBeInTheDocument());
+    const badge = document.querySelector(".np-flags .tag.ghost");
+    expect(badge).not.toBeNull();
+    expect(badge?.textContent).toContain("file mode");
+  });
+
+  it("focuses the topbar search with the / shortcut", async () => {
+    const user = userEvent.setup();
+    mount();
+
+    await user.keyboard("/");
+    const input = screen.getByPlaceholderText(/Search songs, artists or paste a link/i);
+    expect(document.activeElement).toBe(input);
   });
 
   it("opens the download modal from the rail", async () => {

@@ -668,6 +668,8 @@ input[type="range"]:disabled { opacity: .5; }
 /* ── now playing rail ────────────────────────────────────────────────────── */
 .np-card { padding: 16px; }
 .np-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.np-flags { display: inline-flex; align-items: center; gap: 8px; }
+.tag.ghost { color: var(--warn, #f5c76a); border-color: color-mix(in srgb, var(--warn, #f5c76a) 38%, transparent); }
 .np-state { display: inline-flex; align-items: center; gap: 6px; font-size: 10.6px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
 .np-state i { width: 6px; height: 6px; border-radius: 50%; background: var(--muted-2); }
 .np-state.on { color: var(--success); }
