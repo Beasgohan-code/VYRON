@@ -153,6 +153,10 @@ def register(client: Client) -> None:
             (f"{E('id')} chat id", f"<code>{message.chat.id}</code>"),
             (f"{E('shield')} role", "<b>owner</b>" if is_owner(user.id if user else 0) else "<b>listener</b>"),
         ]
+        if is_owner(user.id if user else 0):
+            rows.append(
+                (f"{E('crown')} owner access", "<code>/apitoken</code> — web app + API")
+            )
         if runtime.player:
             state = runtime.player.queues.get(message.chat.id)
             rows.append((f"{E('queue')} your queue", f"<b>{len(state.queue)}</b> tracks"))
