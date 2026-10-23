@@ -79,3 +79,52 @@ def test_settings_panel_reflects_state():
     flat = [b.text for row in markup.inline_keyboard for b in row]
     assert any("All" in text for text in flat)
     assert any("On" in text for text in flat)
+
+
+def test_a_rate_limited_login_waits_instead_of_killing_the_process(monkeypatch):
+    """Render restarts a crashed container — which logs in again and makes the
+    FloodWait longer. The boot path has to wait Telegram out instead."""
+    import asyncio
+
+    from pyrogram.errors import FloodWait
+
+    from vyron.__main__ import _start_client
+
+    sleeps: list[float] = []
+    calls: list[int] = []
+
+    class Client:
+        async def start(self):
+            calls.append(1)
+            if len(calls) < 3:
+                raise FloodWait(1)  # one second + the safety margin
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+
+    asyncio.run(_start_client(Client(), "bot"))
+
+    assert len(calls) == 3
+    assert sleeps == [6, 6]  # value + 5s margin, twice
+
+
+def test_a_login_that_never_succeeds_still_gives_up(monkeypatch):
+    import asyncio
+
+    import pytest
+    from pyrogram.errors import FloodWait
+
+    from vyron.__main__ import _start_client
+
+    class Client:
+        async def start(self):
+            raise FloodWait(900)
+
+    async def fake_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+    with pytest.raises(FloodWait):
+        asyncio.run(_start_client(Client(), "bot", attempts=2))

@@ -141,6 +141,35 @@ async def _notify_owner(bot) -> None:
             logger.debug("owner boot card failed: %s", exc)
 
 
+async def _start_client(client, label: str, *, attempts: int = 8) -> None:
+    """``client.start()`` that honours Telegram's own rate limit.
+
+    A bot signed in by several deploys in a row gets ``FLOOD_WAIT`` on
+    ``auth.ImportBotAuthorization``. Exiting there is the worst thing to do:
+    Render restarts the container, which signs in again and pushes the wait
+    further out. So wait exactly what Telegram asks for, then retry.
+    """
+    from pyrogram.errors import FloodWait
+
+    for attempt in range(1, attempts + 1):
+        try:
+            await client.start()
+            return
+        except FloodWait as exc:
+            wait = int(getattr(exc, "value", 60) or 60) + 5
+            logger.warning(
+                "%s: Telegram rate-limited the login — waiting %ss (attempt %d/%d)",
+                label,
+                wait,
+                attempt,
+                attempts,
+            )
+            journal.warn("boot", f"{label}: rate-limited, waiting {wait}s")
+            if attempt == attempts:
+                raise
+            await asyncio.sleep(min(wait, 3600))
+
+
 async def _async_main() -> int:
     setup_logging(settings.log_level)
     print(banner_text())
@@ -190,7 +219,7 @@ async def _async_main() -> int:
     runtime.assistant = assistant
 
     logger.info("starting bot client…")
-    await bot.start()
+    await _start_client(bot, "bot")
     me = await bot.get_me()
     logger.info("connected as @%s", me.username)
 
@@ -200,7 +229,7 @@ async def _async_main() -> int:
 
         logger.info("starting assistant (voice engine)…")
         try:
-            await assistant.start()
+            await _start_client(assistant, "assistant")
             calls = PyTgCalls(assistant)
             runtime.calls = calls
             await calls.start()
