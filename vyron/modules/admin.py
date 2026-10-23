@@ -37,7 +37,7 @@ def register(client: Client) -> None:
                 links["api"] = f"{root}/v1/docs"
             if settings.webapp_ready and settings.bot_token:
                 owner_token = make_owner_token(settings.bot_token, sender)
-                links["app"] = f"{settings.webapp_url.rstrip('/')}/app/?ot={owner_token}"
+                links["app"] = cards.app_entry_url(settings.webapp_url, owner_token=owner_token)
         markup = cards.stats_card(
             uptime=runtime.uptime,
             chats=chats,

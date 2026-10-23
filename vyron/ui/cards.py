@@ -1041,6 +1041,12 @@ def _app_root(url: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, f"{path}/", parts.query, parts.fragment))
 
 
+def app_entry_url(url: str | None = None, *, owner_token: str = "") -> str:
+    """Public helper: Mini App URL (optionally with an owner token)."""
+    entry = _app_root(url or settings.webapp_url)
+    return _with_owner_token(entry, owner_token) if owner_token else entry
+
+
 def _with_owner_token(url: str, token: str) -> str:
     if not url or not token:
         return url
@@ -1102,6 +1108,7 @@ def webapp_card(url: str, chat_title: str = "", owner_token: str = "") -> str:
 
 __all__ = [
     "about_card",
+    "app_entry_url",
     "api_key_card",
     "api_keys_card",
     "api_usage_card",

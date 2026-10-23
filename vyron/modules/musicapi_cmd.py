@@ -107,8 +107,9 @@ def register(client: Client) -> None:
         if owner and settings.bot_token and settings.webapp_ready:
             from vyron.web.auth import make_owner_token
 
-            owner_link = (
-                f"{settings.webapp_url.rstrip('/')}/app/?ot={make_owner_token(settings.bot_token, sender)}"
+            owner_link = cards.app_entry_url(
+                settings.webapp_url,
+                owner_token=make_owner_token(settings.bot_token, sender),
             )
         await _reply(
             client,
