@@ -80,10 +80,26 @@ def register(client: Client) -> None:
 
         stats = await runtime.storage.counters() if runtime.storage else {}
         name = (message.from_user.first_name if message.from_user else "there") or "there"
+
+        # A returning user in an active chat wants the track, not the manual.
+        live = None
+        if runtime.player:
+            state = runtime.player.queues.get(message.chat.id)
+            if state is not None and state.current is not None:
+                track = state.current
+                live = {
+                    "title": track.title,
+                    "artist": getattr(track, "uploader", "") or "",
+                    "duration": getattr(track, "duration", 0) or 0,
+                    "queue": len(state.queue),
+                    "paused": state.paused,
+                }
+
         markup = cards.start_card(
             name,
             {"chats": stats.get("chats", 0), "tracks": stats.get("tracks", 0)},
             streaming=runtime.streaming_ready,
+            live=live,
         )
         # No credential and no URL in the card: the Mini App identifies the
         # owner from Telegram's own initData, and its button is DM-only.

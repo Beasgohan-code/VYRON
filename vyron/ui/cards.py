@@ -69,8 +69,13 @@ def start_card(
     stats: dict,
     *,
     streaming: bool = True,
+    live: dict | None = None,
 ) -> str:
-    """The first card anyone sees: what this bot does, and how to start."""
+    """The first card anyone sees: what this bot does, and how to start.
+
+    ``live`` is filled when this chat already has something playing, so a
+    returning user gets the current track instead of a setup guide.
+    """
     served = stats.get("chats", 0)
     tracks = stats.get("tracks", 0)
     mode = "Streaming ready" if streaming else "File mode"
@@ -113,13 +118,37 @@ def start_card(
             B.btn(f"{E('star')} Updates", url=settings.updates_channel, style="link"),
         )
     )
+    body = features + guide
+    if live:
+        title = esc(truncate(str(live.get("title") or "Unknown"), 48))
+        body = B.kv(
+            [
+                (
+                    f"{E('headphones')} Now playing",
+                    f"<b>{title}</b>",
+                ),
+                (
+                    f"{E('user')} Artist",
+                    esc(truncate(str(live.get("artist") or "—"), 32)),
+                ),
+                (
+                    f"{E('clock')} Length",
+                    f"<b>{fmt_duration(int(live.get('duration') or 0))}</b>",
+                ),
+                (
+                    f"{E('queue')} Up next",
+                    f"<b>{int(live.get('queue') or 0)}</b> in the queue"
+                    + (" · <b>paused</b>" if live.get("paused") else ""),
+                ),
+            ]
+        )
+
     return (
         B.heading(f"{E('brand')} {esc(BRAND_DISPLAY)}", 2)
         + B.note(
             f"<b>{esc(truncate(name, 40))}</b> · {mode}\n{detail}"
         )
-        + features
-        + guide
+        + body
         + B.divider()
         + buttons
         + B.footer(

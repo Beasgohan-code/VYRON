@@ -175,3 +175,20 @@ def test_confirm_card_is_a_two_step_action():
     markup = cards.confirm_card("Really?", "detail", confirm="v:x:yes", danger=True)
     assert 'data="v:x:yes"' in markup
     assert "Cancel" in rich.to_plain_text(markup)
+
+
+def test_start_card_swaps_the_manual_for_the_track():
+    live = {"title": "Believer", "artist": "Imagine Dragons", "duration": 204, "queue": 3}
+    text = rich.to_plain_text(cards.start_card("Rahul", {}, live=live))
+    assert "Believer" in text and "3" in text
+    assert "Set up in three steps" not in text  # no manual for a live chat
+    assert "Set up in three steps" in rich.to_plain_text(cards.start_card("Rahul", {}))
+
+
+def test_to_caption_drops_button_rows():
+    markup = (
+        '<h2>Title</h2><tg-button-row><tg-button data="v:app">Player</tg-button>'
+        "</tg-button-row><p>Body</p>"
+    )
+    caption = rich.to_caption(markup)
+    assert "Player" not in caption and "Body" in caption

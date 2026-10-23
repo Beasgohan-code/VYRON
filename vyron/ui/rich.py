@@ -181,6 +181,22 @@ def to_html(markup: str) -> str:
     return text.strip()
 
 
+_BUTTON_ROW_RE = re.compile(
+    r"<tg-button-row\b[^>]*>[\s\S]*?</tg-button-row>|<button\b[^>]*>[\s\S]*?</button>",
+    re.I,
+)
+
+
+def to_caption(markup: str) -> str:
+    """HTML fit for a photo caption: buttons are dropped, not turned into links.
+
+    A card that renders its own ``<tg-button>`` rows would otherwise show those
+    labels twice — once as dead links in the caption and once as the real
+    keyboard underneath the picture.
+    """
+    return to_html(_BUTTON_ROW_RE.sub("", markup))
+
+
 def to_plain_text(markup: str) -> str:
     """Rich markup → completely tag-free text (used for toasts/notifications)."""
     if not markup:
@@ -311,7 +327,7 @@ async def send_photo(
     if not markup:
         return None
     keyboard = markup_keyboard or reply_markup
-    caption = to_html(markup)
+    caption = to_caption(markup)
     if len(caption) > 1024:  # Telegram's caption ceiling
         caption = caption[:1010].rsplit("\n", 1)[0] + "…"
     if photo:
