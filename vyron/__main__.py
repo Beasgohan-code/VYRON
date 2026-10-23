@@ -45,11 +45,13 @@ COMMANDS = [
     ("queue", "show the queue"),
     ("lyrics", "find lyrics"),
     ("settings", "per-chat settings"),
+    ("language", "change VYRON's language"),
     ("app", "open the player web app"),
     ("api", "music API for other bots"),
     ("getapi", "mint a music API key"),
     ("apitoken", "owner token for web app + API"),
     ("logs", "owner journal: starts, stops, errors"),
+    ("logger", "mirror warnings to a channel"),
     ("effects", "audio effects panel"),
     ("locks", "content locks & anti-flood"),
     ("warn", "warn a member"),
@@ -192,6 +194,11 @@ async def _async_main() -> int:
         logger.warning("no STRING_SESSION — running in file-only mode (no voice chat)")
 
     await runtime.build_services()
+    from vyron.core import logsink
+
+    logsink.install(bot)
+    if await logsink.load(runtime.storage):
+        logger.info("log channel is on")
     if runtime.player and calls is not None:
         runtime.player.calls = calls
         runtime.player.register_handlers()

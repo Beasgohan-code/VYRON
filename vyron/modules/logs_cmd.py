@@ -20,8 +20,12 @@ from pyrogram import Client, filters
 from pyrogram.enums import ChatType
 from pyrogram.types import CallbackQuery, Message
 
+from vyron.core import logsink
+from vyron.runtime import runtime
 from vyron.core.journal import journal
+from vyron.ui import blocks as B
 from vyron.ui import cards, rich
+from vyron.ui.theme import E
 from vyron.utils.filters import owner
 from vyron.utils.helpers import is_owner
 
@@ -73,7 +77,85 @@ async def _is_owner_message(message: Message) -> bool:
     return bool(message.from_user and is_owner(message.from_user.id))
 
 
+def _logger_kb():
+    from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("✅ On", callback_data="v:log:on"),
+                InlineKeyboardButton("✖️ Off", callback_data="v:log:off"),
+            ]
+        ]
+    )
+
+
+def logger_card() -> str:
+    """Status of the live log channel (one card, one toggle)."""
+    from vyron.config import settings
+
+    on = logsink.is_enabled()
+    channel = settings.logger_id
+    body = (
+        B.heading(f"{E('live')} log channel", 2)
+        + B.kv(
+            [
+                ("state", f"<b>{'on' if on else 'off'}</b>"),
+                ("channel", f"<code>{channel}</code>" if channel else "<i>LOGGER_ID is not set</i>"),
+                ("mirrors", "warnings and errors"),
+            ]
+        )
+        + B.note(
+            "With this on, every warning and error in the journal is also posted "
+            "to the channel, so you see trouble without opening /logs."
+            if channel
+            else "Set <code>LOGGER_ID</code> to a channel the bot can post in, then "
+            "<code>/logger on</code>."
+        )
+        + B.row(
+            B.btn(f"{E('check')} Turn on", data="v:log:on", style="success"),
+            B.btn(f"{E('close')} Turn off", data="v:log:off", style="danger"),
+        )
+        + B.footer("/logger · owner only · rate limited to 20 events a minute")
+    )
+    return body
+
+
 def register(client: Client) -> None:
+    @client.on_message(filters.command("logger") & owner)
+    async def _logger(_: Client, message: Message) -> None:
+        arg = (message.command[1].lower() if len(message.command) > 1 else "").strip()
+        if arg in {"on", "enable", "start"}:
+            state = await logsink.set_enabled(runtime.storage, True)
+            await rich.send(
+                client,
+                message.chat.id,
+                cards.ok_card(
+                    f"<b>Log channel on</b>\n<blockquote>Warnings and errors are mirrored "
+                    f"to <code>{runtime.settings.logger_id}</code>.</blockquote>"
+                    if state
+                    else "<b>Nothing to post to</b>\n<blockquote>Set <code>LOGGER_ID</code> first.</blockquote>"
+                ),
+                reply_to=message.id,
+            )
+            return
+        if arg in {"off", "disable", "stop"}:
+            await logsink.set_enabled(runtime.storage, False)
+            await rich.send(
+                client,
+                message.chat.id,
+                cards.ok_card("<b>Log channel off</b> — the journal keeps recording."),
+                reply_to=message.id,
+            )
+            return
+        await rich.send(
+            client,
+            message.chat.id,
+            logger_card(),
+            markup_keyboard=_logger_kb(),
+            reply_to=message.id,
+        )
+
     @client.on_message(filters.command("logs") & owner)
     async def _logs(_: Client, message: Message) -> None:
         if message.chat.type != ChatType.PRIVATE:

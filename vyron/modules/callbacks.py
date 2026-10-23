@@ -9,7 +9,7 @@ from pyrogram import Client, filters
 from pyrogram.enums import ChatType
 from pyrogram.types import CallbackQuery
 
-from vyron.core import pending
+from vyron.core import i18n, pending
 from vyron.config import settings
 from vyron.runtime import runtime
 from vyron.ui import cards, keyboards, rich
@@ -353,6 +353,51 @@ def register(client: Client) -> None:
             await cq.answer()
             return
 
+        if action == "log":
+            from vyron.core import logsink
+            from vyron.modules.logs_cmd import _logger_kb, logger_card
+
+            actor = cq.from_user.id if cq.from_user else 0
+            if not is_owner(actor):
+                await cq.answer("Owner only", show_alert=True)
+                return
+            state = await logsink.set_enabled(runtime.storage, arg == "on")
+            await _show(client, cq, logger_card(), _logger_kb())
+            await cq.answer("Log channel on" if state else "Log channel off")
+            return
+
+        if action == "lang":
+            from vyron.core import chatcfg
+            from vyron.modules.language import keyboard as lang_keyboard
+            from vyron.modules.language import language_card
+
+            catalog = await i18n.for_chat(chat.id)
+            code = arg
+            if not code or code == "menu":
+                current = str(await chatcfg.get(chat.id, "lang", "") or "")
+                await _show(client, cq, language_card(current), lang_keyboard(current))
+                await cq.answer()
+                return
+            if not i18n.is_known(code):
+                await cq.answer(catalog.t("lang.unknown"), show_alert=True)
+                return
+            actor = cq.from_user.id if cq.from_user else 0
+            if not is_private_chat(chat) and not (
+                is_owner(actor) or await is_chat_admin(client, chat.id, actor)
+            ):
+                await cq.answer(catalog.t("lang.admin_only"), show_alert=True)
+                return
+            chosen = await i18n.set_for_chat(chat.id, code)
+            fresh = i18n.catalog(chosen)
+            await _show(
+                client,
+                cq,
+                language_card(chosen, text_key="lang.saved"),
+                lang_keyboard(chosen),
+            )
+            await cq.answer(fresh.t("lang.saved"))
+            return
+
         if action == "vote":
             from vyron.modules.power import cast_vote
 
@@ -403,24 +448,34 @@ def register(client: Client) -> None:
             return
 
         # ── transport ──────────────────────────────────────────────────────
+        catalog = await i18n.for_chat(chat.id)
+
         if action == "pause":
-            await cq.answer("Paused" if await player.pause(chat.id) else "Nothing to pause")
+            await cq.answer(
+                catalog.t("ctl.paused")
+                if await player.pause(chat.id)
+                else catalog.t("ctl.nothing_playing")
+            )
             return
 
         if action == "resume":
-            await cq.answer("Resumed" if await player.resume(chat.id) else "Nothing is paused")
+            await cq.answer(
+                catalog.t("ctl.resumed")
+                if await player.resume(chat.id)
+                else catalog.t("ctl.nothing_paused")
+            )
             return
 
         if action == "skip":
             track = await player.skip(chat.id)
             await cq.answer(
-                f"⏭ {truncate(track.title, 40)}" if track else "Queue is empty"
+                f"⏭ {truncate(track.title, 40)}" if track else catalog.t("ctl.queue_empty")
             )
             return
 
         if action == "stop":
             await player.stop(chat.id, leave=True)
-            await cq.answer("Stopped and left the voice chat")
+            await cq.answer(catalog.t("ctl.stopped"))
             try:
                 await cq.message.delete()
             except Exception:
@@ -437,7 +492,8 @@ def register(client: Client) -> None:
             if current.duration:
                 target = min(current.duration - 1, target)
             if await player.seek(chat.id, target):
-                await cq.answer(f"⏩ {fmt_duration(target)}" if step > 0 else f"⏪ {fmt_duration(target)}")
+                mark = "⏩" if step > 0 else "⏪"
+                await cq.answer(f"{mark} {catalog.t('ctl.seek', time=fmt_duration(target))}")
             else:
                 await cq.answer("Could not seek")
             return
@@ -446,13 +502,13 @@ def register(client: Client) -> None:
             state.loop = state.loop.next()
             await player.persist(chat.id)
             await player.refresh_now_playing(chat.id)
-            await cq.answer(f"Loop: {state.loop.label}")
+            await cq.answer(catalog.t("ctl.loop", mode=state.loop.label))
             return
 
         if action == "shuffle":
             count = player.queues.shuffle(chat.id)
             await player.refresh_now_playing(chat.id)
-            await cq.answer(f"Shuffled {count} tracks")
+            await cq.answer(catalog.t("ctl.shuffled", count=count))
             return
 
         if action == "vol":
@@ -461,7 +517,7 @@ def register(client: Client) -> None:
                 return
             delta = int(arg) if arg.lstrip("+-").isdigit() else 0
             volume = await player.set_volume(chat.id, state.volume + delta)
-            await cq.answer(f"Volume: {volume}%")
+            await cq.answer(catalog.t("ctl.volume", volume=volume))
             return
 
         # ── settings ───────────────────────────────────────────────────────

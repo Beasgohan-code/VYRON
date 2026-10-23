@@ -212,6 +212,8 @@ _HELP: dict[str, tuple[str, list[tuple[str, str]]]] = {
             ("/fav · /favs", "save and list favourites"),
             ("/history", "your recently played"),
             ("/settings", "per-chat defaults"),
+            ("/language", "English · हिन्दी · മലയാളം · ਪੰਜਾਬੀ"),
+            ("/logger", "mirror warnings to a channel (owner)"),
             ("/247", "toggle 24/7 mode"),
             ("/app", "open the player web app"),
             ("/api", "the music API (keys, docs)"),
@@ -354,11 +356,17 @@ def now_playing_card(state: ChatState, track: Track | None = None) -> str:
     )
 
 
-def now_playing_caption(state: ChatState) -> str:
-    """Caption for the poster: the live clock, nothing the picture already says."""
+def now_playing_caption(state: ChatState, catalog=None) -> str:
+    """Caption for the poster: the live clock, nothing the picture already says.
+
+    ``catalog`` is an i18n catalog; without one the English labels are used.
+    """
     track = state.current
     if not track:
         return ""
+
+    def label(key: str, fallback: str, **values) -> str:
+        return catalog.t(key, **values) if catalog is not None else fallback.format(**values)
 
     elapsed = state.elapsed()
     total = track.duration or 0
@@ -369,19 +377,28 @@ def now_playing_caption(state: ChatState) -> str:
         if total
         else f"<code>{fmt_duration(elapsed)}</code> · live"
     )
-    status = "paused" if state.paused else "streaming"
+    status = (
+        label("np.paused", "paused") if state.paused else label("np.streaming", "streaming")
+    )
     lines = [f"<code>{bar}</code>", f"{E('live')} {status} · {clock_line}"]
 
     if state.queue:
         upcoming = state.queue[0]
         lines.append(
-            f"{E('queue')} <i>up next</i> {esc(truncate(upcoming.title, 34))}"
+            f"{E('queue')} <i>{label('np.up_next', 'up next')}</i> "
+            f"{esc(truncate(upcoming.title, 34))}"
         )
     requester = _requester(track)
     if requester:
         lines.append(f"{E('user')} {requester}")
-    flags = [state.volume and f"{state.volume}%", "24/7" if state.always_on else "", f"{len(state.queue)} queued"]
-    lines.append(f"<i>{' · '.join(flag for flag in flags if flag)}</i>")
+    flags = [
+        state.volume and f"{state.volume}%",
+        "24/7" if state.always_on else "",
+        label("np.queued", "{count} queued", count=len(state.queue)) if state.queue else "",
+    ]
+    tail = " · ".join(flag for flag in flags if flag)
+    if tail:
+        lines.append(f"<i>{tail}</i>")
     return "\n".join(lines)
 
 
@@ -390,6 +407,7 @@ def now_playing_dm_caption(
     *,
     chat_title: str = "",
     state: ChatState | None = None,
+    catalog=None,
 ) -> str:
     """The "this just started from the app" note that lands in a DM."""
     where = f" in <b>{esc(truncate(chat_title, 40))}</b>" if chat_title else ""
@@ -408,7 +426,7 @@ def now_playing_dm_caption(
         + "</blockquote>"
     )
     if state is not None:
-        body += "\n" + now_playing_caption(state)
+        body += "\n" + now_playing_caption(state, catalog)
     return body
 
 
@@ -606,6 +624,15 @@ def history_card(items: list[dict]) -> str:
 
 
 # ── settings / stats / lyrics / about ───────────────────────────────────────
+def _lang_name(code) -> str:
+    try:
+        from vyron.core import i18n
+
+        return i18n.name(str(code or ""))
+    except Exception:  # pragma: no cover - never break a card
+        return "English"
+
+
 def settings_card(cfg: dict, chat_title: str = "") -> str:
     volume = int(cfg.get("volume", settings.default_volume))
     loop = str(cfg.get("loop", "off")).title()
@@ -618,6 +645,7 @@ def settings_card(cfg: dict, chat_title: str = "") -> str:
             ("autoplay", f"<b>{'on' if autoplay else 'off'}</b>"),
             ("24/7 mode", f"<b>{'on' if always else 'off'}</b>"),
             ("poster", f"<b>{'on' if cfg.get('poster', True) else 'off'}</b>"),
+            ("language", f"<b>{_lang_name(cfg.get('lang'))}</b>"),
         ]
     )
     return (
@@ -630,6 +658,7 @@ def settings_card(cfg: dict, chat_title: str = "") -> str:
             B.btn(f"{E('clock')} 24/7", data="v:set:always"),
             B.btn(f"{E('image')} Poster", data="v:set:poster"),
         )
+        + B.row(B.btn(f"{E('globe')} Language", data="v:lang:menu"))
         + B.footer(f"{esc(truncate(chat_title, 40) or 'this chat')} · changes apply instantly")
     )
 

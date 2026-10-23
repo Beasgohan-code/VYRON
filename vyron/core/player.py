@@ -666,8 +666,10 @@ class Player:
             return
         if not force and not state.playing:
             return
+        from vyron.core import i18n
+
         markup = (
-            cards.now_playing_caption(state)
+            cards.now_playing_caption(state, await i18n.for_chat(chat_id))
             if rich.is_photo(chat_id, state.np_message_id)
             else cards.now_playing_card(state)
         )

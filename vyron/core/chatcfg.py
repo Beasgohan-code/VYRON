@@ -35,6 +35,7 @@ DEFAULTS: dict[str, Any] = {
     "channel": 0,
     "thumbnail": "",
     "poster": True,   # generated now-playing artwork
+    "lang": "",       # "" = English; see vyron/core/i18n.py
 }
 
 

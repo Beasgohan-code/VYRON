@@ -18,6 +18,7 @@ import logging
 from collections import OrderedDict
 
 from vyron.config import settings
+from vyron.core import i18n
 from vyron.core.queue import ChatState, Track
 from vyron.ui import cards, keyboards, rich
 from vyron.utils import thumbnails
@@ -85,9 +86,11 @@ async def announce(
     track = state.current
     keyboard = keyboards.now_playing(state)
 
+    catalog = await i18n.for_chat(chat_id)
+
     if edit and state.np_message_id:
         markup = (
-            cards.now_playing_caption(state)
+            cards.now_playing_caption(state, catalog)
             if rich.is_photo(chat_id, state.np_message_id)
             else cards.now_playing_card(state)
         )
@@ -101,7 +104,7 @@ async def announce(
             bot,
             chat_id,
             image,
-            cards.now_playing_caption(state),
+            cards.now_playing_caption(state, catalog),
             markup_keyboard=keyboard,
         )
     if message is None:
@@ -124,7 +127,10 @@ async def mirror_to_dm(bot, user_id: int, state: ChatState, *, chat_title: str =
     if bot is None or state is None or state.current is None or not user_id:
         return
     track = state.current
-    caption = cards.now_playing_dm_caption(track, chat_title=chat_title, state=state)
+    catalog = await i18n.for_chat(user_id)
+    caption = cards.now_playing_dm_caption(
+        track, chat_title=chat_title, state=state, catalog=catalog
+    )
     image = await poster(state, track)
     try:
         if image:

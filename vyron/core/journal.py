@@ -119,6 +119,8 @@ class Journal:
         self._seq = 0
         self._counts: Counter[str] = Counter()
         self._handler: logging.Handler | None = None
+        # Optional callback fired for every event (used by the log channel).
+        self._sink: Any = None
         self.started_at = time.time()
         self.installed = False
 
@@ -140,6 +142,12 @@ class Journal:
             path = self.path
         if path is not None:
             self._persist(event, path)
+        sink = self._sink
+        if sink is not None:
+            try:
+                sink(event)
+            except Exception:  # a sink must never break the caller
+                pass
         return event
 
     def _persist(self, event: Event, path: Path) -> None:
@@ -178,6 +186,10 @@ class Journal:
             tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
             meta.setdefault("traceback", tb[-1800:])
         return self.record("error", scope, message, **meta)
+
+    def set_sink(self, sink: Any) -> None:
+        """Attach (or clear) a callable that receives every recorded event."""
+        self._sink = sink
 
     # ── reading ────────────────────────────────────────────────────────────
     def events(
