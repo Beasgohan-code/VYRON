@@ -36,7 +36,7 @@ class Runtime:
     lyrics: LyricsClient | None = None
     player: Player | None = None
     started_at: float = field(default_factory=time.time)
-    version: str = "1.0.0"
+    version: str = "1.1.0"
     handlers_loaded: list[str] = field(default_factory=list)
 
     # ── readiness ──────────────────────────────────────────────────────────
