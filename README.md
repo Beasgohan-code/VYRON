@@ -138,6 +138,7 @@ Health check → <http://localhost:8080/health> · Mini App → <http://localhos
 | `/volume 80` · `/volume +10` | assistant volume (1–200) |
 | `/loop [off\|one\|all]` | repeat mode |
 | `/shuffle` · `/autoplay` | queue behaviour |
+| `/autoplay mood chill` · `/autoplay lang malayalam` | keep autoplay inside a mood / language lane (`/autoplay status` shows it) |
 | `/np` | now-playing card (rendered artwork when Pillow is installed) |
 | `/similar [query]` | tracks like this one — tap to queue |
 | `/playnext <query>` | insert a track at the front of the queue |
@@ -154,6 +155,30 @@ Health check → <http://localhost:8080/health> · Mini App → <http://localhos
 | `/exportpl <name>` | send the playlist as a portable JSON file |
 | `/importpl [name]` | reply to that file to restore the playlist |
 | `/history` | what was played here recently |
+
+### Downloads that survive a bad day
+
+Every file the bot sends — `/song`, `/vsong`, `POST /v1/tracks`,
+`/v1/downloads` — goes through one engine in `vyron/core/downloader.py`, and it
+is deliberately paranoid:
+
+1. **Client ladder.** The same player clients the stream resolver walks
+   (`default → android_vr → ios → tv`). YouTube issues a different format set to
+   each, and today's 403 is often tomorrow's working client.
+2. **Atomic writes.** yt-dlp downloads into a private temp directory and the
+   finished file is renamed into place, so a half-written track can never be
+   cached and served forever.
+3. **A second engine.** If yt-dlp cannot produce a file at all, the direct URL
+   from an [Invidious](https://docs.invidious.io/api/) or
+   [Piped](https://github.com/TeamPiped/Piped) instance is fetched and
+   transcoded with ffmpeg (or saved raw when ffmpeg is missing). That is the
+   same tier the streamer falls back to, so a track that plays can be
+   downloaded too.
+4. **One cache, one lock.** Two people asking for the same song at once share a
+   single download; the file is reused until `DOWNLOAD_CACHE_HOURS` expires.
+
+`/doctor` reports all four: yt-dlp version, ffmpeg, the mirror tier and a live
+YouTube probe.
 
 ### Now-playing posters
 
@@ -174,6 +199,19 @@ sampled from the artwork, so no two songs look alike.
   render as boxes (`assets/fonts/`).
 - Starting playback from the Mini App mirrors the poster into that person's DM
   (`NP_DM`), so the phone shows what the app just started.
+
+### Two interfaces, and a fallback that always works
+
+VYRON ships both UIs. **Rich** uses the new Bot API rich cards (headings,
+tables, collapsible sections, in-message buttons); **Classic** is the older
+plain-HTML look with an inline keyboard. The owner picks with `/uistyle rich`
+or `/uistyle classic`, and the choice is persisted.
+
+Because the rich lane depends on a parse mode Telegram is still rolling out,
+`/start` is checked twice — once at boot and once on demand with `/uicheck`,
+which renders the card in *both* lanes. If the rich card ever comes back empty
+the bot switches itself to the classic (old) UI instead of showing a blank
+front door, and says so in the log.
 
 ### Starting up
 
@@ -246,7 +284,7 @@ feeds the Library view of the web app. (YouTube imports stay on `/playlist`.)
 | `/gblock` · `/gunblock` · `/ublock` · `/uunblock` | aliases of `/block` & `/unblock` |
 | `/doctor` | deployment self-check: config, yt-dlp, cookies, a **live** YouTube resolve, voice engine, storage, web app, music API |
 | `/uistyle rich` · `/uistyle classic` | switch between the rich card UI and the classic (old) HTML UI — persisted |
-| `/uicheck` | render the `/start` card through the active lane and report what happened |
+| `/uicheck` | render the `/start` card in **both** lanes, report each one, and fall back to the old UI if the rich card is empty |
 
 Effect shortcuts: `/effecton bass|nightcore|vaporwave` · `/effectoff …` (the `/effects` panel has one-tap buttons)
 `/effecton <name>` · `/effectoff <name|all>`
@@ -328,6 +366,11 @@ canonical routes add metadata, streaming, scopes, expiry and metrics.
 | `POST` | `/v1/tracks` | download audio by id, URL or query | `download` |
 | `GET` | `/v1/tracks/{video_id}` | metadata, no download | `read` |
 | `GET` | `/v1/tracks/{video_id}/stream` | inline stream, HTTP Range | `download` |
+| `POST` | `/v1/downloads` | start a job, returns `202` + `job_id` | `download` |
+| `GET` | `/v1/downloads` | your recent jobs and their state | `download` |
+| `GET` | `/v1/downloads/{job_id}` | progress, size, `download_url` | `download` |
+| `GET` | `/v1/downloads/{job_id}/file` | the finished file, HTTP Range | `download` |
+| `DELETE` | `/v1/downloads/{job_id}` | cancel a queued or running job | `download` |
 | `GET·POST` | `/v1/search?q=` | search YouTube | `search` |
 | `GET·POST` | `/v1/lyrics?title=` | lyrics + synced lines (LRCLIB) | `read` |
 | `GET` | `/v1/me` | your key, scopes, usage, quota | — |
@@ -346,7 +389,21 @@ canonical routes add metadata, streaming, scopes, expiry and metrics.
 curl -X POST "$WEBAPP_URL/v1/tracks" \
   -H "X-API-Key: vyrn_xxxxxxxx" -H "Content-Type: application/json" \
   -d '{"video_id":"dQw4w9WgXcQ"}' --output track.mp3
+
+# the same download, but with a progress bar instead of a blocked request
+JOB=$(curl -s -X POST "$WEBAPP_URL/v1/downloads" \
+  -H "X-API-Key: vyrn_xxxxxxxx" -H "Content-Type: application/json" \
+  -d '{"video_id":"dQw4w9WgXcQ","format":"audio"}' | jq -r .job_id)
+
+curl -s "$WEBAPP_URL/v1/downloads/$JOB" -H "X-API-Key: vyrn_xxxxxxxx"
+# → {"status":"running","progress":0.42,…}   … then "ready" + download_url
+curl -sL "$WEBAPP_URL/v1/downloads/$JOB/file?download=1" -H "X-API-Key: vyrn_xxxxxxxx" -o track.mp3
 ```
+
+`POST /v1/tracks` is the one-shot call a script wants; `/v1/downloads` is the
+same engine split into submit → poll → fetch, which is what a phone (or the
+Mini App's download sheet) needs. Jobs are per key: another key's `job_id`
+answers `404`, never someone else's file.
 
 - **Keys** — `vyrn_` + 40 url-safe characters, stored **hashed** (SHA-256) with a
   12-char prefix for display, so a database dump cannot be replayed. Mint,
@@ -676,6 +733,9 @@ The interesting optional ones:
 | `AUTOPLAY` | `true` | related tracks when the queue ends |
 | `COOKIES_FILE` | – | `cookies.txt` for age-restricted videos |
 | `PROXY` | – | `http://…` / `socks5://…` for yt-dlp |
+| `STREAM_FALLBACK` | `on` | ask Invidious/Piped for a direct URL when every yt-dlp client fails |
+| `STREAM_FALLBACK_HOSTS` | built-in list | comma-separated mirrors to use instead of the defaults |
+| `STREAM_FALLBACK_TIMEOUT` | `9` | seconds per mirror before moving on |
 | `MONGO_URL` | – | persistence (JSON file otherwise) |
 | `PREMIUM_EMOJI_FILE` | `./emoji.json` | custom emoji pack |
 | `RICH_MESSAGES` | `true` | rich cards (set `false` for plain HTML) |
@@ -756,7 +816,8 @@ owner-only `/sysstats` card.
 | `Start a voice chat in this group first` | The group has no active VC — start one (or `/vplay` after starting). |
 | `/play` says **voice engine is off** | `STRING_SESSION` is missing or failed to start — check the boot log, regenerate with `python -m vyron.tools.session`, restart. `/voice` shows the live engine state. |
 | Assistant joins but is silent | The **assistant** needs *manage voice chats*; give the bot admin too. |
-| `Could not resolve that track` | YouTube changed something → `pip install -U yt-dlp`; for age-gated videos set `COOKIES_FILE`. |
+| `Could not resolve that track` | YouTube changed something → `pip install -U yt-dlp`; for age-gated videos set `COOKIES_FILE`. If `/doctor` shows the mirror tier as `off`, turn on `STREAM_FALLBACK` — a public Invidious/Piped instance usually still has the track. |
+| Download fails but streaming works | the client ladder got a URL but no file → check `/doctor`'s **ffmpeg** row; without ffmpeg the bot saves `.m4a` instead of `.mp3`, which is fine but not what `/song` promises. |
 | Bot replies "already in use" | Two instances with the same `STRING_SESSION` — run only one. |
 | Docker build: `error: No such file or directory: 'gcc'` | TgCrypto has no cp312 wheel; the image compiles it in its own stage. Rebuild without cache (`docker compose build --no-cache`). |
 | MongoDB falls back to JSON | `MONGO_URL` must start with `mongodb://` or `mongodb+srv://`; whitelist the host in Atlas → Network Access. The bot keeps running on JSON storage meanwhile. |

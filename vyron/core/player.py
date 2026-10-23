@@ -113,6 +113,8 @@ class Player:
             state.volume = int(data.get("volume", state.volume) or state.volume)
             state.always_on = bool(data.get("always_on", state.always_on))
             state.effects = audio_fx.resolve(data.get("effects", []))
+            state.mood = str(data.get("mood", state.mood) or "")
+            state.language = str(data.get("language", state.language) or "")
         return state
 
     async def persist(self, chat_id: int) -> None:
@@ -124,6 +126,8 @@ class Player:
                 "autoplay": state.autoplay,
                 "volume": state.volume,
                 "always_on": state.always_on,
+                "mood": state.mood,
+                "language": state.language,
             },
         )
 
@@ -143,6 +147,8 @@ class Player:
                 "volume": state.volume,
                 "always_on": state.always_on,
                 "effects": list(state.effects),
+                "mood": state.mood,
+                "language": state.language,
             }
         return data
 
@@ -584,8 +590,26 @@ class Player:
             track, state.prefetched = state.prefetched, None
             track.requested_name = "autoplay"
             return track
+        # Mood/language-aware first (autoplay.py), related-videos second: a
+        # chat that asked for Malayalam should not fall out of the lane just
+        # because YouTube's related graph suggested a gaming montage.
+        from vyron.core import autoplay as auto
+
         try:
-            suggestions = await self.youtube.related(state.current, limit=3)
+            chosen = await auto.next_track(
+                self.youtube,
+                state.current,
+                mood=state.mood,
+                language=state.language,
+                played=state.history,
+            )
+            if chosen is not None:
+                return chosen
+        except Exception as exc:  # pragma: no cover - autoplay must never break
+            logger.debug("autoplay lane failed: %s", exc)
+
+        try:
+            suggestions = await self.youtube.related(state.current, limit=5)
         except Exception as exc:
             logger.debug("autoplay lookup failed: %s", exc)
             return None

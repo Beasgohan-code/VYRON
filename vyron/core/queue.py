@@ -127,6 +127,9 @@ class ChatState:
     is_video: bool = False
     always_on: bool = False
     effects: list[str] = field(default_factory=list)
+    # autoplay lane (see vyron/core/autoplay.py): "" = no preference
+    mood: str = ""
+    language: str = ""
 
     # timing (monotonic clock; see vyron.ui.progress.now)
     started_at: float = 0.0

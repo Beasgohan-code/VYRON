@@ -420,11 +420,48 @@ class YouTube:
             self._stream_cache[key] = result
             return result
 
+        # Last tier: a public Invidious/Piped mirror. yt-dlp failing is a
+        # YouTube-side problem (PO token, 403, "confirm you're not a bot"), not
+        # usually a track-side one, so somebody else's resolver often still has
+        # a signed URL for the same video.
+        fallback = await self._public_fallback(track, video=video)
+        if fallback:
+            self._stream_cache[key] = fallback
+            return fallback
+
         self._stream_cache.pop(key, None)
         raise MediaError(
             f"no playable stream for this track ({type(last_error).__name__}: {last_error})"
             if last_error
             else "no playable stream for this track"
+        )
+
+    async def _public_fallback(self, track: Track, *, video: bool = False) -> StreamInfo | None:
+        """Direct URL from Invidious/Piped, or ``None`` when not configured."""
+        if not getattr(self.settings, "stream_fallback", True):
+            return None
+        try:
+            from vyron.core.public_streams import get_public_streams
+
+            height = 0
+            if video:
+                height = {"360p": 360, "480p": 480, "720p": 720, "1080p": 1080}.get(
+                    self.settings.video_quality, 720
+                )
+            direct = await get_public_streams(self.settings).resolve(track.id, height=height)
+        except Exception as exc:  # pragma: no cover - never break a resolve
+            logger.info("public stream fallback failed for %s: %s", track.id, exc)
+            return None
+        if not direct:
+            return None
+        logger.info("stream for %s came from %s", track.id, direct.source)
+        return StreamInfo(
+            url=direct.url,
+            expires_at=time.time() + self.settings.stream_cache_ttl,
+            headers=dict(direct.headers),
+            ext=direct.ext,
+            mime=direct.mime or ("video/mp4" if video else "audio/mp4"),
+            title=track.title,
         )
 
     # ── stream plumbing ────────────────────────────────────────────────────

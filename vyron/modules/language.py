@@ -75,7 +75,7 @@ async def can_change(client: Client, message: Message) -> bool:
 
 
 def register(client: Client) -> None:
-    @client.on_message(filters.command(["language"]))
+    @client.on_message(filters.command(["language", "lang"]))
     async def _language(_: Client, message: Message) -> None:
         current = str(await chatcfg.get(message.chat.id, "lang", "") or "")
         await rich.send(

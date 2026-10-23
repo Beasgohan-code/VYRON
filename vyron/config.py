@@ -96,6 +96,14 @@ class Settings:
     )
     proxy: str = field(default_factory=lambda: _env("PROXY"))
     ytdlp_args: str = field(default_factory=lambda: _env("YTDLP_ARGS"))
+    # When every yt-dlp client fails, ask Invidious/Piped for a direct URL.
+    # Set STREAM_FALLBACK=off for a yt-dlp-only deployment, or override the
+    # instance list with STREAM_FALLBACK_HOSTS=a.example,b.example.
+    stream_fallback: bool = field(default_factory=lambda: _flag("STREAM_FALLBACK", True))
+    stream_fallback_hosts: str = field(default_factory=lambda: _env("STREAM_FALLBACK_HOSTS"))
+    stream_fallback_timeout: int = field(
+        default_factory=lambda: max(3, _int("STREAM_FALLBACK_TIMEOUT", 9))
+    )
     search_results: int = field(default_factory=lambda: min(10, max(3, _int("SEARCH_RESULTS", 5))))
 
     # ── UI / new Bot API features ───────────────────────────────────────────

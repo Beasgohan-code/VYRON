@@ -13,7 +13,7 @@ import time
 
 from aiohttp import web
 
-from vyron.api import routes
+from vyron.api import downloads, routes
 from vyron.api.errors import ApiError, envelope, error_response, request_id
 from vyron.api.metrics import METRICS
 from vyron.api.state import MOUNTED, REQUEST_ID
@@ -104,6 +104,14 @@ def build_app() -> web.Application:
     router.add_post("/tracks", routes.download)
     router.add_get("/tracks/{video_id}", routes.track_info)
     router.add_get("/tracks/{video_id}/stream", routes.stream)
+
+    # asynchronous downloads (submit → poll → fetch)
+    router.add_post("/downloads", downloads.submit)
+    router.add_get("/downloads", downloads.listing)
+    router.add_get("/downloads/by-video-id/{video_id}", downloads.by_url)
+    router.add_get("/downloads/{job_id}", downloads.status)
+    router.add_get("/downloads/{job_id}/file", downloads.file)
+    router.add_delete("/downloads/{job_id}", downloads.cancel)
 
     # discovery
     router.add_get("/search", routes.search)

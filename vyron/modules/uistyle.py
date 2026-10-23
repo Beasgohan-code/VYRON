@@ -20,7 +20,6 @@ import logging
 from pyrogram import Client
 from pyrogram.types import Message
 
-from vyron.config import settings
 from vyron.runtime import runtime
 from vyron.ui import blocks as B
 from vyron.ui import cards, keyboards, rich
@@ -38,7 +37,7 @@ ALIASES = {"old": "classic", "html": "classic", "rich": "rich", "new": "rich"}
 
 
 def current() -> str:
-    return "rich" if settings.rich_messages else "classic"
+    return "rich" if rich.rich_enabled() else "classic"
 
 
 async def load() -> str:
@@ -50,15 +49,36 @@ async def load() -> str:
     except Exception:  # pragma: no cover - storage is best effort at boot
         return current()
     if saved in STYLES:
-        settings.rich_messages = saved == "rich"
+        rich.set_rich_enabled(saved == "rich")
     return current()
+
+
+async def verify() -> dict:
+    """Probe at boot and **fall back to the classic UI** if rich is broken.
+
+    The rich lane depends on a parse mode Telegram is still rolling out. When a
+    deployment is on the wrong side of that rollout, `/start` — the first thing
+    anybody sees — would be an empty message. Rather than shipping a broken
+    front door, we drop to the old plain-HTML UI and say so in the log.
+    """
+    report = probe()
+    if not report["classic_ok"]:
+        logger.error("interface: the start card renders empty in both lanes")
+    elif not report["rich_ok"] and rich.rich_enabled():
+        logger.error(
+            "interface: the rich start card is empty (rich api %s) — switching to the classic UI",
+            "available" if report["rich_api"] else "unavailable",
+        )
+        await set_style("classic")
+        report = {**report, "style": "classic", "fell_back": True}
+    return report
 
 
 async def set_style(style: str) -> str:
     style = ALIASES.get(style, style)
     if style not in STYLES:
         return current()
-    settings.rich_messages = style == "rich"
+    rich.set_rich_enabled(style == "rich")
     if runtime.storage:
         try:
             await runtime.storage.set_meta(META_KEY, style)
@@ -99,44 +119,57 @@ def card() -> str:
     return body
 
 
-def probe() -> dict:
-    """Check the `/start` card in both lanes without talking to Telegram.
-
-    `/start` is the one card every single user sees, so it is the right canary:
-    if its markup cannot be down-converted, every other card is broken too.
-    """
-    markup = cards.start_card(
+def _start_markup() -> str:
+    return cards.start_card(
         "there",
         {"chats": 0, "tracks": 0},
         streaming=bool(getattr(runtime, "streaming_ready", False)),
     )
+
+
+def probe() -> dict:
+    """Check the `/start` card in *both* lanes without talking to Telegram.
+
+    `/start` is the one card every single user sees, so it is the right canary.
+    The two lanes are checked separately: the rich card can render fine while
+    its down-conversion (used for edits and for classic mode) is empty, and
+    that would break every card in the bot, not just this one.
+    """
+    markup = _start_markup()
     plain = rich.to_html(markup)
+    rich_ok = bool(rich.RICH_AVAILABLE and markup.strip() and markup.count("<tg-button") >= 0)
+    classic_ok = bool(plain.strip())
     return {
         "style": current(),
         "rich_api": bool(rich.RICH_AVAILABLE),
+        "rich_ok": rich_ok,
+        "classic_ok": classic_ok,
         "rich_chars": len(markup),
         "classic_chars": len(plain),
         "buttons": markup.count("<tg-button"),
-        "ok": bool(plain.strip()),
+        "ok": rich_ok and classic_ok,
     }
 
 
 async def check(client: Client, chat_id: int) -> str:
-    """Render the `/start` card for real and report what the lane did."""
-    markup = cards.start_card(
-        "there",
-        {"chats": 0, "tracks": 0},
-        streaming=bool(getattr(runtime, "streaming_ready", False)),
-    )
+    """Render the `/start` card for real and report *both* lanes."""
+    markup = _start_markup()
     plain = rich.to_html(markup)
+    report = probe()
     rows = [
         (f"{E('interface')} style", f"<b>{STYLES[current()]}</b>"),
         (
             f"{E('code')} rich api",
             "<b>yes</b>" if rich.RICH_AVAILABLE else "no — classic only",
         ),
-        (f"{E('spark')} card size", f"<b>{len(markup)}</b> chars"),
-        (f"{E('download')} classic copy", f"<b>{len(plain)}</b> chars"),
+        (
+            f"{E('spark')} rich start",
+            ("<b>ok</b> · " if report["rich_ok"] else "<b>empty</b> · ") + f"{len(markup)} chars",
+        ),
+        (
+            f"{E('download')} classic start",
+            ("<b>ok</b> · " if report["classic_ok"] else "<b>empty</b> · ") + f"{len(plain)} chars",
+        ),
     ]
     delivered = False
     try:
@@ -144,22 +177,27 @@ async def check(client: Client, chat_id: int) -> str:
         delivered = message is not None
     except Exception as exc:  # pragma: no cover - that is what this checks
         logger.warning("ui check send failed: %s", exc)
+        # A failed rich send in the rich lane is exactly the case that should
+        # end in the old UI, so do it immediately rather than leaving the
+        # deployment on a lane that cannot deliver.
+        if rich.rich_enabled():
+            await set_style("classic")
     rows.append(
         (
             f"{E('rocket')} delivery",
             "<b>ok</b>" if delivered else "<b>failed</b>",
         )
     )
-    return (
-        B.heading(f"{E('shield')} ui check", 2)
-        + B.kv(rows)
-        + B.note(
+    if not delivered and not rich.rich_enabled():
+        tail = f"{E('warn')} Both lanes failed to send — check the bot token and chat."
+    elif not delivered:
+        tail = f"{E('warn')} The rich card did not send — switched to the classic UI with <code>/uistyle classic</code>."
+    else:
+        tail = (
             f"{E('check')} The card above was sent through the "
             f"<b>{STYLES[current()]}</b> lane."
-            if delivered
-            else f"{E('warn')} Sending failed — fall back with <code>/uistyle classic</code>."
         )
-    )
+    return B.heading(f"{E('shield')} ui check", 2) + B.kv(rows) + B.note(tail)
 
 
 def register(client: Client) -> None:
@@ -223,4 +261,14 @@ def register(client: Client) -> None:
         )
 
 
-__all__ = ["STYLES", "card", "check", "current", "load", "probe", "register", "set_style"]
+__all__ = [
+    "STYLES",
+    "card",
+    "check",
+    "current",
+    "load",
+    "probe",
+    "register",
+    "set_style",
+    "verify",
+]

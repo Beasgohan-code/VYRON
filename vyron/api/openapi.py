@@ -44,6 +44,28 @@ ERROR = {
     },
 }
 
+DOWNLOAD_JOB = {
+    "type": "object",
+    "properties": {
+        "ok": {"type": "boolean"},
+        "job_id": {"type": "string"},
+        "status": {
+            "type": "string",
+            "enum": ["queued", "running", "ready", "failed", "cancelled"],
+        },
+        "kind": {"type": "string", "enum": ["audio", "video"]},
+        "video_id": {"type": "string"},
+        "title": {"type": "string"},
+        "artist": {"type": "string"},
+        "progress": {"type": "number", "minimum": 0, "maximum": 1},
+        "message": {"type": "string"},
+        "size": {"type": "integer"},
+        "format": {"type": "string"},
+        "download_url": {"type": "string"},
+        "error": {"type": "string"},
+    },
+}
+
 KEY = {
     "type": "object",
     "properties": {
@@ -108,6 +130,7 @@ def spec(request: web.Request) -> dict:
                 }
             },
             "schemas": {
+                "DownloadJob": DOWNLOAD_JOB,
                 "Track": TRACK,
                 "Error": ERROR,
                 "Key": KEY,
@@ -229,6 +252,75 @@ def spec(request: web.Request) -> dict:
                         {"name": "download", "in": "query", "schema": {"type": "boolean"}},
                     ],
                     "responses": {"200": {"description": "audio"}, **_err(400, 403, 429)},
+                }
+            },
+            "/downloads": {
+                "post": {
+                    "tags": ["Downloads"],
+                    "summary": "Submit an asynchronous download",
+                    "description": (
+                        "Same engine as `POST /tracks`, but it returns immediately with a "
+                        "job id: poll `/downloads/{job_id}` for progress, then fetch "
+                        "`/downloads/{job_id}/file`. Requires the `download` scope."
+                    ),
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "video_id": {"type": "string"},
+                                        "url": {"type": "string"},
+                                        "query": {"type": "string"},
+                                        "format": {"type": "string", "enum": ["audio", "video"]},
+                                    },
+                                    "anyOf": [
+                                        {"required": ["video_id"]},
+                                        {"required": ["url"]},
+                                        {"required": ["query"]},
+                                    ],
+                                }
+                            }
+                        },
+                    },
+                    "responses": {
+                        "202": {"description": "job accepted", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DownloadJob"}}}},
+                        **_err(400, 401, 403, 429, 502, 503),
+                    },
+                },
+                "get": {
+                    "tags": ["Downloads"],
+                    "summary": "Recent jobs for the calling key",
+                    "responses": {"200": {"description": "jobs"}, **_err(403, 429)},
+                },
+            },
+            "/downloads/{job_id}": {
+                "get": {
+                    "tags": ["Downloads"],
+                    "summary": "Poll a download job",
+                    "parameters": [{"name": "job_id", "in": "path", "required": True, "schema": {"type": "string"}}],
+                    "responses": {
+                        "200": {"description": "job", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DownloadJob"}}}},
+                        **_err(403, 404, 429),
+                    },
+                },
+                "delete": {
+                    "tags": ["Downloads"],
+                    "summary": "Cancel a job",
+                    "parameters": [{"name": "job_id", "in": "path", "required": True, "schema": {"type": "string"}}],
+                    "responses": {"202": {"description": "cancelled"}, **_err(403, 404, 429)},
+                },
+            },
+            "/downloads/{job_id}/file": {
+                "get": {
+                    "tags": ["Downloads"],
+                    "summary": "Fetch a finished file (Range supported)",
+                    "parameters": [
+                        {"name": "job_id", "in": "path", "required": True, "schema": {"type": "string"}},
+                        {"name": "download", "in": "query", "schema": {"type": "boolean"}},
+                    ],
+                    "responses": {"200": {"description": "media"}, **_err(403, 404, 409, 429)},
                 }
             },
             "/search": {

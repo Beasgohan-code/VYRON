@@ -191,6 +191,7 @@ async def index(request: web.Request) -> web.Response:
             "endpoints": {
                 "health": "GET /v1/health",
                 "download": "POST /v1/tracks",
+                "downloads": "POST /v1/downloads  →  GET /v1/downloads/{job_id}",
                 "stream": "GET /v1/tracks/{video_id}/stream",
                 "metadata": "GET /v1/tracks/{video_id}",
                 "search": "GET /v1/search?q=…",
@@ -226,6 +227,7 @@ async def health(request: web.Request) -> web.Response:
                 "/v1/tracks",
                 "/v1/tracks/{video_id}",
                 "/v1/tracks/{video_id}/stream",
+                "/v1/downloads",
                 "/v1/search",
                 "/v1/lyrics",
                 "/v1/me",

@@ -285,6 +285,24 @@ def to_plain_text(markup: str) -> str:
 
 
 # ── delivery ────────────────────────────────────────────────────────────────
+# `/uistyle` changes lanes at runtime. `Settings` is frozen (by design — it is
+# the deployment's contract), so the live choice lives here as an override:
+# ``None`` follows RICH_MESSAGES, ``True``/``False`` is what the owner picked.
+_style_override: bool | None = None
+
+
+def rich_enabled() -> bool:
+    """Is the rich lane on *right now* for this process?"""
+    if _style_override is not None:
+        return _style_override
+    return bool(settings.rich_messages)
+
+
+def set_rich_enabled(value: bool | None) -> None:
+    global _style_override
+    _style_override = value
+
+
 def _ephemeral(receiver_user_id: int | None, callback_query_id: str | None):
     if not receiver_user_id or EphemeralMessageParameters is None:
         return None
@@ -330,7 +348,7 @@ async def send(
     rich_ok = (
         RICH_AVAILABLE
         and InputRichMessage is not None
-        and settings.rich_messages
+        and rich_enabled()
         and (eph is not None or (has_rich_tags(markup) and not editable))
     )
 
@@ -469,7 +487,7 @@ async def edit(
         )
 
     if (
-        settings.rich_messages
+        rich_enabled()
         and RICH_AVAILABLE
         and InputRichMessage is not None
         and _was_rich(chat_id, message_id)

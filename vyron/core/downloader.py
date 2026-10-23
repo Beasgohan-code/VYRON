@@ -1,11 +1,28 @@
 # ---------------------------------------------------------------------------
 #  VYRON — file downloads (audio / video) with an on-disk cache
 # ---------------------------------------------------------------------------
+# Downloading is where music bots usually fall over, so this module is built
+# around three rules:
+#
+#   1. **Never trust one yt-dlp invocation.** YouTube issues a different set of
+#      formats to each player client and rotates which ones need a PO token.
+#      The download therefore walks the same client ladder the stream resolver
+#      uses (default → android_vr → ios) and only gives up after all of them.
+#   2. **Never leave a half file where the cache will find it.** yt-dlp writes
+#      into a private temp directory; the finished file is moved into place in
+#      one atomic rename. A crashed download can no longer masquerade as a
+#      cached track and be served forever.
+#   3. **Have a second engine.** If yt-dlp cannot produce a file at all, the
+#      direct URL from Invidious/Piped is transcoded with ffmpeg (or saved raw
+#      when ffmpeg is missing) — the exact fallback chain the music API and
+#      `/song` share.
 from __future__ import annotations
 
 import asyncio
 import logging
 import re
+import shutil
+import subprocess
 import time
 from pathlib import Path
 from typing import Callable
@@ -18,6 +35,15 @@ from vyron.core.queue import Track
 logger = logging.getLogger(__name__)
 
 _SAFE_RE = re.compile(r"[^\w\-. ()\[\]]+", re.UNICODE)
+AUDIO_EXTS = ("mp3", "m4a", "opus", "webm", "ogg", "aac")
+VIDEO_EXTS = ("mp4", "webm", "mkv")
+
+# yt-dlp clients, in the order that keeps working when web starts demanding a
+# PO token. `None` means "whatever yt-dlp picks", which is still the best first
+# bet on an IP that YouTube likes.
+CLIENT_LADDER: tuple[str | None, ...] = (None, "android_vr", "ios", "tv")
+
+ProgressHook = Callable[[float, str], None]
 
 
 class DownloadError(RuntimeError):
@@ -29,12 +55,30 @@ def safe_stem(text: str, limit: int = 70) -> str:
     return (cleaned or "track")[:limit]
 
 
+def ffmpeg_path() -> str:
+    """`ffmpeg` on PATH, or "" — the Docker image ships it, bare hosts may not."""
+    return shutil.which("ffmpeg") or ""
+
+
+def _atomic_move(source: Path, target: Path) -> Path:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if source.resolve() == target.resolve():
+        return target
+    try:
+        source.replace(target)
+    except OSError:  # different filesystems
+        shutil.copyfile(source, target)
+        source.unlink(missing_ok=True)
+    return target
+
+
 class Downloader:
     """Downloads one track at a time per call, reusing previously cached files."""
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.settings.ensure_dirs()
+        self._locks: dict[str, asyncio.Lock] = {}
 
     # ── paths ──────────────────────────────────────────────────────────────
     def audio_path(self, track: Track) -> Path:
@@ -43,11 +87,25 @@ class Downloader:
     def video_path(self, track: Track) -> Path:
         return self.settings.downloads_dir / f"{track.source}-{track.id}.mp4"
 
-    def cached(self, track: Track, *, video: bool = False) -> Path | None:
-        path = self.video_path(track) if video else self.audio_path(track)
-        if path.is_file() and path.stat().st_size > 0:
-            return path
+    def _existing(self, track: Track, exts: tuple[str, ...]) -> Path | None:
+        for ext in exts:
+            path = self.settings.downloads_dir / f"{track.source}-{track.id}.{ext}"
+            if path.is_file() and path.stat().st_size > 0:
+                return path
         return None
+
+    def cached(self, track: Track, *, video: bool = False) -> Path | None:
+        path = self._existing(track, VIDEO_EXTS if video else AUDIO_EXTS)
+        if path:
+            path.touch()
+        return path
+
+    def _lock(self, key: str) -> asyncio.Lock:
+        lock = self._locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._locks[key] = lock
+        return lock
 
     # ── yt-dlp options ─────────────────────────────────────────────────────
     def _base_opts(self) -> dict:
@@ -57,114 +115,308 @@ class Downloader:
             "noprogress": True,
             "geo_bypass": True,
             "nocheckcertificate": True,
+            "noplaylist": True,
+            "ignoreerrors": False,
+            # Retries are *per request*; the client ladder below handles the
+            # case where the whole extraction is refused.
             "retries": 3,
-            "fragment_retries": 3,
+            "fragment_retries": 4,
             "socket_timeout": 20,
             "max_filesize": self.settings.max_download_mb * 1024 * 1024,
-            "outtmpl": str(self.settings.downloads_dir / "%(autonumber)s-%(id)s.%(ext)s"),
-            "noplaylist": True,
+            "nopart": False,
+            "overwrites": True,
         }
         if self.settings.cookies_file:
             opts["cookiefile"] = self.settings.cookies_file
         if self.settings.proxy:
             opts["proxy"] = self.settings.proxy
+        if self.settings.ytdlp_args:
+            try:
+                from vyron.core.search import YouTube
+
+                opts.update(YouTube._parse_ytdlp_args(self.settings.ytdlp_args))
+            except Exception:  # pragma: no cover - operator args are advisory
+                pass
         return opts
 
+    def _attempts(self) -> list[tuple[str, dict]]:
+        attempts: list[tuple[str, dict]] = []
+        for client in CLIENT_LADDER:
+            extra: dict = {}
+            if client:
+                extra["extractor_args"] = {"youtube": {"player_client": [client]}}
+            attempts.append((client or "default", extra))
+        return attempts
+
+    @staticmethod
+    def _hook(on_progress: ProgressHook | None, label: str):
+        def hook(data: dict) -> None:
+            if not on_progress:
+                return
+            status = str(data.get("status") or "")
+            if status == "downloading":
+                total = data.get("total_bytes") or data.get("total_bytes_estimate") or 0
+                done = data.get("downloaded_bytes") or 0
+                fraction = float(done) / float(total) if total else 0.0
+                on_progress(min(0.99, fraction), f"{label} {int(fraction * 100)}%")
+            elif status == "finished":
+                on_progress(0.99, f"{label} — converting")
+            elif status == "postprocessing":
+                on_progress(0.99, f"{label} — finishing")
+
+        return hook
+
+    # ── yt-dlp engine ──────────────────────────────────────────────────────
+    def _download_ytdlp(
+        self,
+        track: Track,
+        *,
+        video: bool,
+        on_progress: ProgressHook | None = None,
+    ) -> Path:
+        height = {"360p": 360, "480p": 480, "720p": 720, "1080p": 1080}.get(
+            self.settings.video_quality, 720
+        )
+        final = self.video_path(track) if video else self.audio_path(track)
+        work = self.settings.downloads_dir / f".work-{track.id}"
+        work.mkdir(parents=True, exist_ok=True)
+        last_error: Exception | None = None
+
+        for name, extra in self._attempts():
+            work.mkdir(parents=True, exist_ok=True)
+            for leftover in work.glob("*"):
+                try:
+                    leftover.unlink()
+                except OSError:
+                    pass
+            opts = self._base_opts()
+            opts.update(extra)
+            opts.update(
+                {
+                    "outtmpl": str(work / "track.%(ext)s"),
+                    "progress_hooks": [self._hook(on_progress, "downloading")],
+                }
+            )
+            if video:
+                opts.update(
+                    {
+                        "format": (
+                            f"bestvideo[height<={height}][ext=mp4]+bestaudio[ext=m4a]/"
+                            f"best[height<={height}][ext=mp4]/best[height<={height}]/best"
+                        ),
+                        "merge_output_format": "mp4",
+                    }
+                )
+            else:
+                opts.update(
+                    {
+                        "format": "bestaudio[ext=m4a]/bestaudio[acodec!=none]/best",
+                        "postprocessors": (
+                            [
+                                {
+                                    "key": "FFmpegExtractAudio",
+                                    "preferredcodec": "mp3",
+                                    "preferredquality": "192",
+                                },
+                                {"key": "FFmpegMetadata", "add_metadata": True},
+                            ]
+                            if ffmpeg_path()
+                            else []
+                        ),
+                    }
+                )
+            try:
+                if on_progress:
+                    on_progress(0.02, f"resolving ({name})")
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    ydl.download([track.url or track.watch_url])
+                produced = sorted(
+                    (p for p in work.glob("track.*") if p.is_file() and p.stat().st_size > 0),
+                    key=lambda p: p.stat().st_size,
+                    reverse=True,
+                )
+                if not produced:
+                    raise DownloadError("no file was produced")
+                source = produced[0]
+                if source.stat().st_size > self.settings.max_download_mb * 1024 * 1024:
+                    raise DownloadError("that file is larger than the allowed size")
+                target = final if source.suffix == final.suffix else final.with_suffix(source.suffix)
+                _atomic_move(source, target)
+                return target
+            except Exception as exc:
+                last_error = exc
+                logger.info("download via %s failed for %s: %s", name, track.id, exc)
+            finally:
+                shutil.rmtree(work, ignore_errors=True)
+
+        raise DownloadError(
+            f"yt-dlp could not download this track ({type(last_error).__name__}: {last_error})"
+            if last_error
+            else "yt-dlp could not download this track"
+        )
+
+    # ── direct-URL engine (Invidious / Piped + ffmpeg) ─────────────────────
+    async def _download_direct(
+        self,
+        track: Track,
+        *,
+        video: bool,
+        on_progress: ProgressHook | None = None,
+    ) -> Path:
+        from vyron.core.public_streams import get_public_streams
+
+        if not getattr(self.settings, "stream_fallback", True):
+            raise DownloadError("no fallback resolver is enabled")
+        height = {"360p": 360, "480p": 480, "720p": 720, "1080p": 1080}.get(
+            self.settings.video_quality, 720
+        )
+        direct = await get_public_streams(self.settings).resolve(
+            track.id, height=height if video else 0
+        )
+        if not direct:
+            raise DownloadError("no mirror had a downloadable URL")
+
+        if on_progress:
+            on_progress(0.1, f"downloading from {direct.source.split(':')[0]}")
+        final = (self.video_path(track) if video else self.audio_path(track)).with_suffix(
+            "." + (direct.ext or ("mp4" if video else "m4a"))
+        )
+        work = self.settings.downloads_dir / f".direct-{track.id}"
+        work.mkdir(parents=True, exist_ok=True)
+        raw = work / f"source.{direct.ext or 'm4a'}"
+        try:
+            await self._fetch_to(direct.url, raw, direct.headers, on_progress)
+            if raw.stat().st_size == 0:
+                raise DownloadError("the mirror sent an empty file")
+            if raw.stat().st_size > self.settings.max_download_mb * 1024 * 1024:
+                raise DownloadError("that file is larger than the allowed size")
+
+            binary = ffmpeg_path()
+            if not binary or raw.suffix == final.suffix:
+                return _atomic_move(raw, final)
+
+            if on_progress:
+                on_progress(0.85, "converting with ffmpeg")
+            args = (
+                [binary, "-y", "-loglevel", "error", "-i", str(raw), "-vn", "-c:a", "libmp3lame",
+                 "-b:a", "192k", str(final)]
+                if not video
+                else [binary, "-y", "-loglevel", "error", "-i", str(raw), "-c", "copy",
+                      "-movflags", "+faststart", str(final)]
+            )
+            result = await asyncio.to_thread(
+                subprocess.run, args, capture_output=True, timeout=900
+            )
+            if result.returncode != 0 or not final.is_file() or final.stat().st_size == 0:
+                logger.info("ffmpeg fallback failed: %s", (result.stderr or b"")[:400])
+                return _atomic_move(raw, final.with_suffix(raw.suffix))
+            return final
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+
+    async def _fetch_to(
+        self,
+        url: str,
+        target: Path,
+        headers: dict[str, str],
+        on_progress: ProgressHook | None,
+    ) -> None:
+        """Stream *url* to *target* with progress, enforcing the size cap."""
+        import aiohttp
+
+        cap = self.settings.max_download_mb * 1024 * 1024
+        timeout = aiohttp.ClientTimeout(total=None, sock_read=45)
+        written = 0
+        async with aiohttp.ClientSession(timeout=timeout, headers=headers or None) as session:
+            async with session.get(url) as response:
+                if response.status != 200:
+                    raise DownloadError(f"the mirror answered HTTP {response.status}")
+                total = int(response.headers.get("Content-Length") or 0)
+                with target.open("wb") as handle:
+                    async for chunk in response.content.iter_chunked(256 * 1024):
+                        written += len(chunk)
+                        if written > cap:
+                            raise DownloadError("that file is larger than the allowed size")
+                        handle.write(chunk)
+                        if on_progress and total:
+                            on_progress(min(0.8, 0.1 + 0.7 * written / total), "downloading")
+
     # ── public API ─────────────────────────────────────────────────────────
+    async def fetch(
+        self,
+        track: Track,
+        *,
+        video: bool = False,
+        on_progress: ProgressHook | None = None,
+    ) -> Path:
+        """Cached file → yt-dlp ladder → direct-URL mirror. Always a real file."""
+        cached = self.cached(track, video=video)
+        if cached:
+            if on_progress:
+                on_progress(1.0, "cached")
+            return cached
+
+        async with self._lock(f"{track.id}:{'v' if video else 'a'}"):
+            cached = self.cached(track, video=video)
+            if cached:
+                return cached
+            errors: list[str] = []
+            try:
+                return await asyncio.to_thread(
+                    self._download_ytdlp, track, video=video, on_progress=on_progress
+                )
+            except Exception as exc:
+                errors.append(f"yt-dlp: {exc}")
+                logger.warning("yt-dlp download failed for %s: %s", track.id, exc)
+            try:
+                return await self._download_direct(
+                    track, video=video, on_progress=on_progress
+                )
+            except Exception as exc:
+                errors.append(f"mirror: {exc}")
+                logger.warning("direct download failed for %s: %s", track.id, exc)
+            raise DownloadError(" · ".join(errors))
+
     async def audio(
         self,
         track: Track,
         *,
         progress: Callable[[str], None] | None = None,
+        on_progress: ProgressHook | None = None,
     ) -> Path:
-        cached = self.cached(track)
-        if cached:
-            cached.touch()
-            return cached
-
-        def _work() -> Path:
-            target = self.audio_path(track)
-            opts = self._base_opts()
-            opts.update(
-                {
-                    "format": "bestaudio/best",
-                    "outtmpl": str(target),
-                    "postprocessors": [
-                        {
-                            "key": "FFmpegExtractAudio",
-                            "preferredcodec": "mp3",
-                            "preferredquality": "192",
-                        },
-                        {"key": "FFmpegMetadata", "add_metadata": True},
-                        {"key": "EmbedThumbnail", "already_have_thumbnail": False},
-                    ],
-                    "writethumbnail": True,
-                }
-            )
-            if progress:
-                progress("downloading")
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                ydl.download([track.url or track.watch_url])
-            if not target.is_file():
-                raise DownloadError("The audio file could not be created.")
-            if target.stat().st_size > self.settings.max_download_mb * 1024 * 1024:
-                target.unlink(missing_ok=True)
-                raise DownloadError("That file is larger than the allowed size.")
-            return target
-
-        try:
-            return await asyncio.to_thread(_work)
-        except DownloadError:
-            raise
-        except Exception as exc:
-            logger.warning("audio download failed: %s", exc)
-            raise DownloadError(str(exc)) from exc
+        callback = on_progress
+        if progress and not callback:
+            callback = lambda _fraction, text: progress(text)  # noqa: E731
+        return await self.fetch(track, video=False, on_progress=callback)
 
     async def video(
         self,
         track: Track,
         *,
         progress: Callable[[str], None] | None = None,
+        on_progress: ProgressHook | None = None,
     ) -> Path:
-        cached = self.cached(track, video=True)
-        if cached:
-            cached.touch()
-            return cached
-
-        height = {"360p": 360, "480p": 480, "720p": 720, "1080p": 1080}.get(
-            self.settings.video_quality, 720
-        )
-
-        def _work() -> Path:
-            target = self.video_path(track)
-            opts = self._base_opts()
-            opts.update(
-                {
-                    "format": (
-                        f"bestvideo[height<={height}][ext=mp4]+bestaudio[ext=m4a]/"
-                        f"best[height<={height}][ext=mp4]/best[height<={height}]/best"
-                    ),
-                    "outtmpl": str(target),
-                    "merge_output_format": "mp4",
-                }
-            )
-            if progress:
-                progress("downloading")
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                ydl.download([track.url or track.watch_url])
-            if not target.is_file():
-                raise DownloadError("The video file could not be created.")
-            return target
-
-        try:
-            return await asyncio.to_thread(_work)
-        except DownloadError:
-            raise
-        except Exception as exc:
-            logger.warning("video download failed: %s", exc)
-            raise DownloadError(str(exc)) from exc
+        callback = on_progress
+        if progress and not callback:
+            callback = lambda _fraction, text: progress(text)  # noqa: E731
+        return await self.fetch(track, video=True, on_progress=callback)
 
     # ── maintenance ────────────────────────────────────────────────────────
+    def clear(self) -> int:
+        """Delete every cached download (used by `/clearcache`)."""
+        removed = 0
+        for path in self.settings.downloads_dir.iterdir():
+            try:
+                if path.is_dir():
+                    shutil.rmtree(path, ignore_errors=True)
+                    removed += 1
+                else:
+                    path.unlink(missing_ok=True)
+                    removed += 1
+            except OSError:
+                continue
+        return removed
+
     def cleanup(self) -> int:
         """Delete cache entries older than DOWNLOAD_CACHE_HOURS."""
         cutoff = time.time() - self.settings.download_cache_hours * 3600
@@ -174,13 +426,16 @@ class Downloader:
                 if path.is_file() and path.stat().st_mtime < cutoff:
                     path.unlink(missing_ok=True)
                     removed += 1
+                elif path.is_dir() and path.name.startswith((".work-", ".direct-")):
+                    shutil.rmtree(path, ignore_errors=True)
+                    removed += 1
             except OSError:
                 continue
         return removed
 
     def cache_size(self) -> int:
         total = 0
-        for path in self.settings.downloads_dir.glob("*"):
+        for path in self.settings.downloads_dir.rglob("*"):
             try:
                 if path.is_file():
                     total += path.stat().st_size
@@ -189,4 +444,4 @@ class Downloader:
         return total
 
 
-__all__ = ["DownloadError", "Downloader", "safe_stem"]
+__all__ = ["DownloadError", "Downloader", "ffmpeg_path", "safe_stem"]

@@ -49,6 +49,8 @@ class FakeYouTube:
         self.stream_info_calls: list[str] = []
         self.related_calls = 0
         self.suggestions: list[Track] = []
+        self.searches: list[str] = []
+        self.search_results: list[Track] = []
 
     async def stream_url(self, track, video=False):
         if track.id in self.broken:
@@ -62,6 +64,10 @@ class FakeYouTube:
     async def related(self, track, limit=3):
         self.related_calls += 1
         return list(self.suggestions)[:limit]
+
+    async def search(self, query, limit=5, requester=(0, "")):
+        self.searches.append(query)
+        return list(self.search_results)
 
 
 class FakeStorage:
@@ -416,3 +422,43 @@ def test_resume_always_on_only_wakes_247_chats():
     assert started == 1
     assert calls.played == ["https://cdn/a.m4a"]
     assert player.queues.get(20).playing is False
+
+def test_autoplay_prefers_the_mood_lane_over_related_videos():
+    player, calls, youtube, storage = make_player()
+    state = player.queues.get(10)
+    state.current = Track(id="seed0000001", title="Kessoku Band - Guitar, Loneliness (Official Video)", duration=200, uploader="Anime")
+    state.mood = "chill"
+    state.language = "malayalam"
+    state.autoplay = True
+    youtube.search_results = [Track(id="fresh000001", title="Lofi Malayalam Chill Mix", duration=180, uploader="x")]
+
+    picked = run(player._autoplay_track(10, state))
+
+    assert picked is not None and picked.id == "fresh000001"
+    assert youtube.searches and "malayalam" in youtube.searches[0].lower()
+    assert youtube.related_calls == 0  # the lane answered, no fallback needed
+
+
+def test_autoplay_falls_back_to_related_videos_when_the_lane_is_empty():
+    player, calls, youtube, storage = make_player()
+    state = player.queues.get(10)
+    state.current = Track(id="seed0000001", title="Song", duration=200, uploader="x")
+    state.autoplay = True
+    youtube.search_results = []
+    youtube.suggestions = [Track(id="rel00000001", title="Neighbour", duration=200, uploader="x")]
+
+    picked = run(player._autoplay_track(10, state))
+
+    assert picked is not None and picked.id == "rel00000001"
+    assert youtube.related_calls >= 1
+
+
+def test_autoplay_mood_and_language_survive_a_persist_round_trip():
+    player, calls, youtube, storage = make_player()
+    state = player.queues.get(10)
+    state.mood, state.language = "chill", "hindi"
+
+    run(player.persist(10))
+
+    assert storage.saved[10]["mood"] == "chill"
+    assert storage.saved[10]["language"] == "hindi"

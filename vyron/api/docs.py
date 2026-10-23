@@ -113,6 +113,10 @@ ENDPOINTS = [
     ("POST", "/v1/tracks", "Download audio (video id, URL or query)", "download"),
     ("GET", "/v1/tracks/{video_id}", "Track metadata, no download", "read"),
     ("GET", "/v1/tracks/{video_id}/stream", "Inline stream, Range supported", "download"),
+    ("POST", "/v1/downloads", "Start a job → 202 {job_id}", "download"),
+    ("GET", "/v1/downloads/{job_id}", "Poll progress, size, download_url", "download"),
+    ("GET", "/v1/downloads/{job_id}/file", "Fetch the finished file (Range)", "download"),
+    ("DELETE", "/v1/downloads/{job_id}", "Cancel a queued or running job", "download"),
     ("GET", "/v1/search?q=…", "Search YouTube (or POST JSON)", "search"),
     ("GET", "/v1/lyrics?title=…", "Synced lyrics from LRCLIB", "read"),
     ("GET", "/v1/me", "Your key, scopes, usage and quota", "—"),
@@ -157,7 +161,7 @@ def _scope_rows() -> str:
     rows = [
         ("read", "metadata, lyrics, /me", "GET /tracks/{id}, /lyrics, /me"),
         ("search", "YouTube search", "GET+POST /search"),
-        ("download", "audio files and streams", "POST /tracks, GET /tracks/{id}/stream"),
+        ("download", "audio files, streams and download jobs", "POST /tracks, GET /tracks/{id}/stream, /downloads"),
         ("admin", "key management + metrics", "/admin/*, /metrics"),
     ]
     return "".join(

@@ -261,7 +261,7 @@ async def _async_main() -> int:
     from vyron.modules import uistyle
 
     await uistyle.load()
-    report = uistyle.probe()
+    report = await uistyle.verify()
     logger.info(
         "interface: %s (rich api %s) · /start card %d chars, %d buttons → classic %d chars",
         report["style"],
@@ -270,7 +270,9 @@ async def _async_main() -> int:
         report["buttons"],
         report["classic_chars"],
     )
-    if not report["ok"]:
+    if report.get("fell_back"):
+        logger.warning("interface: fell back to the classic (old) UI")
+    elif not report["ok"]:
         logger.error("interface: the start card does not render in either lane")
 
     from vyron.core import logsink

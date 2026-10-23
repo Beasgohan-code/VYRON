@@ -7,6 +7,8 @@
 #    · config       required variables present (secrets masked)
 #    · yt-dlp       installed, and which version
 #    · cookies      a cookie file exists (the usual Render/YouTube fix)
+#    · ffmpeg       conversion available (mp3/mp4 instead of raw m4a)
+#    · mirror tier  Invidious/Piped fallbacks that rescue a failed resolve
 #    · search       a live resolve against YouTube
 #    · voice engine assistant session + PyTgCalls
 #    · storage      mongo / local, and whether it answers
@@ -128,6 +130,27 @@ def register(client: Client) -> None:
 
         cookies_ok, cookies_note = _cookies_state()
         rows.append(_row(f"{E('code')} cookies", cookies_ok, cookies_note))
+
+        from vyron.core.downloader import ffmpeg_path
+
+        rows.append(
+            _row(
+                f"{E('bolt')} ffmpeg",
+                bool(ffmpeg_path()),
+                ffmpeg_path() or "missing — mp3 conversion is off, m4a is used instead",
+            )
+        )
+
+        if settings.stream_fallback:
+            from vyron.core.public_streams import PublicStreams
+
+            streams = PublicStreams(settings)
+            hosts = list(streams.invidious) + list(streams.piped)
+            rows.append(
+                _row(f"{E('download')} mirror tier", True, f"{len(hosts)} hosts · {hosts[0] if hosts else 'none'}")
+            )
+        else:
+            rows.append(_row(f"{E('download')} mirror tier", None, "STREAM_FALLBACK=off (yt-dlp only)"))
 
         search_ok, search_note = await _probe_search()
         rows.append(_row(f"{E('search')} youtube", search_ok, search_note))

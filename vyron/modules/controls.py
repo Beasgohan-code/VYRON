@@ -10,6 +10,7 @@ from pyrogram.types import Message
 
 from vyron.core.queue import LoopMode
 from vyron.runtime import runtime
+from vyron.ui import blocks as B
 from vyron.ui import cards, keyboards, nowplaying, rich
 from vyron.ui.theme import E
 from vyron.utils.helpers import command_args, parse_seek
@@ -145,14 +146,108 @@ def register(client: Client) -> None:
     async def _autoplay(_: Client, message: Message) -> None:
         if not await _guard(message):
             return
+        from vyron.core import autoplay as auto
+        from vyron.core import chatcfg
+
         state = _player().queues.get(message.chat.id)
-        state.autoplay = not state.autoplay
-        await _player().persist(message.chat.id)
-        state_text = "on" if state.autoplay else "off"
+        parts = (message.text or "").split(maxsplit=2)
+        option = parts[1].strip().lower() if len(parts) > 1 else ""
+        value = parts[2].strip().lower() if len(parts) > 2 else ""
+        chat_id = message.chat.id
+        client_ = message._client
+
+        def _status() -> str:
+            lane = auto.describe(state.mood, state.language) or "no lane — anything goes"
+            return (
+                B.heading(f"{E('spark')} autoplay", 3)
+                + B.kv(
+                    [
+                        ("state", "<b>on</b>" if state.autoplay else "<b>off</b>"),
+                        ("mood", f"<b>{state.mood or '–'}</b>"),
+                        ("language", f"<b>{state.language or '–'}</b>"),
+                        ("lane", lane),
+                    ]
+                )
+            )
+
+        if not option:  # bare /autoplay keeps the old toggle behaviour
+            state.autoplay = not state.autoplay
+            await _player().persist(chat_id)
+            await rich.send(
+                client_,
+                chat_id,
+                f"{E('spark')} <b>Autoplay</b> <code>{'on' if state.autoplay else 'off'}</code>",
+            )
+            return
+
+        if option == "status":
+            await rich.send(client_, chat_id, _status())
+            return
+
+        if option == "mood":
+            if not value:
+                moods = " · ".join(f"<code>{name}</code>" for name in auto.MOODS)
+                await rich.send(
+                    client_,
+                    chat_id,
+                    B.note(f"{E('info')} Pick a mood: {moods}\nOr clear it with <code>/autoplay mood off</code>."),
+                )
+                return
+            if value in {"off", "none", "clear", "any"}:
+                state.mood = ""
+            elif value in auto.MOODS:
+                state.mood = value
+            else:
+                await rich.send(
+                    client_,
+                    chat_id,
+                    B.note(f"{E('warn')} Unknown mood — try {', '.join(sorted(auto.MOODS))}."),
+                )
+                return
+            await _player().persist(chat_id)
+            await chatcfg.set(chat_id, "autoplay_mood", state.mood)
+            await rich.send(client_, chat_id, _status())
+            return
+
+        if option in {"lang", "language"}:
+            if not value:
+                codes = " · ".join(f"<code>{name}</code>" for name in auto.LANGUAGES)
+                await rich.send(
+                    client_,
+                    chat_id,
+                    B.note(f"{E('info')} Pick a language: {codes}\nOr clear it with <code>/autoplay lang off</code>."),
+                )
+                return
+            if value in {"off", "none", "clear", "any"}:
+                state.language = ""
+            elif value in auto.LANGUAGES:
+                state.language = value
+            else:
+                await rich.send(
+                    client_,
+                    chat_id,
+                    B.note(f"{E('warn')} Unknown language — try {', '.join(sorted(auto.LANGUAGES))}."),
+                )
+                return
+            await _player().persist(chat_id)
+            await chatcfg.set(chat_id, "autoplay_language", state.language)
+            await rich.send(client_, chat_id, _status())
+            return
+
+        if option in {"on", "off"}:
+            state.autoplay = option == "on"
+            await _player().persist(chat_id)
+            await rich.send(client_, chat_id, _status())
+            return
+
         await rich.send(
-            message._client,
-            message.chat.id,
-            f"{E('spark')} <b>Autoplay</b> <code>{state_text}</code>",
+            client_,
+            chat_id,
+            B.note(
+                f"{E('info')} <code>/autoplay</code> toggles · "
+                f"<code>/autoplay mood chill</code> · <code>/autoplay lang malayalam</code> · "
+                f"<code>/autoplay status</code>"
+            ),
         )
 
     @client.on_message(filters.command(["np"]))
