@@ -15,6 +15,7 @@ from vyron import __version__, banner_text, setup_logging
 from vyron.clients import build_assistant, build_bot
 from vyron.config import settings
 from vyron.modules import register_all
+from vyron.core import maintenance
 from vyron.runtime import runtime
 from vyron.ui import cards, rich
 from vyron.utils import health
@@ -158,6 +159,7 @@ async def _async_main() -> int:
     await _setup_menu_button(bot)
 
     await runtime.player.start_background()
+    maintenance.start()
     await _notify_owner(bot)
 
     logger.info(
@@ -179,6 +181,7 @@ async def _async_main() -> int:
         await stop.wait()
     finally:
         logger.info("shutting down…")
+        await maintenance.stop()
         await runtime.shutdown()
         if runner is not None:
             try:

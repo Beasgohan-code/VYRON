@@ -351,6 +351,7 @@ VYRON/
 │   │   ├── charts.py           # trending / mixes / moods (TTL-cached)
 │   │   ├── votes.py            # group vote-skip tallies
 │   │   ├── acl.py              # runtime sudo roster (/addsudo)
+│   │   ├── maintenance.py      # periodic downloads + DB sweep
 │   │   ├── playlists.py        # per-user saved playlists
 │   │   └── pending.py          # short-lived picker state
 │   ├── ui/
@@ -368,7 +369,7 @@ VYRON/
 │   └── tools/                  # session generator, emoji pack builder, cover generator, preview
 ├── frontend/                   # React + TS + Vite Mini App (src/views · src/components · src/lib)
 ├── webapp/dist/                # built bundle served at /app (regenerate with npm run build)
-└── tests/                      # 119 offline tests
+└── tests/                      # 126 offline tests
 ```
 
 **Design rules**
@@ -407,6 +408,8 @@ The interesting optional ones:
 | `MONGO_URL` | – | persistence (JSON file otherwise) |
 | `PREMIUM_EMOJI_FILE` | `./emoji.json` | custom emoji pack |
 | `RICH_MESSAGES` | `true` | rich cards (set `false` for plain HTML) |
+| `MAINTENANCE_HOURS` | `6` | prune downloads + old DB rows every N hours (`0` = off) |
+| `MAINTENANCE_DAYS` | `30` | history/favourites older than this are pruned |
 | `PORT` | `8080` | health server |
 
 Full list with comments: [`.env.example`](.env.example).
@@ -417,7 +420,7 @@ Full list with comments: [`.env.example`](.env.example).
 
 ```bash
 pip install pytest pytest-asyncio
-python -m pytest tests -q      # 119 passed
+python -m pytest tests -q      # 126 passed
 
 cd frontend && npm test        # 5 component tests (vitest + jsdom)
 ```

@@ -23,7 +23,7 @@ from pyrogram import Client, filters
 from pyrogram.types import Message
 
 from vyron.config import settings
-from vyron.core import acl, chatcfg
+from vyron.core import acl, chatcfg, maintenance
 from vyron.core.votes import VoteBoard, clamp_votes
 from vyron.runtime import runtime
 from vyron.ui import blocks as B
@@ -367,6 +367,24 @@ def register(client: Client) -> None:
             cache_bytes, files = _directory_size(cache_dir)
         rows.append((f"{E('cloud')} cache", f"<b>{human_size(cache_bytes)}</b> · {files} files"))
         rows.append((f"{E('clock')} uptime", f"<b>{human_time(runtime.uptime)}</b>"))
+        sweep = maintenance.status()
+        if sweep.get("last"):
+            rows.append(
+                (
+                    f"{E('spark')} last sweep",
+                    f"{human_time(max(0.0, time.time() - float(sweep['last'])))} ago · "
+                    f"{sweep['files']} files · {sweep['rows']} rows",
+                )
+            )
+        else:
+            rows.append(
+                (
+                    f"{E('spark')} housekeeping",
+                    f"every <b>{sweep['every_hours']}h</b>"
+                    if int(sweep["every_hours"]) > 0
+                    else "<i>disabled</i>",
+                )
+            )
         await rich.send(
             client,
             message.chat.id,

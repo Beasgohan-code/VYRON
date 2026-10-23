@@ -158,3 +158,41 @@ def test_cast_vote_reports_disabled_and_duplicate(monkeypatch):
     third, _, _, _ = asyncio.run(power.cast_vote(1, 78))
     assert third == "disabled"
     power.VOTES.drop(1)
+
+
+# ── housekeeping ───────────────────────────────────────────────────────────
+def test_run_once_reports_what_it_removed(monkeypatch):
+    from vyron.core import maintenance
+
+    class FakeDownloader:
+        def cleanup(self):
+            return 3
+
+    class FakeStorage:
+        async def prune(self, days=30):
+            assert days == 30
+            return {"history": 2, "favorites": 1}
+
+    monkeypatch.setattr(maintenance.runtime, "downloader", FakeDownloader())
+    monkeypatch.setattr(maintenance.runtime, "storage", FakeStorage())
+
+    result = asyncio.run(maintenance.run_once())
+    assert result == {"files": 3, "rows": 3}
+    assert maintenance.status()["files"] == 3
+
+
+def test_run_once_survives_a_broken_backend(monkeypatch):
+    from vyron.core import maintenance
+
+    class AngryDownloader:
+        def cleanup(self):
+            raise OSError("disk is gone")
+
+    class AngryStorage:
+        async def prune(self, days=30):
+            raise RuntimeError("mongo down")
+
+    monkeypatch.setattr(maintenance.runtime, "downloader", AngryDownloader())
+    monkeypatch.setattr(maintenance.runtime, "storage", AngryStorage())
+
+    assert asyncio.run(maintenance.run_once()) == {"files": 0, "rows": 0}

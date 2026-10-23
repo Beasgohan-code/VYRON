@@ -76,6 +76,8 @@ class Settings:
     autoleave_24_7: bool = field(default_factory=lambda: _flag("ALWAYS_ON", False))
     stream_cache_ttl: int = field(default_factory=lambda: max(60, _int("STREAM_CACHE_TTL", 1800)))
     download_cache_hours: int = field(default_factory=lambda: max(1, _int("DOWNLOAD_CACHE_HOURS", 24)))
+    maintenance_hours: int = field(default_factory=lambda: _int("MAINTENANCE_HOURS", 6))
+    maintenance_days: int = field(default_factory=lambda: max(1, _int("MAINTENANCE_DAYS", 30)))
     max_download_mb: int = field(default_factory=lambda: max(1, _int("MAX_DOWNLOAD_MB", 200)))
 
     # ── yt-dlp ──────────────────────────────────────────────────────────────
