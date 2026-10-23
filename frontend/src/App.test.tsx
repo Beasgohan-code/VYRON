@@ -98,6 +98,39 @@ describe("VYRON Player", () => {
     expect(document.activeElement).toBe(input);
   });
 
+  it("plays a result in the app and opens the full player", async () => {
+    const user = userEvent.setup();
+    mount();
+
+    await user.click(nav("Search"));
+    const input = await screen.findByPlaceholderText(/Search or paste a YouTube link/i);
+    await user.type(input, "neon");
+    await user.click(document.querySelector(".search-go") as HTMLElement);
+
+    const row = await waitFor(() => {
+      const node = document.querySelector(".result") as HTMLElement;
+      expect(node).not.toBeNull();
+      return node;
+    });
+    await user.click(within(row).getByLabelText("Play now"));
+
+    const dock = await waitFor(() => {
+      const node = document.querySelector(".playbar") as HTMLElement;
+      expect(node).not.toBeNull();
+      return node;
+    });
+    expect(within(dock).getByText("Neon Skyline")).toBeInTheDocument();
+    expect(within(dock).getByLabelText("Seek")).toBeInTheDocument();
+
+    await user.click(within(dock).getByLabelText("Open full player"));
+    const dialog = await screen.findByRole("dialog", { name: "Player" });
+    expect(within(dialog).getByLabelText("Toggle lyrics")).toBeInTheDocument();
+    expect(within(dialog).getByText(/in queue/i)).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Player" })).toBeNull());
+  });
+
   it("opens the download modal from the rail", async () => {
     const user = userEvent.setup();
     mount();
