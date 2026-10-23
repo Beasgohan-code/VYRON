@@ -751,19 +751,50 @@ class Player:
 
     # ── pytgcalls update handlers ──────────────────────────────────────────
     def register_handlers(self) -> None:
+        """Wire the voice-chat events into the player.
+
+        Every registration is isolated: pytgcalls' filter constructors are
+        version-specific (`chat_update` needs a ``ChatUpdate.Status`` mask since
+        2.2), and a mismatch there must never abort the whole boot — the bot can
+        keep serving search, cards and downloads without live events.
+        """
         if not self.calls:
             return
 
-        def _make(filter_obj):
-            return filter_obj() if isinstance(filter_obj, type) else filter_obj
+        def _wire(factory, handler, label: str) -> None:
+            try:
+                self.calls.on_update(factory())(handler)
+            except Exception as exc:
+                logger.error(
+                    "could not register the %s handler (%s: %s) — live updates for it are off",
+                    label,
+                    type(exc).__name__,
+                    exc,
+                )
 
-        @self.calls.on_update(_make(fl.stream_end))
         async def _on_stream_end(client, update):  # noqa: ANN001
             await self.on_stream_end(client, update)
 
-        @self.calls.on_update(_make(fl.chat_update))
         async def _on_chat_update(client, update):  # noqa: ANN001
             await self.on_chat_update(client, update)
+
+        _wire(lambda: fl.stream_end(), _on_stream_end, "stream-end")
+        _wire(self._chat_update_filter, _on_chat_update, "chat-update")
+
+    @staticmethod
+    def _chat_update_filter():
+        """The filter for "the call is over", across pytgcalls versions."""
+        from pytgcalls.types import ChatUpdate
+
+        flags = None
+        for name in ("KICKED", "CLOSED_VOICE_CHAT", "LEFT_GROUP", "DISCARDED_CALL"):
+            member = getattr(ChatUpdate.Status, name, None)
+            if member is None:
+                continue
+            flags = member if flags is None else flags | member
+        if flags is None:  # pragma: no cover - very old pytgcalls
+            raise RuntimeError("no ChatUpdate.Status flags available")
+        return fl.chat_update(flags)
 
     @staticmethod
     def duplicate_stream_end(state: ChatState, now: float) -> bool:
@@ -801,7 +832,10 @@ class Player:
 
     async def on_chat_update(self, _client, update) -> None:
         chat_id = int(getattr(update, "chat_id", 0) or 0)
-        status = str(getattr(update, "status", "") or "").upper()
+        raw_status = getattr(update, "status", "") or ""
+        # pytgcalls 2.x hands over a Status flag, older builds a string.
+        status = getattr(raw_status, "name", None) or str(raw_status)
+        status = str(status).upper()
         if not chat_id:
             return
         if any(word in status for word in ("KICKED", "CLOSED", "LEFT", "DISCARDED")):

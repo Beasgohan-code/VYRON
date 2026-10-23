@@ -8,6 +8,7 @@ import logging
 import signal
 import sys
 import time
+import traceback
 
 from pyrogram.types import BotCommand
 
@@ -321,13 +322,28 @@ def run() -> None:
     except KeyboardInterrupt:
         sys.exit(0)
     except Exception as exc:  # noqa: BLE001 - last-resort deploy log
-        logger.debug("startup traceback", exc_info=True)
-        logger.error("startup failed: %s", exc)
+        logger.error("startup failed: %s: %s", type(exc).__name__, exc)
+        logger.error("traceback:\n%s", traceback.format_exc())
         journal.error("boot", "startup failed", exc)
-        logger.error(
-            "check BOT_TOKEN, that API_ID/API_HASH belong to the same app, "
-            "and that this host can reach api.telegram.org"
-        )
+        # Point at the real cause instead of blaming the token every time.
+        text = f"{type(exc).__name__}: {exc}".lower()
+        if any(word in text for word in ("auth_key", "api_id", "api_hash", "unauthorized", "token")):
+            logger.error(
+                "check BOT_TOKEN, and that API_ID/API_HASH belong to the same app "
+                "as that bot"
+            )
+        elif any(word in text for word in ("timeout", "connection", "network", "resolve", "dns")):
+            logger.error(
+                "this host could not reach api.telegram.org — check outbound network "
+                "access (some hosts block it on the free tier)"
+            )
+        elif any(word in text for word in ("session", "dc_id", "sign_in")):
+            logger.error(
+                "STRING_SESSION looks wrong for this API_ID — regenerate it with "
+                "`python -m vyron.tools.session` using the same API_ID/API_HASH"
+            )
+        else:
+            logger.error("the traceback above is the exact failure; nothing was masked")
         sys.exit(1)
 
 
