@@ -124,3 +124,33 @@ def test_reset_stream_clears_end_state():
     state.ended_at = 5.0
     state.reset_stream()
     assert state.ended_track == "" and state.ended_at == 0.0
+
+
+def test_the_settings_panel_reports_this_chat_not_the_defaults(monkeypatch):
+    """`/settings` used to build its own partial dict: Language always said
+    English and Artwork was missing entirely."""
+    import asyncio
+
+    from vyron.core import chatcfg, queue
+    from vyron.ui import cards, panels
+
+    stored = {(-100, "poster"): False, (-100, "thumbnail"): "art-id", (-100, "lang"): "hi"}
+
+    async def fake_get(chat_id, key, default=None, **_kwargs):
+        return stored.get((int(chat_id), key), default)
+
+    monkeypatch.setattr(chatcfg, "get", fake_get)
+    state = queue.ChatState(chat_id=-100, volume=45)
+    state.autoplay = False
+
+    cfg = asyncio.run(panels.chat_panel(-100, state))
+
+    assert cfg["volume"] == 45
+    assert cfg["poster"] is False
+    assert cfg["thumbnail"] is True
+    assert cfg["lang"] == "hi"
+
+    text = cards.settings_card(cfg, "Room")
+    assert "Volume" in text and "45%" in text
+    assert "Artwork" in text and "Custom" in text
+    assert "\u0939\u093f\u0928\u094d\u0926\u0940" in text or "Hindi" in text

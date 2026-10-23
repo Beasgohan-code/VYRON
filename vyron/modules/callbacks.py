@@ -12,7 +12,7 @@ from pyrogram.types import CallbackQuery
 from vyron.core import i18n, pending
 from vyron.config import settings
 from vyron.runtime import runtime
-from vyron.ui import cards, keyboards, rich
+from vyron.ui import cards, keyboards, panels, rich
 from vyron.ui.progress import fmt_duration, truncate
 from vyron.ui.theme import E
 from vyron.utils.helpers import is_chat_admin, is_owner, is_private_chat
@@ -377,9 +377,13 @@ def register(client: Client) -> None:
             return
 
         if action == "settings":
-            cfg = await runtime.storage.chat_settings(chat.id) if runtime.storage else {}
-            await _show(client, cq, cards.settings_card(cfg, chat.title or ""),
-                        keyboards.back_close("v:np"))
+            cfg = await panels.chat_panel(chat.id, state)
+            await _show(
+                client,
+                cq,
+                cards.settings_card(cfg, chat.title or ""),
+                keyboards.settings_panel(cfg),
+            )
             await cq.answer()
             return
 
@@ -565,13 +569,7 @@ def register(client: Client) -> None:
                     chat.id, "poster", not await chatcfg.get(chat.id, "poster", True)
                 )
             await player.persist(chat.id)
-            cfg = {
-                "volume": state.volume,
-                "loop": state.loop.value,
-                "autoplay": state.autoplay,
-                "always_on": state.always_on,
-                "poster": await chatcfg.get(chat.id, "poster", True),
-            }
+            cfg = await panels.chat_panel(chat.id, state)
             await _show(
                 client,
                 cq,

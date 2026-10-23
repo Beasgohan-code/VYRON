@@ -640,16 +640,20 @@ def settings_card(cfg: dict, chat_title: str = "") -> str:
     loop = str(cfg.get("loop", "off")).title()
     autoplay = cfg.get("autoplay", True)
     always = cfg.get("always_on", False)
-    body = B.kv(
-        [
-            ("volume", f"<b>{volume}%</b>"),
-            ("loop", f"<b>{loop}</b>"),
-            ("autoplay", f"<b>{'on' if autoplay else 'off'}</b>"),
-            ("24/7 mode", f"<b>{'on' if always else 'off'}</b>"),
-            ("poster", f"<b>{'on' if cfg.get('poster', True) else 'off'}</b>"),
-            ("language", f"<b>{_lang_name(cfg.get('lang'))}</b>"),
-        ]
-    )
+    def flag(value: bool) -> str:
+        return "<b>On</b>" if value else "<b>Off</b>"
+
+    rows = [
+        ("Volume", f"<b>{volume}%</b>"),
+        ("Loop", f"<b>{loop}</b>"),
+        ("Autoplay", flag(autoplay)),
+        ("24/7 mode", flag(always)),
+        ("Poster", flag(cfg.get("poster", True))),
+    ]
+    if "thumbnail" in cfg:  # only shown when the caller looked it up
+        rows.append(("Artwork", "<b>Custom</b>" if cfg["thumbnail"] else "<b>Cover art</b>"))
+    rows.append(("Language", f"<b>{_lang_name(cfg.get('lang'))}</b>"))
+    body = B.kv(rows)
     return (
         B.heading(f"{E('settings')} settings", 2)
         + body

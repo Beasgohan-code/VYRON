@@ -7,7 +7,7 @@ from pyrogram import Client, filters
 from pyrogram.types import Message
 
 from vyron.runtime import runtime
-from vyron.ui import cards, keyboards, rich
+from vyron.ui import cards, keyboards, panels, rich
 
 
 def register(client: Client) -> None:
@@ -15,16 +15,8 @@ def register(client: Client) -> None:
     async def _settings(_: Client, message: Message) -> None:
         if not runtime.player:
             return
-        from vyron.core import chatcfg
-
         state = await runtime.player.restore_settings(message.chat.id)
-        cfg = {
-            "volume": state.volume,
-            "loop": state.loop.value,
-            "autoplay": state.autoplay,
-            "always_on": state.always_on,
-            "poster": await chatcfg.get(message.chat.id, "poster", True),
-        }
+        cfg = await panels.chat_panel(message.chat.id, state)
         await rich.send(
             client,
             message.chat.id,
