@@ -213,6 +213,7 @@ _HELP: dict[str, tuple[str, list[tuple[str, str]]]] = {
             ("/approve · /approved", "exempt trusted members"),
             ("/zombies [kick]", "clean up deleted accounts"),
             ("/report", "flag a message to the admins"),
+            ("/dj [add|del]", "who may control playback"),
         ],
     ),
     "power": (
@@ -1328,6 +1329,7 @@ def group_admin_card(
                 "<code>/zombies</code> — find (and kick) deleted accounts",
                 "<code>/report</code> — ping the admins about a message",
                 "<code>/captcha</code> — one-tap human check for new members",
+                "<code>/dj</code> — let trusted members control playback",
             ]
         ),
     )
@@ -1424,5 +1426,34 @@ def captcha_card(mention: str, *, seconds: int = 120, user_id: int = 0) -> str:
         )
         + B.footer(
             f"{E('info')} still muted? the button stays live {BULLET} ask an admin if it fails"
+        )
+    )
+
+
+def dj_card(entries: list[tuple[str, str]], *, admins: int = 0) -> str:
+    """``/dj`` — who may touch the queue in this chat."""
+    if not entries:
+        return (
+            B.heading(f"{E('headphones')} {small_caps('dj lineup')}", 2)
+            + B.note(
+                "<b>Nobody yet.</b>\nRight now only admins can control playback. "
+                "Add a DJ with <code>/dj @name</code> or by replying to them."
+            )
+            + B.row(B.btn(f"{E('close')} Close", data="v:close", style="danger"))
+            + B.footer(f"{E('info')} admins keep their controls either way")
+        )
+    rows = "".join(
+        f"<tr><td>{esc(name)}</td><td><code>{uid}</code></td></tr>" for name, uid in entries[:30]
+    )
+    return (
+        B.heading(f"{E('headphones')} {small_caps('dj lineup')}", 2)
+        + B.note(f"<b>{len(entries)}</b> DJ{'s' if len(entries) != 1 else ''} can play, skip and queue")
+        + f"<table><tr><th>dj</th><th>id</th></tr>{rows}</table>"
+        + B.row(
+            B.btn(f"{E('check')} Done", data="v:close", style="success"),
+        )
+        + B.footer(
+            f"{E('shield')} {admins} admins keep their controls {BULLET} "
+            f"<code>/dj del @name</code> to remove one"
         )
     )

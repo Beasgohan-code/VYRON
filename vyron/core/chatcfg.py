@@ -29,6 +29,7 @@ DEFAULTS: dict[str, Any] = {
     "approved": [],
     "slowmode": 0,
     "captcha": False,
+    "dj": [],
     "goodbye": "",
     "effects": [],
     "voteskip": 0,

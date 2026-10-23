@@ -68,6 +68,7 @@ COMMANDS = [
     ("zombies", "find deleted accounts"),
     ("report", "flag a message to admins"),
     ("tmute", "mute for a set time"),
+    ("dj", "who may control playback"),
     ("setwelcome", "set the welcome message"),
     ("cplay", "play in the linked channel"),
     ("cplayset", "bind a channel for playback"),

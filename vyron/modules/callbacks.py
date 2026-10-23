@@ -15,7 +15,7 @@ from vyron.runtime import runtime
 from vyron.ui import cards, keyboards, rich
 from vyron.ui.progress import truncate
 from vyron.ui.theme import E
-from vyron.utils.helpers import is_chat_admin, is_owner, is_private_chat
+from vyron.utils.helpers import is_chat_admin, is_dj, is_owner, is_private_chat
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,8 @@ async def _authorized(client: Client, cq: CallbackQuery, action: str) -> bool:
     if message.chat.type == ChatType.PRIVATE:
         return True
     if is_owner(cq.from_user.id):
+        return True
+    if await is_dj(message.chat.id, cq.from_user.id):
         return True
     return await is_chat_admin(client, message.chat.id, cq.from_user.id)
 
