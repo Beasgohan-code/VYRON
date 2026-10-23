@@ -96,7 +96,7 @@ def engine_card() -> str:
 
 
 def register(client: Client) -> None:
-    @client.on_message(filters.command(["voice", "engine"]))
+    @client.on_message(filters.command(["voice"]))
     async def _voice(_: Client, message: Message) -> None:
         await rich.send(client, message.chat.id, engine_card(), reply_to=message.id)
 
@@ -114,14 +114,14 @@ def register(client: Client) -> None:
             return False
         return True
 
-    @client.on_message(filters.command(["assistant", "assistantinfo"]) & owner)
+    @client.on_message(filters.command(["assistant"]) & owner)
     async def _info(_: Client, message: Message) -> None:
         if not await _guard(message):
             return
         me = await runtime.assistant.get_me()
         await rich.send(client, message.chat.id, _card(me), reply_to=message.id)
 
-    @client.on_message(filters.command(["setname", "assname"]) & owner)
+    @client.on_message(filters.command(["setname"]) & owner)
     async def _setname(_: Client, message: Message) -> None:
         if not await _guard(message):
             return
@@ -153,7 +153,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["setbio", "assbio"]) & owner)
+    @client.on_message(filters.command(["setbio"]) & owner)
     async def _setbio(_: Client, message: Message) -> None:
         if not await _guard(message):
             return
@@ -186,7 +186,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["setpfp", "asspfp"]) & owner)
+    @client.on_message(filters.command(["setpfp"]) & owner)
     async def _setpfp(_: Client, message: Message) -> None:
         if not await _guard(message):
             return
@@ -231,7 +231,7 @@ def register(client: Client) -> None:
         else:
             await rich.send(client, message.chat.id, markup)
 
-    @client.on_message(filters.command(["delpfp", "delasspfp"]) & owner)
+    @client.on_message(filters.command(["delpfp"]) & owner)
     async def _delpfp(_: Client, message: Message) -> None:
         if not await _guard(message):
             return

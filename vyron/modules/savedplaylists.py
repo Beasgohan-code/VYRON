@@ -33,7 +33,7 @@ def _uid(message: Message) -> int:
 
 def register(client: Client) -> None:
     # ── /playlists ─────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["playlists", "pls", "mylists", "listpl"]))
+    @client.on_message(filters.command(["playlists"]))
     async def _playlists(_: Client, message: Message) -> None:
         items = await store.list_playlists(_uid(message))
         if not items:
@@ -63,7 +63,7 @@ def register(client: Client) -> None:
         )
 
     # ── /savepl ────────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["savepl", "saveplaylist", "plsave"]))
+    @client.on_message(filters.command(["savepl"]))
     async def _save(_: Client, message: Message) -> None:
         if not runtime.storage:
             return
@@ -117,7 +117,7 @@ def register(client: Client) -> None:
         )
 
     # ── /pl <name>──────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["pl", "pplay", "playlistplay", "plplay", "loadpl", "loadplaylist"]))
+    @client.on_message(filters.command(["pplay"]))
     async def _play_saved(_: Client, message: Message) -> None:
         name = command_args(message)
         if not name:
@@ -160,7 +160,7 @@ def register(client: Client) -> None:
         )
 
     # ── /pldel ─────────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["pldel", "pdelete", "plremove", "playlistdelete", "rmplaylist", "delpl", "deleteplaylist"]))
+    @client.on_message(filters.command(["pdelete"]))
     async def _delete(_: Client, message: Message) -> None:
         name = command_args(message)
         playlist = await store.find(_uid(message), name) if name else None
@@ -180,7 +180,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
     # ── /pcreate · /padd · /pview · /premove (Shizu command names) ─────────
-    @client.on_message(filters.command(["pcreate", "newpl"]))
+    @client.on_message(filters.command(["pcreate"]))
     async def _pcreate(_: Client, message: Message) -> None:
         name = store.clean_name(command_args(message) or "")
         if not name:
@@ -216,7 +216,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["padd", "pladd"]))
+    @client.on_message(filters.command(["padd"]))
     async def _padd(_: Client, message: Message) -> None:
         """Add the current track (or a replied audio) to a named playlist."""
         name = store.clean_name(command_args(message) or "")
@@ -261,7 +261,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["pview", "plview"]))
+    @client.on_message(filters.command(["pview"]))
     async def _pview(_: Client, message: Message) -> None:
         name = store.clean_name(command_args(message) or "")
         playlist = await store.find(_uid(message), name) if name else None
@@ -304,7 +304,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["premove", "pltrim"]))
+    @client.on_message(filters.command(["premove"]))
     async def _premove(_: Client, message: Message) -> None:
         """``/premove <name> <index>`` — the index shown by /pview."""
         args = command_args(message).split()

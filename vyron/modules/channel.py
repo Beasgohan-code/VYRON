@@ -84,7 +84,7 @@ async def _target_chat(client: Client, message: Message) -> int | None:
 
 
 def register(client: Client) -> None:
-    @client.on_message(filters.command(["cplay", "channelplay"]))
+    @client.on_message(filters.command(["cplay"]))
     async def _cplay(_: Client, message: Message) -> None:
         if not runtime.player:
             return
@@ -147,7 +147,7 @@ def register(client: Client) -> None:
             await rich.edit(client, message.chat.id, status.id, markup)
 
     # ── /cplayset — pin the channel a group should stream into ────────────
-    @client.on_message(filters.command(["cplayset", "cplaybind"]))
+    @client.on_message(filters.command(["cplayset"]))
     async def _cplayset(_: Client, message: Message) -> None:
         chat_id = message.chat.id
         user = message.from_user
@@ -209,7 +209,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["cstop", "cend"]))
+    @client.on_message(filters.command(["cstop"]))
     async def _cstop(_: Client, message: Message) -> None:
         if not runtime.player:
             return
@@ -224,7 +224,7 @@ def register(client: Client) -> None:
             B.row(B.btn(f"{E('check')} Channel stream stopped", data="v:noop", style="success")),
         )
     # ── /addchannel · /delchannel — the validated link ────────────────────
-    @client.on_message(filters.command(["addchannel", "setchannel"]))
+    @client.on_message(filters.command(["addchannel"]))
     async def _addchannel(_: Client, message: Message) -> None:
         """Bind this group to a channel, with the checks that make it safe.
 
@@ -371,7 +371,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["delchannel", "removechannel"]))
+    @client.on_message(filters.command(["delchannel"]))
     async def _delchannel(_: Client, message: Message) -> None:
         chat_id = message.chat.id
         user = message.from_user
@@ -424,7 +424,7 @@ def register(client: Client) -> None:
         )
         return False
 
-    @client.on_message(filters.command(["cplayforce", "cpf", "cvplayforce", "cvpf"]))
+    @client.on_message(filters.command(["cplayforce", "cvplayforce"]))
     async def _cplayforce(_: Client, message: Message) -> None:
         if not runtime.player:
             return
@@ -510,7 +510,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["cthumbnail", "cthumb"]))
+    @client.on_message(filters.command(["cthumbnail"]))
     async def _cthumbnail(_: Client, message: Message) -> None:
         """The channel's own poster artwork, same rules as `/thumbnail`."""
         from vyron.modules import thumbnail_cmd

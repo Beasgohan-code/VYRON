@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import io
 import logging
+import math
 from pathlib import Path
 
 from vyron.utils.thumbnails import PIL_AVAILABLE, font
@@ -96,87 +97,133 @@ def _backdrop() -> "Image.Image":
     return Image.blend(base, glow, 0.42)
 
 
+def _aurora_canvas() -> "Image.Image":
+    """The classic black canvas: two soft glows and a few drifting bokeh."""
+    canvas = Image.new("RGB", (W, H), (4, 5, 8))
+    glow = Image.new("RGB", (W, H), (0, 0, 0))
+    draw = ImageDraw.Draw(glow)
+    draw.ellipse((W * 0.55, H * 0.18, W * 1.05, H * 0.95), fill=(10, 92, 92))
+    draw.ellipse((W * 0.72, H * 0.05, W * 1.10, H * 0.75), fill=(48, 22, 96))
+    glow = glow.filter(ImageFilter.GaussianBlur(150))
+    canvas = Image.blend(canvas, glow, 0.85)
+
+    bokeh = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    dots = (
+        (0.60, 0.14, 26, (45, 232, 200, 26)),
+        (0.66, 0.30, 16, (139, 92, 246, 30)),
+        (0.72, 0.10, 34, (45, 232, 200, 18)),
+        (0.79, 0.36, 22, (139, 92, 246, 22)),
+        (0.86, 0.18, 40, (45, 232, 200, 14)),
+        (0.91, 0.42, 18, (139, 92, 246, 26)),
+        (0.63, 0.46, 12, (45, 232, 200, 22)),
+        (0.95, 0.12, 26, (120, 90, 220, 20)),
+    )
+    bdraw = ImageDraw.Draw(bokeh)
+    for x, y, radius, colour in dots:
+        bdraw.ellipse(
+            (W * x - radius, H * y - radius, W * x + radius, H * y + radius),
+            fill=colour,
+        )
+    bokeh = bokeh.filter(ImageFilter.GaussianBlur(7))
+    return Image.alpha_composite(canvas.convert("RGBA"), bokeh)
+
+
+def _waveform_layer() -> "Image.Image":
+    """Thin sine ribbons that read as a live waveform, not a stock divider."""
+    layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    bands = (
+        ((45, 232, 200, 220), 3, 1.00, 0.0),
+        ((45, 232, 200, 150), 2, 0.72, 1.5),
+        ((139, 246, 236, 190), 1, 0.46, 2.6),
+        ((139, 92, 246, 200), 3, 0.88, 0.8),
+        ((168, 128, 255, 150), 2, 0.58, 2.1),
+        ((210, 190, 255, 90), 1, 0.34, 3.4),
+    )
+    left, right = W * 0.34, W * 0.97
+    mid = H * 0.50
+    for colour, width, scale, phase in bands:
+        points = []
+        steps = 260
+        for index in range(steps + 1):
+            ratio = index / steps
+            x = left + (right - left) * ratio
+            envelope = math.sin(min(1.0, ratio * 1.25) * math.pi) ** 0.6
+            wobble = (
+                math.sin(ratio * 17 + phase) * 44
+                + math.sin(ratio * 41 + phase * 2) * 22
+                + math.sin(ratio * 7 + phase / 2) * 58
+            )
+            points.append((x, mid + wobble * envelope * scale))
+
+        # Draw segment by segment so the ribbon can *fade to nothing* at both
+        # ends. Fading only the wobble leaves a flat hairline where every point
+        # collapses onto the centre line — which is exactly what the first
+        # render shipped with.
+        for index in range(steps):
+            ratio = (index + 0.5) / steps
+            fade = min(1.0, ratio * 5.0) * max(0.0, min(1.0, (0.86 - ratio) / 0.34))
+            if fade <= 0.02:
+                continue
+            alpha = int(colour[3] * fade * (0.45 + 0.55 * envelope))
+            if alpha <= 6:
+                continue
+            draw.line(
+                [points[index], points[index + 1]],
+                fill=(*colour[:3], alpha),
+                width=width,
+            )
+
+    glow = layer.filter(ImageFilter.GaussianBlur(11))
+    return Image.alpha_composite(glow, layer)
+
+
 def start_image() -> bytes | None:
-    """The /start hero: mark on the left, wordmark and facts on the right."""
+    """The /start hero — the classic VYRON banner.
+
+    Big wordmark, the aurora waveform on the right, one gradient underline.  It
+    is deliberately quiet: it is the first thing anyone sees, and a logo says
+    more than a wall of feature chips.
+    """
     if not _READY:
         return None
     try:
-        canvas = _backdrop().convert("RGBA")
+        canvas = _aurora_canvas()
+        canvas = Image.alpha_composite(canvas, _waveform_layer())
+
         layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         draw = ImageDraw.Draw(layer)
 
-        # ── mark + ring ────────────────────────────────────────────────────
-        size = 400
-        x, y = 92, (H - size) // 2
-        halo = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        ImageDraw.Draw(halo).ellipse(
-            (x - 40, y - 40, x + size + 40, y + size + 40),
-            fill=(*VIOLET, 110),
-        )
-        layer = Image.alpha_composite(layer, halo.filter(ImageFilter.GaussianBlur(60)))
-
-        layer.alpha_composite(_circle(_mark(size), size), (x, y))
-        draw = ImageDraw.Draw(layer)
-        draw.ellipse((x, y, x + size, y + size), outline=(*VIOLET, 220), width=3)
-        draw.ellipse((x + 14, y + 14, x + size - 14, y + size - 14), outline=(255, 255, 255, 30), width=1)
-
-        # ── wordmark ───────────────────────────────────────────────────────
-        text_x = 588
-        _letterspaced(draw, (text_x, 176), "MUSIC BEYOND LIMITS", font(15, 600, "MUSIC BEYOND LIMITS"), VIOLET, 4)
-
-        face = font(104, 800, "VYRON")
-        x_cursor = text_x
+        # wordmark — the only thing that has to be readable at 300 px wide
+        word_x, word_y = 96, 198
+        face = font(196, 800, "VYRON")
+        cursor = word_x
         for char in "VYRON":
-            draw.text((x_cursor, 208), char, font=face, fill=TEXT)
-            x_cursor += draw.textlength(char, font=face) + 10
-        draw.ellipse((x_cursor + 8, 258, x_cursor + 30, 280), fill=TEAL)
+            draw.text((cursor, word_y), char, font=face, fill=(252, 252, 255))
+            cursor += draw.textlength(char, font=face) + 6
 
-        draw.text(
-            (text_x, 344),
-            "Stream · search · download",
-            font=font(30, 500, "Stream"),
-            fill=MUTED,
-        )
-
-        # ── feature chips ──────────────────────────────────────────────────
-        chips = (("VOICE CHAT", TEAL), ("DOWNLOADS", VIOLET), ("MINI APP", MUTED))
-        chip_y = 420
-        cursor = text_x
-        for label, colour in chips:
-            face = font(16, 600, label)
-            width = int(draw.textlength(label, font=face) + len(label) * 3 + 46)
-            draw.rounded_rectangle(
-                (cursor, chip_y, cursor + width, chip_y + 46),
-                radius=23,
-                fill=(16, 14, 26, 210),
-                outline=(255, 255, 255, 26),
-                width=1,
+        # gradient underline with a period dot
+        bar_y, bar_h = 448, 5
+        bar_left, bar_right = 92, 486
+        for x in range(bar_left, bar_right):
+            ratio = (x - bar_left) / max(1, bar_right - bar_left)
+            colour = tuple(
+                int(TEAL[i] * (1 - ratio) + VIOLET[i] * ratio) for i in range(3)
             )
-            draw.ellipse((cursor + 18, chip_y + 19, cursor + 26, chip_y + 27), fill=colour)
-            _letterspaced(draw, (cursor + 34, chip_y + 13), label, face, TEXT, 3)
-            cursor += width + 12
+            draw.line([(x, bar_y), (x, bar_y + bar_h)], fill=(*colour, 255))
+        draw.ellipse((bar_right + 6, bar_y - 3, bar_right + 20, bar_y + 11), fill=(*VIOLET, 255))
 
-        # ── hairline + handle ──────────────────────────────────────────────
-        draw.line([(text_x, 556), (W - 92, 556)], fill=(255, 255, 255, 26), width=1)
+        # a whisper of the tagline, bottom-left, so the banner has a footer
         _letterspaced(
             draw,
-            (text_x, 584),
-            "@VYRONMUSICBOT · THREE STEPS",
-            font(14, 600, "@VYRONMUSICBOT"),
-            (150, 148, 172),
-            3,
-        )
-        draw.text(
-            (text_x, 614),
-            "Add to a group, start a voice chat, send /play",
-            font=font(22, 500, "Add to a group"),
-            fill=(196, 194, 214),
+            (96, H - 96),
+            "MUSIC BEYOND LIMITS",
+            font(15, 600, "MUSIC BEYOND LIMITS"),
+            (120, 118, 142),
+            4,
         )
 
-        canvas = Image.alpha_composite(canvas, layer).convert("RGB")
-        edge = ImageDraw.Draw(canvas)
-        edge.line([(0, H - 4), (W, H - 4)], fill=tuple(int(c * 0.7) for c in VIOLET), width=4)
-
+        canvas = Image.alpha_composite(canvas.convert("RGBA"), layer).convert("RGB")
         buffer = io.BytesIO()
         canvas.save(buffer, format="JPEG", quality=92, optimize=True, progressive=True)
         return buffer.getvalue()

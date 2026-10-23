@@ -30,7 +30,6 @@ COMMANDS = [
     ("vplay", "stream video"),
     ("playforce", "clear the queue and play now"),
     ("song", "download an MP3"),
-    ("video", "download an MP4"),
     ("vsong", "download a video file"),
     ("search", "search and pick a result"),
     ("playlist", "queue a YouTube playlist"),
@@ -83,7 +82,7 @@ COMMANDS = [
     ("voteskip", "enable group vote-skip"),
     ("fav", "save the current track"),
     ("savepl", "save the queue as a playlist"),
-    ("suggest", "tracks like this one"),
+    ("similar", "tracks like this one"),
     ("stats", "bot statistics"),
     ("help", "all commands"),
 ]

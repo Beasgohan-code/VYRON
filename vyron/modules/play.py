@@ -34,7 +34,7 @@ USAGE = (
     f"<blockquote><code>/play believer</code>\n"
     f"<code>/play https://youtu.be/…</code>\n"
     f"<code>/song …</code> — send an MP3\n"
-    f"<code>/video …</code> — send an MP4</blockquote>"
+    f"<code>/vsong …</code> — send an MP4</blockquote>"
 )
 
 
@@ -74,7 +74,7 @@ async def _edit(client: Client, chat_id: int, message_id: int | None, markup: st
 
 def register(client: Client) -> None:
     # ── /play /vplay ───────────────────────────────────────────────────────
-    @client.on_message(filters.command(["play", "p", "vplay", "vp", "music"]))
+    @client.on_message(filters.command(["play", "vplay"]))
     async def _play_cmd(_: Client, message: Message) -> None:
         if not runtime.player:
             return
@@ -193,7 +193,7 @@ def register(client: Client) -> None:
         )
 
     # ── /playforce /vplayforce ─────────────────────────────────────────────
-    @client.on_message(filters.command(["playforce", "pf", "vplayforce", "vpf"]))
+    @client.on_message(filters.command(["playforce", "vplayforce"]))
     async def _playforce_cmd(_: Client, message: Message) -> None:
         """Skip the queue and start this request now.
 
@@ -270,15 +270,13 @@ def register(client: Client) -> None:
             + f"\n<footer>{E('bolt')} queue cleared by an admin</footer>",
         )
 
-    # ── /song /video ───────────────────────────────────────────────────────
+    # ── /song /vsong (one download command per format) ───────────────────────────────────────────────────────
     @client.on_message(
-        filters.command(
-            ["song", "audio", "mp3", "vsong", "video", "mp4", "dl", "download"]
-        )
+        filters.command(["song", "vsong"])
     )
     async def _download_cmd(_: Client, message: Message) -> None:
         command = message.command[0].lower()
-        want_video = command in {"video", "mp4", "vsong"}
+        want_video = command == "vsong"
         query = command_args(message)
         chat_id = message.chat.id
         if not query:
@@ -331,7 +329,7 @@ def register(client: Client) -> None:
             )
 
     # ── /search ────────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["search", "find"]))
+    @client.on_message(filters.command(["search"]))
     async def _search_cmd(_: Client, message: Message) -> None:
         query = command_args(message)
         if not query:
@@ -365,7 +363,7 @@ def register(client: Client) -> None:
         )
 
     # ── /playlist ──────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["playlist", "ytpl"]))
+    @client.on_message(filters.command(["playlist"]))
     async def _playlist_cmd(_: Client, message: Message) -> None:
         query = command_args(message)
         if not query or not looks_like_url(query):

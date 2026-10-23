@@ -35,7 +35,7 @@ def _uid(message: Message) -> int:
 
 def register(client: Client) -> None:
     # ── /exportpl ──────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["exportpl", "plexport", "exportplaylist"]))
+    @client.on_message(filters.command(["exportpl"]))
     async def _export(_: Client, message: Message) -> None:
         if runtime.storage is None:
             return
@@ -111,7 +111,7 @@ def register(client: Client) -> None:
             )
 
     # ── /importpl ──────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["importpl", "plimport", "importplaylist"]))
+    @client.on_message(filters.command(["importpl"]))
     async def _import(_: Client, message: Message) -> None:
         if runtime.storage is None:
             return

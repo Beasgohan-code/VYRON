@@ -81,7 +81,7 @@ def test_core_commands_are_present():
     for name in (
         "play", "vplay", "song", "vsong", "pause", "resume", "skip", "stop",
         "seek", "volume", "loop", "shuffle", "np", "queue", "lyrics",
-        "voteskip", "vskip", "setvoteskip", "skipvotes", "cplayset",
+        "voteskip", "setvoteskip", "cplayset",
         "eval", "vars", "dbstats", "dbcleanup", "clearcache",
         "addsudo", "delsudo", "sudolist", "blocklist", "repo", "id",
     ):
@@ -141,3 +141,20 @@ def test_removed_commands_stay_removed():
     for gone in ("speedtest", "whoami", "emojis", "dj", "random", "daemons", "replay", "timer"):
         assert gone not in registered, f"/{gone} is back"
         assert gone not in {name for name, _ in COMMANDS}, f"/{gone} is back in the menu"
+
+
+def test_runtime_command_list_matches_the_registrations():
+    """`/unknown` hints read the source; they must see the same handlers."""
+    from vyron.core.commandlist import command_names
+
+    assert set(command_names()) == set(_commands())
+
+
+def test_unknown_command_hints_point_at_live_commands():
+    from vyron.core.commandlist import suggest
+
+    assert suggest("pl") == ["play"]
+    assert suggest("favs") == ["fav"]
+    assert suggest("vskip") == ["skip"]
+    # a nonsense token must not invent a suggestion
+    assert suggest("qwertyuiop") == []

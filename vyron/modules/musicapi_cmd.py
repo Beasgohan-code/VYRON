@@ -97,7 +97,7 @@ def parse_key_args(raw: str) -> dict:
 
 
 def register(client: Client) -> None:
-    @client.on_message(filters.command(["api", "musicapi"]))
+    @client.on_message(filters.command(["api"]))
     async def _api_cmd(_: Client, message: Message) -> None:
         api = get_music_api()
         stats = await api.stats()
@@ -116,7 +116,7 @@ def register(client: Client) -> None:
             ),
         )
 
-    @client.on_message(filters.command(["getapi", "newkey"]) & owner)
+    @client.on_message(filters.command(["getapi"]) & owner)
     async def _getapi(_: Client, message: Message) -> None:
         raw = command_args(message) or ""
         options = parse_key_args(raw)
@@ -146,7 +146,7 @@ def register(client: Client) -> None:
             what="API key",
         )
 
-    @client.on_message(filters.command(["listkey", "apikeys"]) & owner)
+    @client.on_message(filters.command(["apikeys"]) & owner)
     async def _listkeys(_: Client, message: Message) -> None:
         keys = await get_music_api().keys(reveal=False)
         await _reply_private(
@@ -156,7 +156,7 @@ def register(client: Client) -> None:
             what="Key list",
         )
 
-    @client.on_message(filters.command(["rotatekey", "rotateapi"]) & owner)
+    @client.on_message(filters.command(["rotatekey"]) & owner)
     async def _rotate(_: Client, message: Message) -> None:
         needle = (command_args(message) or "").strip().split()[0] if command_args(message) else ""
         if not needle:
@@ -195,7 +195,7 @@ def register(client: Client) -> None:
             what="API key",
         )
 
-    @client.on_message(filters.command(["revoke", "revokekey"]) & owner)
+    @client.on_message(filters.command(["revoke"]) & owner)
     async def _revoke(_: Client, message: Message) -> None:
         needle = (command_args(message) or "").strip().split()[0] if command_args(message) else ""
         if not needle:
@@ -244,7 +244,7 @@ def register(client: Client) -> None:
             what="Usage report",
         )
 
-    @client.on_message(filters.command(["apitoken", "ownertoken", "ownerkey"]) & owner)
+    @client.on_message(filters.command(["apitoken"]) & owner)
     async def _apitoken(_: Client, message: Message) -> None:
         """Mint (or rotate) the owner token, and offer to kill it again."""
         if not settings.bot_token:

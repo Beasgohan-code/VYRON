@@ -15,7 +15,7 @@ from vyron.utils.helpers import command_args
 
 
 def register(client: Client) -> None:
-    @client.on_message(filters.command(["lyrics", "lyric", "lrc"]))
+    @client.on_message(filters.command(["lyrics"]))
     async def _lyrics(_: Client, message: Message) -> None:
         if not runtime.lyrics:
             return
@@ -49,7 +49,7 @@ def register(client: Client) -> None:
         if status:
             await rich.edit(client, message.chat.id, status.id, cards.lyrics_card(track_for_card, result))
 
-    @client.on_message(filters.command(["fav", "favourite", "favorite", "save"]))
+    @client.on_message(filters.command(["fav", "save"]))
     async def _fav(_: Client, message: Message) -> None:
         if not runtime.player or not runtime.storage:
             return
@@ -68,14 +68,14 @@ def register(client: Client) -> None:
         else:
             await rich.send(client, message.chat.id, cards.warn_card("Already in your favourites."))
 
-    @client.on_message(filters.command(["favs", "favorites", "favourites"]))
+    @client.on_message(filters.command(["favorites"]))
     async def _favs(_: Client, message: Message) -> None:
         if not runtime.storage:
             return
         items = await runtime.storage.favorites(message.from_user.id, limit=10)
         await rich.send(client, message.chat.id, cards.favorites_card(items), reply_to=message.id)
 
-    @client.on_message(filters.command(["history", "recent", "played"]))
+    @client.on_message(filters.command(["history"]))
     async def _history(_: Client, message: Message) -> None:
         if not runtime.storage:
             return

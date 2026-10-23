@@ -118,7 +118,7 @@ async def clear_art(client: Client, message: Message) -> None:
 
 
 def register(client: Client) -> None:
-    @client.on_message(filters.command(["thumbnail", "chatthumb"]))
+    @client.on_message(filters.command(["thumbnail"]))
     async def _thumbnail(actor: Client, message: Message) -> None:
         argument = (message.command[1].lower() if len(message.command) > 1 else "").strip()
         file_id = photo_file_id(message)

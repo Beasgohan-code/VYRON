@@ -71,7 +71,7 @@ def register(client: Client) -> None:
             B.row(B.btn(f"{E('check')} Unblocked {target}", data="v:noop", style="success")),
         )
 
-    @client.on_message(filters.command(["blocklist", "blocked"]))
+    @client.on_message(filters.command(["blocklist"]))
     async def _blocklist(_: Client, message: Message) -> None:
         if not is_owner(message.from_user.id):
             return
@@ -127,7 +127,7 @@ def register(client: Client) -> None:
         )
 
     # ── active voice chats ─────────────────────────────────────────────────
-    @client.on_message(filters.command(["activevc", "vc", "sessions"]) & owner)
+    @client.on_message(filters.command(["vc"]) & owner)
     async def _activevc(_: Client, message: Message) -> None:
         if not runtime.player:
             return
@@ -155,7 +155,7 @@ def register(client: Client) -> None:
         )
 
     # ── system stats ───────────────────────────────────────────────────────
-    @client.on_message(filters.command(["sysstats", "system"]) & owner)
+    @client.on_message(filters.command(["sysstats"]) & owner)
     async def _sysstats(_: Client, message: Message) -> None:
         uptime = runtime.uptime
         try:
@@ -204,7 +204,7 @@ def register(client: Client) -> None:
         )
 
     # ── restart hint ───────────────────────────────────────────────────────
-    @client.on_message(filters.command(["restart", "reboot"]) & owner)
+    @client.on_message(filters.command(["restart"]) & owner)
     async def _restart(_: Client, message: Message) -> None:
         await rich.send(
             client,

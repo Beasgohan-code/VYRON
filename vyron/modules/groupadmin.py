@@ -128,7 +128,7 @@ async def _target_id(client: Client, message: Message) -> int | None:
 # ── registration ────────────────────────────────────────────────────────────
 def register(client: Client) -> None:
     # ── the map ────────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["gadmin", "group", "manage", "gpanel"]) & GROUP)
+    @client.on_message(filters.command(["gadmin"]) & GROUP)
     async def _panel(_: Client, message: Message) -> None:
         if not await _can_manage(client, message):
             await _deny(client, message)
@@ -177,7 +177,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["setrules", "addrules"]) & GROUP)
+    @client.on_message(filters.command(["setrules"]) & GROUP)
     async def _setrules(_: Client, message: Message) -> None:
         if not await _can_manage(client, message):
             await _deny(client, message)
@@ -208,7 +208,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["clearrules", "delrules"]) & GROUP)
+    @client.on_message(filters.command(["delrules"]) & GROUP)
     async def _clearrules(_: Client, message: Message) -> None:
         if not await _can_manage(client, message):
             await _deny(client, message)
@@ -222,7 +222,7 @@ def register(client: Client) -> None:
         )
 
     # ── chat info ──────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["chatinfo", "groupinfo", "ginfo"]) & GROUP)
+    @client.on_message(filters.command(["chatinfo"]) & GROUP)
     async def _info(_: Client, message: Message) -> None:
         chat_id = message.chat.id
         info: dict = {"id": chat_id, "title": message.chat.title}
@@ -267,7 +267,7 @@ def register(client: Client) -> None:
         await rich.send(client, chat_id, cards.chat_info_card(info), reply_to=message.id)
 
     # ── title · description · photo ────────────────────────────────────────
-    @client.on_message(filters.command(["settitle", "gtitle"]) & GROUP)
+    @client.on_message(filters.command(["settitle"]) & GROUP)
     async def _settitle(_: Client, message: Message) -> None:
         if not await _can_manage(client, message):
             await _deny(client, message)
@@ -302,7 +302,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["setdesc", "setdescription", "gdesc"]) & GROUP)
+    @client.on_message(filters.command(["setdesc"]) & GROUP)
     async def _setdesc(_: Client, message: Message) -> None:
         if not await _can_manage(client, message):
             await _deny(client, message)
@@ -328,7 +328,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["setgphoto", "setchatphoto", "gphoto"]) & GROUP)
+    @client.on_message(filters.command(["setchatphoto"]) & GROUP)
     async def _setphoto(_: Client, message: Message) -> None:
         if not await _can_manage(client, message):
             await _deny(client, message)
@@ -364,7 +364,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["delgphoto", "delchatphoto"]) & GROUP)
+    @client.on_message(filters.command(["delchatphoto"]) & GROUP)
     async def _delphoto(_: Client, message: Message) -> None:
         if not await _can_manage(client, message):
             await _deny(client, message)
@@ -457,7 +457,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["pinned", "getpin"]) & GROUP)
+    @client.on_message(filters.command(["pinned"]) & GROUP)
     async def _pinned(_: Client, message: Message) -> None:
         pinned = getattr(message.chat, "pinned_message", None)
         text = None
@@ -493,7 +493,7 @@ def register(client: Client) -> None:
         )
 
     # ── invites ────────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["invitelink", "invite"]) & GROUP)
+    @client.on_message(filters.command(["invitelink"]) & GROUP)
     async def _invite(_: Client, message: Message) -> None:
         if not await _can_manage(client, message):
             await _deny(client, message)
@@ -723,7 +723,7 @@ def register(client: Client) -> None:
         )
 
     # ── deleted accounts ───────────────────────────────────────────────────
-    @client.on_message(filters.command(["zombies", "deleted"]) & GROUP)
+    @client.on_message(filters.command(["zombies"]) & GROUP)
     async def _zombies(_: Client, message: Message) -> None:
         if not await _can_manage(client, message):
             await _deny(client, message)
@@ -826,7 +826,7 @@ def register(client: Client) -> None:
             )
 
     # ── fallback: reply to any unknown /group-style help ───────────────────
-    @client.on_message(filters.command(["grouphelp", "adminhelp"]) & GROUP)
+    @client.on_message(filters.command(["adminhelp"]) & GROUP)
     async def _grouphelp(_: Client, message: Message) -> None:
         await rich.send(
             client,

@@ -13,7 +13,7 @@ from vyron.utils.helpers import command_args
 
 
 def register(client: Client) -> None:
-    @client.on_message(filters.command(["queue", "q"]))
+    @client.on_message(filters.command(["queue"]))
     async def _queue(_: Client, message: Message) -> None:
         if not runtime.player:
             return
@@ -29,7 +29,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["clear", "clearqueue"]))
+    @client.on_message(filters.command(["clearqueue"]))
     async def _clear(_: Client, message: Message) -> None:
         if not runtime.player:
             return
@@ -42,7 +42,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["remove", "rm"]))
+    @client.on_message(filters.command(["remove"]))
     async def _remove(_: Client, message: Message) -> None:
         if not runtime.player:
             return
@@ -62,7 +62,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["move", "reorder"]))
+    @client.on_message(filters.command(["move"]))
     async def _move(_: Client, message: Message) -> None:
         if not runtime.player:
             return
@@ -79,7 +79,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["jump", "playpos"]))
+    @client.on_message(filters.command(["jump"]))
     async def _jump(_: Client, message: Message) -> None:
         if not runtime.player:
             return

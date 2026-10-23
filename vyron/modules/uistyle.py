@@ -177,7 +177,7 @@ def register(client: Client) -> None:
         )
         return False
 
-    @client.on_message(filters.command(["uistyle", "uimode", "ui"]))
+    @client.on_message(filters.command(["uistyle"]))
     async def _uistyle(_: Client, message: Message) -> None:
         if not await _owner_only(message):
             return

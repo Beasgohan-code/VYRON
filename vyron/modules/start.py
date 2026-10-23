@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from pathlib import Path
 
@@ -12,6 +13,8 @@ from pyrogram import Client, filters
 from pyrogram.types import Message
 
 from vyron.config import settings
+from vyron.core.commandlist import command_names
+from vyron.core.commandlist import suggest as command_suggest
 from vyron.runtime import runtime
 from vyron.ui import cards, keyboards, rich
 from vyron.ui.theme import E
@@ -25,7 +28,7 @@ logger = logging.getLogger(__name__)
 START_PHOTO = Path(__file__).resolve().parents[2] / "assets" / "start.jpg"
 _PHOTO_META = "start_photo_file_id"
 _PHOTO_VERSION = "start_photo_version"
-_ART_VERSION = "3"
+_ART_VERSION = "5"  # classic banner, ribbons fade out (2026-10-23)
 
 
 async def _photo_source() -> tuple[object, bool]:
@@ -91,7 +94,7 @@ def register(client: Client) -> None:
                 reply_to=message.id,
             )
 
-    @client.on_message(filters.command(["start", "begin"]))
+    @client.on_message(filters.command(["start"]))
     async def _start(_: Client, message: Message) -> None:
         # t.me/<bot>?start=app deep-links straight into the player, so a shared
         # link lands people where the music actually is.
@@ -158,7 +161,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["about", "source", "repo"]))
+    @client.on_message(filters.command(["about", "repo"]))
     async def _about(_: Client, message: Message) -> None:
         await rich.send(
             message._client,
@@ -168,7 +171,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["app", "player", "webapp", "web"]))
+    @client.on_message(filters.command(["app", "player"]))
     async def _webapp(_: Client, message: Message) -> None:
         await _send_app(message)
 
@@ -185,7 +188,31 @@ def register(client: Client) -> None:
                 cards.ping_card(latency, runtime.uptime),
             )
 
-    @client.on_message(filters.command(["id", "ids"]))
+    # ── unknown commands get a hint, not silence ───────────────────────────
+    known = frozenset(command_names())
+
+    @client.on_message(filters.regex(r"^/[A-Za-z0-9_]+") & filters.private, group=1)
+    async def _unknown(_: Client, message: Message) -> None:
+        """Runs in a later group, so it only sees commands nobody claimed.
+
+        The alias prune left a lot of muscle memory pointing at names that no
+        longer exist (`/pl`, `/favs`, `/vskip`); instead of dropping those on
+        the floor we answer with the closest live command.
+        """
+        token = re.match(r"^/([A-Za-z0-9_]+)", (message.text or "").strip())
+        if not token:
+            return
+        name = token.group(1).lower()
+        if name in known:
+            return  # a real command: its handler already ran in group 0
+        close = command_suggest(name)
+        hint = f"<b>/{name}</b> isn't a command."
+        if close:
+            hint += f" Did you mean <code>/{close[0]}</code>?"
+        hint += "\n<blockquote>/help lists everything the bot can do.</blockquote>"
+        await rich.send(message._client, message.chat.id, hint, reply_to=message.id)
+
+    @client.on_message(filters.command(["id"]))
     async def _id(_: Client, message: Message) -> None:
         chat = message.chat
         lines = [

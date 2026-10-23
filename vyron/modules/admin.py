@@ -22,7 +22,7 @@ from vyron.utils.filters import owner
 
 
 def register(client: Client) -> None:
-    @client.on_message(filters.command(["stats", "status"]))
+    @client.on_message(filters.command(["stats"]))
     async def _stats(_: Client, message: Message) -> None:
         if not runtime.storage:
             return
@@ -70,7 +70,7 @@ def register(client: Client) -> None:
             f"{E('live')} <b>Active sessions</b>\n<blockquote>{body}</blockquote>",
         )
 
-    @client.on_message(filters.command(["broadcast", "gcast"]) & owner)
+    @client.on_message(filters.command(["broadcast"]) & owner)
     async def _broadcast(_: Client, message: Message) -> None:
         text = command_args(message)
         target = message.reply_to_message
@@ -124,7 +124,7 @@ def register(client: Client) -> None:
                 cards.ok_card(f"<b>Broadcast finished</b> — {sent} sent, {failed} failed."),
             )
 
-    @client.on_message(filters.command(["leaveall", "assleaveall"]) & owner)
+    @client.on_message(filters.command(["leaveall"]) & owner)
     async def _leaveall(_: Client, message: Message) -> None:
         if not runtime.player:
             return

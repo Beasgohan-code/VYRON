@@ -52,7 +52,7 @@ def panel(active: list[str]) -> str:
 
 
 def register(client: Client) -> None:
-    @client.on_message(filters.command(["effects", "fx", "filter"]))
+    @client.on_message(filters.command(["effects"]))
     async def _effects(_: Client, message: Message) -> None:
         chat_id = message.chat.id
         state = await _active(chat_id)
@@ -121,7 +121,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["effecton", "fxon"]))
+    @client.on_message(filters.command(["effecton"]))
     async def _effect_on(_: Client, message: Message) -> None:
         name = effects.resolve([command_args(message).strip()])
         if not name:
@@ -130,7 +130,7 @@ def register(client: Client) -> None:
             return
         await _toggle_effect(message, name[0], True)
 
-    @client.on_message(filters.command(["effectoff", "fxoff"]))
+    @client.on_message(filters.command(["effectoff"]))
     async def _effect_off(_: Client, message: Message) -> None:
         arg = command_args(message).strip()
         if not arg:
@@ -156,8 +156,8 @@ def register(client: Client) -> None:
 
     for shortcut, effect_name in (("bass", "bass"), ("nightcore", "nightcore"), ("vaporwave", "vaporwave")):
         on_handler, off_handler = _make_shortcut(effect_name)
-        client.on_message(filters.command([shortcut]))(on_handler)
-        client.on_message(filters.command([f"{shortcut}off"]))(off_handler)
+        client.on_message(filters.command(["{shortcut}"]))(on_handler)
+        client.on_message(filters.command(["{shortcut}off"]))(off_handler)
 
 
 

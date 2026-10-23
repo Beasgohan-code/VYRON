@@ -173,7 +173,7 @@ def _target_user(message: Message) -> int | None:
 def register(client: Client) -> None:
     # ── vote skip ──────────────────────────────────────────────────────────
     @client.on_message(
-        filters.command(["voteskip", "vskip", "vs", "skipvotes", "setvoteskip"]) & filters.group
+        filters.command(["voteskip", "setvoteskip"]) & filters.group
     )
     async def _voteskip(_: Client, message: Message) -> None:
         chat_id = message.chat.id
@@ -294,7 +294,7 @@ def register(client: Client) -> None:
         )
 
     # ── /eval ──────────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["eval", "exec"]) & owner)
+    @client.on_message(filters.command(["eval"]) & owner)
     async def _eval(_: Client, message: Message) -> None:
         code = command_args(message)
         if code.startswith("```"):
@@ -334,7 +334,7 @@ def register(client: Client) -> None:
         await rich.send(client, message.chat.id, card, reply_to=message.id)
 
     # ── /vars ──────────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["vars", "variables", "config"]) & owner)
+    @client.on_message(filters.command(["vars"]) & owner)
     async def _vars(_: Client, message: Message) -> None:
         rows = var_rows()
         card = (
@@ -359,7 +359,7 @@ def register(client: Client) -> None:
         await rich.send(client, message.chat.id, card, reply_to=message.id)
 
     # ── /dbstats ───────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["dbstats", "dbb", "storage"]) & owner)
+    @client.on_message(filters.command(["dbstats"]) & owner)
     async def _dbstats(_: Client, message: Message) -> None:
         storage = runtime.storage
         if storage is None:
@@ -413,7 +413,7 @@ def register(client: Client) -> None:
         )
 
     # ── /dbcleanup ─────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["dbcleanup", "cleanupdb", "prune"]) & owner)
+    @client.on_message(filters.command(["dbcleanup"]) & owner)
     async def _dbcleanup(_: Client, message: Message) -> None:
         storage = runtime.storage
         if storage is None:
@@ -457,7 +457,7 @@ def register(client: Client) -> None:
             await rich.send(client, message.chat.id, markup)
 
     # ── /clearcache ────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["clearcache", "rmdownloads", "purgefiles", "cleanup"]) & owner)
+    @client.on_message(filters.command(["clearcache"]) & owner)
     async def _clearcache(_: Client, message: Message) -> None:
         target = Path(settings.downloads_dir)
         removed = 0
@@ -494,7 +494,7 @@ def register(client: Client) -> None:
         )
 
     # ── runtime sudoers ────────────────────────────────────────────────────
-    @client.on_message(filters.command(["addsudo", "sudoit"]) & owner)
+    @client.on_message(filters.command(["addsudo"]) & owner)
     async def _addsudo(_: Client, message: Message) -> None:
         target = _target_user(message)
         if target is None:
@@ -517,7 +517,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["delsudo", "rmsudo", "removesudo"]) & owner)
+    @client.on_message(filters.command(["delsudo"]) & owner)
     async def _delsudo(_: Client, message: Message) -> None:
         target = _target_user(message)
         if target is None:
@@ -547,7 +547,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["sudolist", "sudos"]) & owner)
+    @client.on_message(filters.command(["sudolist"]) & owner)
     async def _sudolist(_: Client, message: Message) -> None:
         env_ids = {int(i) for i in settings.sudo_users}
         runtime_ids = acl.extra_ids()

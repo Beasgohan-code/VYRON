@@ -3,7 +3,7 @@
 #
 #  /suggest  — tracks similar to whatever is playing (or to a query)
 #  /next <q> — insert the next track to play, ahead of the queue
-#  /qinfo    — a one-glance health view of the current queue
+#  /queueinfo — a one-glance health view of the current queue
 #
 #  Built on VYRON's queue / search / rich-card layers.
 # ---------------------------------------------------------------------------
@@ -39,7 +39,7 @@ def _picker(query: str, tracks, prefix: str = "v:p") -> str:
 
 def register(client: Client) -> None:
     # ── /suggest ───────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["suggest", "similar", "upnext"]))
+    @client.on_message(filters.command(["similar"]))
     async def _suggest(_: Client, message: Message) -> None:
         if not runtime.youtube:
             return
@@ -127,7 +127,7 @@ def register(client: Client) -> None:
         await rich.edit(client, message.chat.id, status.id, markup)
 
     # ── /next <query> ──────────────────────────────────────────────────────
-    @client.on_message(filters.command(["playnext", "insert"]) & filters.regex(r"^/\w+\s+\S"))
+    @client.on_message(filters.command(["playnext"]) & filters.regex(r"^/\w+\s+\S"))
     async def _play_next(_: Client, message: Message) -> None:
         if not runtime.player or not runtime.youtube:
             return
@@ -172,8 +172,8 @@ def register(client: Client) -> None:
                 ),
             )
 
-    # ── /qinfo ─────────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["queueinfo", "qinfo"]))
+    # ── /queueinfo ─────────────────────────────────────────────────────────────
+    @client.on_message(filters.command(["queueinfo"]))
     async def _queueinfo(_: Client, message: Message) -> None:
         if not runtime.player:
             return

@@ -127,32 +127,30 @@ Health check → <http://localhost:8080/health> · Mini App → <http://localhos
 |---|---|
 | `/play <song \| link>` | search & stream audio (or play a link instantly) |
 | `/vplay <song \| link>` | stream video |
-| `/song <song \| link>` | send the MP3 to the chat |
-| `/video <song \| link>` | send the MP4 to the chat |
+| `/song <song \| link>` | download the MP3 (same engine as `/api/download`) |
+| `/vsong <song \| link>` | download the MP4 |
 | `/playlist <url>` | queue up to 50 tracks from a playlist / mix |
 | `/search <text>` | browse results without playing |
 | `/pause` · `/resume` | hold / continue |
 | `/skip [n]` | jump forward |
 | `/stop` | end the session and leave the voice chat |
-| `/seek 1:30` · `/forward` · `/rewind` | move inside the track |
+| `/seek 1:30` · `/seek +15` | move inside the track |
 | `/volume 80` · `/volume +10` | assistant volume (1–200) |
 | `/loop [off\|one\|all]` | repeat mode |
 | `/shuffle` · `/autoplay` | queue behaviour |
 | `/np` | now-playing card (rendered artwork when Pillow is installed) |
-| `/suggest [query]` | tracks similar to what's playing — tap to queue |
-| `/next <query>` | insert a track at the front of the queue |
-| `/qinfo` | queue health: length, remaining time, loop, effects |
+| `/similar [query]` | tracks like this one — tap to queue |
+| `/playnext <query>` | insert a track at the front of the queue |
+| `/queueinfo` | queue health: length, remaining time, loop, effects |
 
 ### Queue
 
-`/queue [page]` · `/remove 3` · `/move 3 1` · `/jump 2` · `/clear`
+`/queue [page]` · `/remove 3` · `/move 3 1` · `/jump 2` · `/clearqueue`
 
 ### Convenience
 
 | Command | What it does |
 |---|---|
-| `/timer 30` · `/timer 1h30m` · `/timer off` | stop playback and leave the VC when the timer ends |
-| `/random [mood or query]` | play a surprise track from trending, a mood, or a search |
 | `/exportpl <name>` | send the playlist as a portable JSON file |
 | `/importpl [name]` | reply to that file to restore the playlist |
 | `/history` | what was played here recently |
@@ -186,7 +184,7 @@ Telegram `file_id` after the first send, so later starts cost nothing.
 
 ### Tools
 
-`/lyrics` · `/fav` · `/favs` · `/history` · `/settings` · `/247` · `/stats` · `/ping` · `/id`
+`/lyrics` · `/fav` · `/favorites` · `/history` · `/settings` · `/247` · `/stats` · `/ping` · `/id`
 `/song` · `/vsong` · `/repo` · `/playforce` · `/language` · `/logger` · `/voice` · `/thumbnail`
 
 `/playforce` clears the queue and cuts in immediately (admins, or the owner),
@@ -196,19 +194,20 @@ state of the streaming engine (assistant account, active calls, quality), and
 `/thumbnail` lets a group put its own picture behind the now-playing poster —
 reply to a photo with it, `/thumbnail off` goes back to the cover.
 
-Videl/Fallen aliases are accepted everywhere they make sense: `/music` (`/start`),
-`/listpl`, `/loadpl`, `/rmplaylist`, `/deleteplaylist`, `/delpl`,
-`/reboot`, `/gblock`, `/gunblock`, `/ublock`, `/uunblock`.
+Every feature has exactly **one** command — the alias sprawl is gone, so a
+mistyped `/pl` or `/favs` now gets a hint instead of silently doing something
+different. `/block`, `/gblock` and `/ublock` stay separate on purpose: they act
+on the user, the group or every chat at once.
 
 ### Groups & voting
 
 | Command | What it does |
 |---|---|
 | `/voteskip set <n>` | require *n* votes before a skip (admins; `0` disables) |
-| `/vskip` · `/skipvotes` | cast your vote — or tap the **Vote to skip** button (admins skip instantly) |
+| `/voteskip` | cast your vote — or tap the **Vote to skip** button (admins skip instantly) |
 | `/setvoteskip` | show the current threshold |
 | `/cplayset <id\|@name>` | bind a channel for `/cplay` (`off` reverts to the linked chat) |
-| `/suggest [query]` | tracks similar to what's playing — tap to queue |
+| `/similar [query]` | tracks like this one — tap to queue |
 | `/savepl [name]` | save the current track / queue into a playlist |
 
 ### Playlists
@@ -218,13 +217,13 @@ Videl/Fallen aliases are accepted everywhere they make sense: `/music` (`/start`
 | `/savepl [name]` | save the current track (or the whole queue, or a replied audio file) into a playlist |
 | `/playlists` | list your saved playlists |
 | `/pl <name>` | queue a saved playlist |
-| `/pldel <name>` · `/pdelete` | delete one |
+| `/pdelete <name>` | delete one |
 | `/pcreate <name>` | create an empty playlist |
 | `/padd <name>` | add what is playing (or a replied audio file) |
 | `/pview <name>` | numbered tracks — the same numbers `/premove` takes |
 | `/premove <name> <n>` | drop track #n |
 
-`/pplay` is an alias of `/pl`. Playlists are per-user, capped at 40 lists × 200 tracks, and the same store
+`/pplay <name>` plays a saved playlist. Playlists are per-user, capped at 40 lists × 200 tracks, and the same store
 feeds the Library view of the web app. (YouTube imports stay on `/playlist`.)
 
 ### Diagnostics & owner console
@@ -249,7 +248,7 @@ feeds the Library view of the web app. (YouTube imports stay on `/playlist`.)
 | `/uistyle rich` · `/uistyle classic` | switch between the rich card UI and the classic (old) HTML UI — persisted |
 | `/uicheck` | render the `/start` card through the active lane and report what happened |
 
-Effect shortcuts: `/bass` `/bassoff` `/nightcore` `/nightcoreoff` `/vaporwave` `/vaporwaveoff`
+Effect shortcuts: `/effecton bass|nightcore|vaporwave` · `/effectoff …` (the `/effects` panel has one-tap buttons)
 `/effecton <name>` · `/effectoff <name|all>`
 
 The bot also announces itself politely when added to a group (with Play / Web app /
@@ -280,12 +279,12 @@ chat (rules, slow mode, locks, approvals, captcha, bot rights).
 
 | Area | Commands |
 | --- | --- |
-| Members | `/ban` `/unban` `/kick` `/mute` `/tmute 10m` `/unmute` `/warn` `/warns` `/resetwarns` `/setwarnlimit 3` |
+| Members | `/ban` `/unban` `/kick` `/mute` `/tmute 10m` `/unmute` `/warn` `/dwarn` `/warns` `/resetwarns` `/warnlimit 3` |
 | Rank | `/promote` `/demote` — rights are granted explicitly, never all-or-nothing |
-| Messages | `/purge` (reply) `/del` `/cleanup` `/pin` `/unpin` `/unpinall` `/pinned` |
-| Chat identity | `/settitle` `/setdesc` (reply works) `/setgphoto` (reply to a photo) `/delgphoto` |
+| Messages | `/purge` (reply) `/del` `/pin` `/unpin` `/unpinall` `/pinned` |
+| Chat identity | `/settitle` `/setdesc` (reply works) `/setchatphoto` (reply to a photo) `/delchatphoto` |
 | Access | `/invitelink` `/revokeinvite` `/slowmode 30s\|off` `/captcha on\|off` |
-| Rules | `/rules` (everyone) `/setrules …` `/clearrules` |
+| Rules | `/rules` (everyone) `/setrules …` `/delrules` |
 | Safety | `/approve` `/unapprove` `/approved` — exempt trusted members from locks and anti-flood |
 | Cleanup | `/zombies [kick]` — find deleted accounts, kick them with one flag |
 | Reports | `/report [reason]` — reply to a message; pings the admins, rate-limited per user |
@@ -301,15 +300,15 @@ so the fakes in `tests/test_moderation.py` validate the exact call shape.
 ### Locks & effects
 
 `/locks` — panel with coloured toggles for media, links, forwards, stickers, bots,
-commands and NSFW, plus anti-flood (`/antiflood 7`, `/setflood on|off`).
+commands and NSFW, plus anti-flood (`/antiflood 7`).
 `/lock media` · `/unlock links`
 `/effects` — toggle bass, treble, nightcore, vaporwave, 8D, echo, karaoke,
 loudness, mono, double/half speed (max 3 at once, applied from the next track).
 
 ### Owner only
 
-`/broadcast <text>` · `/gcast <text>` · `/block <id>` · `/unblock <id>` · `/blocklist`
-`/activevc` · `/sysstats` · `/leaveall` · `/cleanup` · `/emojireload` · `/restart`
+`/broadcast <text>` · `/block <id>` · `/unblock <id>` · `/blocklist`
+`/vc` · `/sysstats` · `/leaveall` · `/clearcache` · `/emojireload` · `/restart`
 
 Everything above also works from the inline buttons on the now-playing card.
 
@@ -352,12 +351,12 @@ curl -X POST "$WEBAPP_URL/v1/tracks" \
 - **Keys** — `vyrn_` + 40 url-safe characters, stored **hashed** (SHA-256) with a
   12-char prefix for display, so a database dump cannot be replayed. Mint,
   rotate and revoke them with `/getapi [label] [scopes=…] [days=N]`,
-  `/listkey`, `/rotatekey`, `/revoke` and `/apiusage`, or from the Mini App's
+  `/apikeys`, `/rotatekey`, `/revoke` and `/apiusage`, or from the Mini App's
   **Music API** tab.
 - **Scopes** — `read`, `search`, `download`, `admin` (`admin` implies all).
   Defaults are the first three; anything missing returns `403 forbidden_scope`.
 - **Limits** — 25 active keys per owner, optional per-key expiry (`days=30`) and
-  a per-key rate override (`rate=60`), all visible in `/listkey` and the app.
+  a per-key rate override (`rate=60`), all visible in `/apikeys` and the app.
   Downloads are queued behind a two-slot semaphore so API traffic never starves
   voice-chat playback.
 - **Headers** — `X-RateLimit-Limit/Remaining/Reset`, `X-Key-Scopes`,
@@ -399,7 +398,7 @@ token minted before that moment stops verifying — including ones you already
 pasted into a script. The Mini App is unaffected, because it authenticates with
 Telegram's `initData`, not with this token.
 
-API keys work the same way and are killed separately: `/listkey` shows them with
+API keys work the same way and are killed separately: `/apikeys` shows them with
 a **Revoke** button each, `/revoke <id|prefix>` does it from the command line, and
 `/rotatekey` swaps a key for a fresh one. `/start`, `/app`, `/api` and `/stats`
 also grow direct owner links automatically.
@@ -746,7 +745,7 @@ Two background loops keep a long deployment honest:
   only checked while streaming is enabled.
 
 Both report into `GET /health` (`watchdog`, `keepalive` objects) and into the
-owner-only `/daemons` card.
+owner-only `/sysstats` card.
 
 ---
 

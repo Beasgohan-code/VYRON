@@ -91,7 +91,7 @@ def _engine_state() -> tuple[bool, str]:
 
 
 def register(client: Client) -> None:
-    @client.on_message(filters.command(["doctor", "diag", "selfcheck"]))
+    @client.on_message(filters.command(["doctor"]))
     async def _doctor(_: Client, message: Message) -> None:
         user = message.from_user
         if not (user and is_owner(user.id)):

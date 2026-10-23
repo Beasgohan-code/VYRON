@@ -38,7 +38,7 @@ def register(client: Client) -> None:
         else:
             await rich.send(message._client, chat_id, cards.warn_card("Nothing is playing right now."))
 
-    @client.on_message(filters.command(["resume", "unpause"]))
+    @client.on_message(filters.command(["resume"]))
     async def _resume(_: Client, message: Message) -> None:
         if not await _guard(message):
             return
@@ -47,7 +47,7 @@ def register(client: Client) -> None:
         else:
             await rich.send(message._client, message.chat.id, cards.warn_card("That track is not paused."))
 
-    @client.on_message(filters.command(["skip", "next", "sh"]))
+    @client.on_message(filters.command(["skip"]))
     async def _skip(_: Client, message: Message) -> None:
         if not await _guard(message):
             return
@@ -61,7 +61,7 @@ def register(client: Client) -> None:
         else:
             await rich.react(message, "⏭")
 
-    @client.on_message(filters.command(["stop", "end", "leave"]))
+    @client.on_message(filters.command(["stop"]))
     async def _stop(_: Client, message: Message) -> None:
         if not await _guard(message):
             return
@@ -72,7 +72,7 @@ def register(client: Client) -> None:
             cards.ok_card("<b>Stopped</b> — left the voice chat and cleared the queue."),
         )
 
-    @client.on_message(filters.command(["seek", "forward", "rewind"]))
+    @client.on_message(filters.command(["seek"]))
     async def _seek(_: Client, message: Message) -> None:
         if not await _guard(message):
             return
@@ -86,7 +86,7 @@ def register(client: Client) -> None:
         await _player().seek(message.chat.id, target)
         await rich.react(message, "👍")
 
-    @client.on_message(filters.command(["volume", "vol"]))
+    @client.on_message(filters.command(["volume"]))
     async def _volume(_: Client, message: Message) -> None:
         if not await _guard(message):
             return
@@ -114,7 +114,7 @@ def register(client: Client) -> None:
             f"{E('volume')} <b>Volume set</b> <code>{volume}%</code>",
         )
 
-    @client.on_message(filters.command(["loop", "repeat"]))
+    @client.on_message(filters.command(["loop"]))
     async def _loop(_: Client, message: Message) -> None:
         if not await _guard(message):
             return
@@ -141,7 +141,7 @@ def register(client: Client) -> None:
             f"{E('shuffle')} <b>Shuffled</b> <code>{count}</code> queued tracks",
         )
 
-    @client.on_message(filters.command(["autoplay", "related"]))
+    @client.on_message(filters.command(["autoplay"]))
     async def _autoplay(_: Client, message: Message) -> None:
         if not await _guard(message):
             return
@@ -155,7 +155,7 @@ def register(client: Client) -> None:
             f"{E('spark')} <b>Autoplay</b> <code>{state_text}</code>",
         )
 
-    @client.on_message(filters.command(["np", "now", "nowplaying", "current"]))
+    @client.on_message(filters.command(["np"]))
     async def _np(_: Client, message: Message) -> None:
         if not await _guard(message):
             return

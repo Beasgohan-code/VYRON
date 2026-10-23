@@ -11,7 +11,7 @@ from vyron.ui import cards, keyboards, panels, rich
 
 
 def register(client: Client) -> None:
-    @client.on_message(filters.command(["settings", "panel", "prefs"]))
+    @client.on_message(filters.command(["settings"]))
     async def _settings(_: Client, message: Message) -> None:
         if not runtime.player:
             return
@@ -25,7 +25,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["247", "alwayson", "always"]))
+    @client.on_message(filters.command(["247"]))
     async def _always(_: Client, message: Message) -> None:
         if not runtime.player:
             return
