@@ -10,6 +10,7 @@ import asyncio
 import dataclasses
 import os
 import time
+import uuid
 
 import pytest
 
@@ -34,6 +35,13 @@ from vyron.engine.youtube import (
     validate_proxy,
 )
 from vyron.utils.health import build_app
+
+
+def _fresh_dir(base):
+    base.mkdir(parents=True, exist_ok=True)
+    path = base / uuid.uuid4().hex
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def cfg(**overrides):
@@ -164,6 +172,42 @@ def test_cleanup_removes_the_file_and_its_request_directory(tmp_path):
     path.write_bytes(b"ID3")
     cleanup_download(path)
     assert not path.exists() and not folder.exists()
+
+
+def test_cleanup_accepts_a_request_directory(tmp_path):
+    folder = tmp_path / "abc"
+    folder.mkdir()
+    (folder / "abc12345678.m4a.part").write_bytes(b"partial")
+    cleanup_download(folder)
+    assert not folder.exists()
+
+
+def test_failed_download_answers_502_and_leaves_nothing_behind(tmp_path, monkeypatch):
+    api = _api(tmp_path, monkeypatch)
+    monkeypatch.setattr(routes, "settings", cfg(downloads_dir=tmp_path / "dl"))
+    monkeypatch.setattr(routes, "new_request_dir", lambda *a, **k: _fresh_dir(tmp_path / "dl"))
+
+    async def boom(video_id, folder, **_kwargs):
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / f"{video_id}.m4a.part").write_bytes(b"partial")
+        raise engine.EngineError("Unable to download track after retries: 403", 502)
+
+    monkeypatch.setattr(routes, "download_audio_async", boom)
+
+    async def run():
+        record, _ = await api.issue(4244, "cli")
+        app = build_app(with_webapp=False)
+        async with TestClient(TestServer(app)) as client:
+            response = await client.post(
+                "/vyron/v1/track/by-video-id",
+                json={"video_id": "abc12345678"},
+                headers={"X-API-Key": record["key"]},
+            )
+            return response.status, await response.json()
+
+    status, payload = asyncio.run(run())
+    assert status == 502 and payload["code"] == "download_failed"
+    assert list((tmp_path / "dl").iterdir()) == []
 
 
 def test_stale_directories_are_swept(tmp_path):

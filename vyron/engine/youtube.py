@@ -181,6 +181,10 @@ def new_request_dir(base: Path | None = None, *, cfg: Settings | None = None) ->
 
 
 def cleanup_download(path: Path) -> None:
+    """Delete a downloaded file, or a whole request directory, then its parent."""
+    if path.is_dir():
+        shutil.rmtree(path, ignore_errors=True)
+        return
     if path.exists():
         path.unlink(missing_ok=True)
     parent = path.parent
