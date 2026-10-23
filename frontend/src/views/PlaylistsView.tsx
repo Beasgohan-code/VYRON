@@ -1,4 +1,4 @@
-import { ListPlus, Play, Plus, Trash2, X } from "lucide-react";
+import { Headphones, ListPlus, Play, Plus, Trash2, X } from "lucide-react";
 import { fmtDuration } from "../lib/format";
 import { useApp } from "../lib/store";
 import { ResultRow } from "../components/ResultRow";
@@ -10,6 +10,7 @@ export function PlaylistsView() {
     openPlaylist,
     openModal,
     act,
+    audio,
     toast,
     refreshPlaylists,
   } = useApp();
@@ -71,6 +72,22 @@ export function PlaylistsView() {
                 }}
               >
                 <Play size={14} /> Play all
+              </button>
+              <button
+                type="button"
+                className="pill-btn"
+                onClick={() => {
+                  const tracks = selectedPlaylist.tracks ?? [];
+                  if (!tracks.length) {
+                    toast("This playlist is empty", "error");
+                    return;
+                  }
+                  audio.play(tracks[0], tracks);
+                  audio.setExpanded(true);
+                  toast(`Playing “${selectedPlaylist.name}” on this device`, "success");
+                }}
+              >
+                <Headphones size={14} /> Play here
               </button>
               <button
                 type="button"
