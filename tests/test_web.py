@@ -508,6 +508,19 @@ def test_audio_info_answers_for_demo_ids_before_the_registry(monkeypatch):
     asyncio.run(scenario())
 
 
+def test_content_disposition_survives_any_title():
+    """A non-latin-1 title must not turn a download into a 500."""
+    from vyron.api.routes import content_disposition
+
+    for title in ["Believer", "Песня 📀", 'bad "quote" / slash', "line\nbreak"]:
+        header = content_disposition(title, "dQw4w9WgXcQ")
+        header.encode("latin-1")  # would raise before the fix
+        assert header.startswith("attachment; filename=\"")
+        assert "filename*=UTF-8''" in header
+    inline = content_disposition("Believer", "dQw4w9WgXcQ", inline=True)
+    assert inline.startswith("inline;")
+
+
 # ── owner access ────────────────────────────────────────────────────────────
 def test_owner_token_roundtrip_and_expiry():
     token = auth.make_owner_token(TOKEN, 424242)

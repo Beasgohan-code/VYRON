@@ -31,6 +31,8 @@ _state: dict[str, object] = {
     "last_error": "",
 }
 _task: asyncio.Task | None = None
+# consecutive get_me() failures; a success resets the streak
+_streak = 0
 
 
 def status() -> dict[str, object]:
@@ -63,6 +65,7 @@ async def _restart(client) -> bool:
 
 async def check_once(*, bot=None, assistant=None, collect_handlers=None) -> list[str]:
     """Run one health check. Returns the list of problems repaired."""
+    global _streak
     bot = bot or runtime.bot
     assistant = assistant or runtime.assistant
     problems: list[str] = []
@@ -84,12 +87,15 @@ async def check_once(*, bot=None, assistant=None, collect_handlers=None) -> list
         try:
             await asyncio.wait_for(bot.get_me(), timeout=15)
             _state["last_error"] = ""
+            _streak = 0
         except Exception as exc:
             problems.append(f"get_me: {type(exc).__name__}")
             _state["failures"] = int(_state["failures"]) + 1
             _state["last_error"] = str(exc)[:120]
+            _streak += 1
             # one hiccup is normal (network blip); two in a row is not
-            if int(_state["failures"]) % 2 == 0:
+            if _streak >= 2:
+                _streak = 0
                 await _restart(bot)
                 if collect_handlers is not None:
                     try:

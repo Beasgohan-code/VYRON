@@ -16,6 +16,7 @@ import platform
 import logging
 import re
 import time
+from urllib.parse import quote
 from typing import Any
 
 from aiohttp import web
@@ -121,6 +122,26 @@ async def _download(track):
             raise ApiError("upstream_failed", str(exc)) from exc
 
 
+def content_disposition(title: str, track_id: str, *, inline: bool = False) -> str:
+    """A latin-1-safe ``Content-Disposition`` for any title.
+
+    HTTP headers cannot carry arbitrary Unicode; a Cyrillic or emoji title used
+    to raise UnicodeEncodeError and turn a good request into a 500.
+    """
+    safe = (
+        f"{title[:60]} [{track_id}]"
+        .replace("/", "-")
+        .replace('"', "")
+        .replace("\\", "-")
+        .replace("\n", " ")
+        .replace("\r", " ")
+    )
+    ascii_name = safe.encode("ascii", "ignore").decode().strip() or str(track_id)
+    encoded = quote(f"{safe}.mp3", safe="")
+    kind = "inline" if inline else "attachment"
+    return f"{kind}; filename=\"{ascii_name}.mp3\"; filename*=UTF-8''{encoded}"
+
+
 async def serve_track(request: web.Request, target: str, *, inline: bool = False) -> web.StreamResponse:
     auth = request[AUTH]
     ensure_ready()
@@ -130,11 +151,9 @@ async def serve_track(request: web.Request, target: str, *, inline: bool = False
     await get_music_api().note_use(auth.record, size=size)
     METRICS.note_download(size)
 
-    filename = f"{track.title[:60]} [{track.id}].mp3".replace("/", "-").replace('"', "")
-    disposition = "inline" if inline else "attachment"
     headers = {
         **headers_for(auth),
-        "Content-Disposition": f'{disposition}; filename="{filename}"',
+        "Content-Disposition": content_disposition(track.title, str(track.id), inline=inline),
         "X-Track-Id": str(track.id),
         "X-Track-Title": track.title[:200].encode("ascii", "ignore").decode() or "track",
         "X-Track-Artist": (track.uploader or "")[:200].encode("ascii", "ignore").decode(),
