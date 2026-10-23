@@ -489,6 +489,28 @@ Appearance* reads against the same charcoal glass surfaces. Signed out, the app
 shows a **gate** (art, three steps, a direct `t.me` link) instead of empty
 shelves; the boot and gate both respect `prefers-reduced-motion`.
 
+## 🌍 Languages
+
+VYRON speaks English, हिन्दी, മലയാളം and ਪੰਜਾਬੀ. `/language` shows the picker;
+the choice is per chat and applies to the now-playing caption, the DM mirror
+and every transport acknowledgement. In a group only admins can change it.
+
+English is the reference catalog in `vyron/core/i18n.py`. Two ways to add one:
+
+* drop `vyron/locales/<code>.json` with `{"name": "…", "strings": {…}}` — picked
+  up at start, no code change, missing keys fall back to English;
+* or add a dict to `CATALOGS` next to the shipped ones.
+
+The test suite fails if a shipped catalog is missing keys or is mostly an
+English copy, so a half-finished translation cannot land quietly.
+
+## 📓 The log channel
+
+`/logger on` mirrors every journal warning and error into `LOGGER_ID` as a
+compact card (level, scope, time, metadata, traceback excerpt). Owner only,
+off by default, 20 events a minute at most — it exists so you notice a dead
+stream on your phone instead of opening `/logs` later.
+
 ## 🎨 Premium emoji
 
 VYRON ships a full unicode fallback set, so it looks good with **zero setup**.
