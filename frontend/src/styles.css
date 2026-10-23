@@ -952,7 +952,7 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
   display: grid;
   gap: 4px;
   justify-items: start;
-  padding: 18px;
+  padding: 15px 16px;
   border-radius: var(--radius);
   border: 1px solid var(--line);
   background:
@@ -1557,6 +1557,10 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
   .tr-index, .tr-dur { display: none; }
   .tr-actions { opacity: 1; }
   .card-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
+  .quick-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .quick { padding: 13px; }
+  .quick b { font-size: 13.5px; }
+  .quick span { font-size: 11.5px; }
   .profile-card { flex-direction: column; align-items: flex-start; }
   .profile-art { width: 76px; }
   .log-line { grid-template-columns: 54px 12px minmax(0, 1fr); }

@@ -208,22 +208,16 @@ export function Home() {
         </section>
       )}
 
-      <section className="stage-block">
-        <header className="section-head">
-          <h2>Listen together</h2>
-          <button type="button" className="section-link" onClick={() => setView("rooms")}>
-            All rooms <ArrowRight size={13} />
-          </button>
-        </header>
-        {rooms.length === 0 ? (
-          <div className="empty inline">
-            <span className="empty-icon">
-              <Users size={18} />
-            </span>
-            <b>No room is playing right now</b>
-            <p>Start one with /play in a group voice chat — it shows up here instantly.</p>
-          </div>
-        ) : (
+      {rooms.length > 0 && (
+        <section className="stage-block">
+          <header className="section-head">
+            <h2>
+              <Radio size={16} /> Listen together
+            </h2>
+            <button type="button" className="section-link" onClick={() => setView("rooms")}>
+              All rooms <ArrowRight size={13} />
+            </button>
+          </header>
           <div className="room-strip">
             {rooms.slice(0, 4).map((room) => (
               <button key={room.chat_id} type="button" className="room-chip" onClick={() => setView("rooms")}>
@@ -238,8 +232,8 @@ export function Home() {
               </button>
             ))}
           </div>
-        )}
-      </section>
+        </section>
+      )}
 
       <section className="stage-block">
         <div className="quick-grid">
@@ -280,6 +274,14 @@ export function Home() {
             <b>Back to the queue</b>
             <span>{audio.queue.length} tracks waiting</span>
           </button>
+
+          {rooms.length === 0 && (
+            <button type="button" className="quick" onClick={() => setView("rooms")}>
+              <Users size={18} />
+              <b>Start a listening room</b>
+              <span>send /play in a group voice chat</span>
+            </button>
+          )}
         </div>
       </section>
 
