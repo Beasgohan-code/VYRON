@@ -377,6 +377,9 @@ def register(client: Client) -> None:
             return
 
         if action == "settings":
+            # A fresh process starts from defaults; the persisted loop/volume
+            # only arrive through restore_settings, so ask before showing them.
+            state = await player.restore_settings(chat.id)
             cfg = await panels.chat_panel(chat.id, state)
             await _show(
                 client,
