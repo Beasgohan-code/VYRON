@@ -196,3 +196,91 @@ def test_run_once_survives_a_broken_backend(monkeypatch):
     monkeypatch.setattr(maintenance.runtime, "storage", AngryStorage())
 
     assert asyncio.run(maintenance.run_once()) == {"files": 0, "rows": 0}
+
+
+# ── MongoDB backend (fake driver, no network) ─────────────────────────────
+def test_mongo_connect_does_not_await_create_index(monkeypatch):
+    """create_index() returns a str — awaiting it used to break every boot."""
+    import sys
+    import types
+
+    calls: dict[str, object] = {}
+
+    class FakeCollection:
+        def __init__(self, name):
+            self.name = name
+
+        def create_index(self, keys, unique=False):
+            calls[f"index:{self.name}"] = (keys, unique)
+            return f"{self.name}_idx"          # a plain string, like pymongo
+
+    class FakeDB:
+        def __init__(self):
+            self.chats = FakeCollection("chats")
+            self.favorites = FakeCollection("favorites")
+            self.history = FakeCollection("history")
+            self.playlists = FakeCollection("playlists")
+            self.counters = FakeCollection("counters")
+
+    class FakeAdmin:
+        def command(self, name):
+            calls["ping"] = name
+            return {"ok": 1}
+
+    class FakeClient:
+        def __init__(self, url, **kwargs):
+            calls["url"] = url
+            self.admin = FakeAdmin()
+
+        def __getitem__(self, name):
+            calls["db"] = name
+            return FakeDB()
+
+        def close(self):
+            calls["closed"] = True
+
+    fake_module = types.SimpleNamespace(MongoClient=FakeClient)
+    monkeypatch.setitem(sys.modules, "pymongo", fake_module)
+
+    from vyron.database import MongoStorage
+
+    settings = dataclasses.replace(Settings(), mongo_url="mongodb+srv://u:p@cluster/db", mongo_db="vyron")
+    storage = MongoStorage(settings)
+    asyncio.run(storage.connect())
+
+    assert storage.backend == "mongo"
+    assert calls["ping"] == "ping"
+    assert calls["db"] == "vyron"
+    assert "index:chats" in calls and "index:playlists" in calls
+
+
+def test_mongo_rejects_a_url_without_a_scheme(monkeypatch):
+    import sys
+    import types
+
+    monkeypatch.setitem(sys.modules, "pymongo", types.SimpleNamespace(MongoClient=object))
+
+    from vyron.database import MongoStorage
+
+    settings = dataclasses.replace(Settings(), mongo_url="cluster.example.com", mongo_db="vyron")
+    with pytest.raises(ValueError, match="mongodb"):
+        asyncio.run(MongoStorage(settings).connect())
+
+
+def test_make_storage_falls_back_to_json_when_mongo_fails(monkeypatch, tmp_path):
+    import sys
+    import types
+
+    class BrokenClient:
+        def __init__(self, *args, **kwargs):
+            raise ConnectionError("no route to host")
+
+    monkeypatch.setitem(sys.modules, "pymongo", types.SimpleNamespace(MongoClient=BrokenClient))
+
+    from vyron.database import JsonStorage, make_storage
+
+    settings = dataclasses.replace(
+        Settings(), mongo_url="mongodb://u:p@bad/db", mongo_db="vyron", data_dir=tmp_path
+    )
+    storage = asyncio.run(make_storage(settings))
+    assert isinstance(storage, JsonStorage)
