@@ -208,7 +208,7 @@ def test_open_mode_allows_anonymous_requests(tmp_path, monkeypatch):
 
 def test_legacy_plaintext_keys_still_authenticate(tmp_path, monkeypatch):
     api, storage = _api(tmp_path, monkeypatch)
-    legacy = "eldian_" + "x" * 32
+    legacy = "legacy_" + "x" * 32
 
     async def scenario():
         await storage.add_api_key(
@@ -474,7 +474,7 @@ def test_v1_reports_not_ready_while_the_bot_boots(tmp_path, monkeypatch):
     _client(scenario)
 
 
-def test_health_stays_compatible_with_eldian_monitors():
+def test_health_stays_compatible_with_third_party_monitors():
     async def scenario(client):
         response = await client.get("/health")
         payload = await response.json()

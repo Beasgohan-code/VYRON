@@ -38,7 +38,7 @@ Rich cards · premium emoji · instant search · zero-clutter controls
 | 📡 **Channel play** | `/cplay` streams into the linked channel's voice chat. |
 | 🔎 **Inline mode** | `@VyronMusicBot <song>` returns shareable results in any chat. |
 | 🌐 **Mini App** | A Spotify-style web player served by the bot: local playback with queue/shuffle/repeat, synced lyrics, a ⌘K command palette and full control of the voice-chat stream. |
-| 🔌 **Music API** | An Eldian-compatible `/v1` API on the same URL: downloads, streaming, search, metadata, lyrics and metrics, with hashed keys, scopes, expiry, rotation and per-key rate limits. |
+| 🔌 **Music API** | A drop-in `/v1` API on the same URL: downloads, streaming, search, metadata, lyrics and metrics, with hashed keys, scopes, expiry, rotation and per-key rate limits. |
 
 ### Built on the *new* Telegram Bot API
 
@@ -379,7 +379,7 @@ routes add metadata, streaming, scopes, expiry and metrics.
 | `GET` | `/v1/metrics` | traffic, volume, latency (JSON or Prometheus) | `admin` |
 | `GET` | `/v1/health` · `/v1/version` | status, versions | — |
 | `GET` | `/v1/docs` · `/v1/openapi.json` | docs page · OpenAPI 3.1 | — |
-| `POST` | `/v1/track/by-video-id` | **legacy** Eldian download | `download` |
+| `POST` | `/v1/track/by-video-id` | **legacy** one-shot download | `download` |
 | `POST` | `/v1/track/by-query` | **legacy** download by query | `download` |
 | `GET` | `/v1/info/by-video-id` | **legacy** metadata | `read` |
 | `GET` | `/v1/key` | **legacy** key info | — |
@@ -464,10 +464,6 @@ curl -X POST "$WEBAPP_URL/vyron/v1/track/by-query" \
   or `YOUTUBE_COOKIES_FILE`, `DOWNLOAD_CLEANUP_SECONDS`. Defaults are sane;
   cookies are only needed for age/region-locked videos.
 - **`VYRON_API=off`** unmounts it; `/health` and `/v1` are unaffected.
-
-The download engine is derived from [Eldian Music
-API](https://github.com/Eldian-Network/eldian-music-api) (MIT); its licence text
-sits at the top of `vyron/engine/youtube.py`, above the code it covers.
 
 ### 🔑 Owner access — web app + API
 
@@ -877,6 +873,11 @@ owner-only `/sysstats` card.
 ## 📄 License
 
 MIT © [Beasgohan-code](https://github.com/Beasgohan-code) — fork it, improve it, ship it.
+
+Third-party code under its own MIT licence (the notice sits above the code it
+covers): the download engine in `vyron/engine/youtube.py`, derived from
+[Eldian Music API](https://github.com/Eldian-Network/eldian-music-api), and
+queue/playback ideas from [ShizuMusic](https://github.com/Badmunda/ShizuMusic).
 
 <div align="center">
 

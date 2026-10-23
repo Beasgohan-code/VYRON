@@ -182,7 +182,7 @@ export const api = {
   action: <T = ActionResult>(action: string, value?: unknown) =>
     request<T & ActionResult>("/api/action", { action, value }),
 
-  /* ── music API (Eldian-compatible, same origin) ─────────────────────── */
+  /* ── music API + download API (same origin) ─────────────────────────── */
   keys: () => request<ApiKeyPayload>("/api/keys"),
 
   createKey: (options: string | ApiKeyOptions = "web") =>
