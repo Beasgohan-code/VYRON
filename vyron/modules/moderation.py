@@ -72,8 +72,11 @@ async def _require_admin(client: Client, message: Message) -> bool:
     await rich.send(
         client,
         message.chat.id,
-        B.row(
-            B.btn(f"{E('shield')} You need to be an admin", data="v:noop", style="danger")
+        cards.notice_card(
+            "Admins only",
+            "This one changes the chat — ask an admin.",
+            tone="warn",
+            icon="shield",
         ),
         reply_to=message.id,
     )
@@ -97,18 +100,38 @@ def register(client: Client) -> None:
             return
         target = await _resolve_id(client, _target(message))
         if not target:
-            await rich.send(client, message.chat.id, f"{E('info')} Reply to a user or pass an id.")
+            await rich.send(
+                client,
+                message.chat.id,
+                cards.notice_card(
+                    "Who?",
+                    "Reply to a user or pass an id.",
+                    tone="info",
+                ),
+                reply_to=message.id,
+            )
             return
         try:
             await client.ban_chat_member(message.chat.id, target)
             await rich.send(
                 client,
                 message.chat.id,
-                B.row(B.btn(f"{E('shield')} Banned", data="v:noop", style="danger")),
+                cards.notice_card(
+                    "Banned",
+                    f"<code>{target}</code> is out and cannot rejoin.",
+                    tone="warn",
+                    icon="shield",
+                ),
+                reply_to=message.id,
             )
             await _log(client, f"🔨 <b>ban</b> · {target} in <code>{message.chat.id}</code>")
         except RPCError as exc:
-            await rich.send(client, message.chat.id, f"{E('warn')} {rich.esc(exc)}")
+            await rich.send(
+                client,
+                message.chat.id,
+                cards.notice_card("Telegram refused", rich.esc(exc), tone="error", icon="cross"),
+                reply_to=message.id,
+            )
 
     @client.on_message(filters.command("unban") & BOT_ADMIN)
     async def _unban(_: Client, message: Message) -> None:
@@ -116,17 +139,36 @@ def register(client: Client) -> None:
             return
         target = await _resolve_id(client, _target(message))
         if not target:
-            await rich.send(client, message.chat.id, f"{E('info')} Reply to a user or pass an id.")
+            await rich.send(
+                client,
+                message.chat.id,
+                cards.notice_card(
+                    "Who?",
+                    "Reply to a user or pass an id.",
+                    tone="info",
+                ),
+                reply_to=message.id,
+            )
             return
         try:
             await client.unban_chat_member(message.chat.id, target)
             await rich.send(
                 client,
                 message.chat.id,
-                B.row(B.btn(f"{E('check')} Unbanned", data="v:noop", style="success")),
+                cards.notice_card(
+                    "Unbanned",
+                    f"<code>{target}</code> may join again.",
+                    icon="check",
+                ),
+                reply_to=message.id,
             )
         except RPCError as exc:
-            await rich.send(client, message.chat.id, f"{E('warn')} {rich.esc(exc)}")
+            await rich.send(
+                client,
+                message.chat.id,
+                cards.notice_card("Telegram refused", rich.esc(exc), tone="error", icon="cross"),
+                reply_to=message.id,
+            )
 
     @client.on_message(filters.command(["kick", "dkick"]) & BOT_ADMIN)
     async def _kick(_: Client, message: Message) -> None:
@@ -134,7 +176,16 @@ def register(client: Client) -> None:
             return
         target = await _resolve_id(client, _target(message))
         if not target:
-            await rich.send(client, message.chat.id, f"{E('info')} Reply to a user or pass an id.")
+            await rich.send(
+                client,
+                message.chat.id,
+                cards.notice_card(
+                    "Who?",
+                    "Reply to a user or pass an id.",
+                    tone="info",
+                ),
+                reply_to=message.id,
+            )
             return
         try:
             await client.ban_chat_member(message.chat.id, target)
@@ -142,10 +193,21 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.row(B.btn(f"{E('bolt')} Kicked", data="v:noop", style="danger")),
+                cards.notice_card(
+                    "Kicked",
+                    f"<code>{target}</code> was removed — they can come back with a new link.",
+                    tone="warn",
+                    icon="bolt",
+                ),
+                reply_to=message.id,
             )
         except RPCError as exc:
-            await rich.send(client, message.chat.id, f"{E('warn')} {rich.esc(exc)}")
+            await rich.send(
+                client,
+                message.chat.id,
+                cards.notice_card("Telegram refused", rich.esc(exc), tone="error", icon="cross"),
+                reply_to=message.id,
+            )
 
     # ── mute / unmute ──────────────────────────────────────────────────────
     @client.on_message(filters.command(["mute", "tmute"]) & BOT_ADMIN)
@@ -184,7 +246,12 @@ def register(client: Client) -> None:
                 ),
             )
         except RPCError as exc:
-            await rich.send(client, message.chat.id, f"{E('warn')} {rich.esc(exc)}")
+            await rich.send(
+                client,
+                message.chat.id,
+                cards.notice_card("Telegram refused", rich.esc(exc), tone="error", icon="cross"),
+                reply_to=message.id,
+            )
             return
         window = f"for {fmt_duration(seconds)}" if seconds else "until unmuted"
         await rich.send(
@@ -205,7 +272,16 @@ def register(client: Client) -> None:
             return
         target = await _resolve_id(client, _target(message))
         if not target:
-            await rich.send(client, message.chat.id, f"{E('info')} Reply to a user or pass an id.")
+            await rich.send(
+                client,
+                message.chat.id,
+                cards.notice_card(
+                    "Who?",
+                    "Reply to a user or pass an id.",
+                    tone="info",
+                ),
+                reply_to=message.id,
+            )
             return
         try:
             await client.restrict_chat_member(
@@ -221,10 +297,20 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.row(B.btn(f"{E('volume')} Unmuted", data="v:noop", style="success")),
+                cards.notice_card(
+                    "Unmuted",
+                    f"<code>{target}</code> can send messages again.",
+                    icon="volume",
+                ),
+                reply_to=message.id,
             )
         except RPCError as exc:
-            await rich.send(client, message.chat.id, f"{E('warn')} {rich.esc(exc)}")
+            await rich.send(
+                client,
+                message.chat.id,
+                cards.notice_card("Telegram refused", rich.esc(exc), tone="error", icon="cross"),
+                reply_to=message.id,
+            )
 
     # ── promote / demote ───────────────────────────────────────────────────
     @client.on_message(filters.command("promote") & BOT_ADMIN)
@@ -233,7 +319,16 @@ def register(client: Client) -> None:
             return
         target = await _resolve_id(client, _target(message))
         if not target:
-            await rich.send(client, message.chat.id, f"{E('info')} Reply to a user or pass an id.")
+            await rich.send(
+                client,
+                message.chat.id,
+                cards.notice_card(
+                    "Who?",
+                    "Reply to a user or pass an id.",
+                    tone="info",
+                ),
+                reply_to=message.id,
+            )
             return
         try:
             await client.promote_chat_member(
@@ -252,10 +347,21 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.row(B.btn(f"{E('crown')} Promoted", data="v:noop", style="success")),
+                cards.notice_card(
+                    "Promoted",
+                    f"<code>{target}</code> can now manage this chat.",
+                    icon="crown",
+                    extra=[("Rights", "info · delete · invite · restrict · pin · voice")],
+                ),
+                reply_to=message.id,
             )
         except RPCError as exc:
-            await rich.send(client, message.chat.id, f"{E('warn')} {rich.esc(exc)}")
+            await rich.send(
+                client,
+                message.chat.id,
+                cards.notice_card("Telegram refused", rich.esc(exc), tone="error", icon="cross"),
+                reply_to=message.id,
+            )
 
     @client.on_message(filters.command("demote") & BOT_ADMIN)
     async def _demote(_: Client, message: Message) -> None:
@@ -263,7 +369,16 @@ def register(client: Client) -> None:
             return
         target = await _resolve_id(client, _target(message))
         if not target:
-            await rich.send(client, message.chat.id, f"{E('info')} Reply to a user or pass an id.")
+            await rich.send(
+                client,
+                message.chat.id,
+                cards.notice_card(
+                    "Who?",
+                    "Reply to a user or pass an id.",
+                    tone="info",
+                ),
+                reply_to=message.id,
+            )
             return
         try:
             await client.promote_chat_member(
@@ -282,10 +397,21 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.row(B.btn(f"{E('user')} Demoted", data="v:noop")),
+                cards.notice_card(
+                    "Demoted",
+                    f"<code>{target}</code> is a regular member again.",
+                    tone="info",
+                    icon="user",
+                ),
+                reply_to=message.id,
             )
         except RPCError as exc:
-            await rich.send(client, message.chat.id, f"{E('warn')} {rich.esc(exc)}")
+            await rich.send(
+                client,
+                message.chat.id,
+                cards.notice_card("Telegram refused", rich.esc(exc), tone="error", icon="cross"),
+                reply_to=message.id,
+            )
 
     # ── warns ──────────────────────────────────────────────────────────────
     @client.on_message(filters.command(["warn", "dwarn"]) & BOT_ADMIN)
@@ -294,7 +420,16 @@ def register(client: Client) -> None:
             return
         target = await _resolve_id(client, _target(message))
         if not target:
-            await rich.send(client, message.chat.id, f"{E('info')} Reply to a user or pass an id.")
+            await rich.send(
+                client,
+                message.chat.id,
+                cards.notice_card(
+                    "Who?",
+                    "Reply to a user or pass an id.",
+                    tone="info",
+                ),
+                reply_to=message.id,
+            )
             return
         count, limit = await chatcfg.add_warn(message.chat.id, target)
         if count >= limit:
@@ -324,7 +459,16 @@ def register(client: Client) -> None:
     async def _warns(_: Client, message: Message) -> None:
         target = await _resolve_id(client, _target(message))
         if not target:
-            await rich.send(client, message.chat.id, f"{E('info')} Reply to a user or pass an id.")
+            await rich.send(
+                client,
+                message.chat.id,
+                cards.notice_card(
+                    "Who?",
+                    "Reply to a user or pass an id.",
+                    tone="info",
+                ),
+                reply_to=message.id,
+            )
             return
         count = await chatcfg.warns_of(message.chat.id, target)
         limit = int(await chatcfg.get(message.chat.id, "warn_limit", 3) or 3)
@@ -362,13 +506,27 @@ def register(client: Client) -> None:
             return
         arg = command_args(message)
         if not arg.isdigit() or not (1 <= int(arg) <= 10):
-            await rich.send(client, message.chat.id, f"{E('info')} Use <code>/setwarnlimit 3</code> (1-10).")
+            await rich.send(
+                client,
+                message.chat.id,
+                cards.notice_card(
+                    "Warn limit",
+                    "Use <code>/setwarnlimit 3</code> — a number from 1 to 10.",
+                    tone="info",
+                ),
+                reply_to=message.id,
+            )
             return
         await chatcfg.set(message.chat.id, "warn_limit", int(arg))
         await rich.send(
             client,
             message.chat.id,
-            B.row(B.btn(f"{E('check')} Warn limit set to {arg}", data="v:noop", style="success")),
+            cards.notice_card(
+                "Warn limit updated",
+                f"A member is banned on warning <b>{arg}</b>.",
+                extra=[("Limit", arg)],
+            ),
+            reply_to=message.id,
         )
 
     # ── purge / pin ────────────────────────────────────────────────────────
@@ -378,7 +536,16 @@ def register(client: Client) -> None:
             return
         reply = message.reply_to_message
         if not reply:
-            await rich.send(client, message.chat.id, f"{E('info')} Reply to the first message to delete.")
+            await rich.send(
+                client,
+                message.chat.id,
+                cards.notice_card(
+                    "Purge",
+                    "Reply to the <b>first</b> message you want deleted.",
+                    tone="info",
+                ),
+                reply_to=message.id,
+            )
             return
         ids = list(range(reply.id, message.id + 1))
         removed = 0
@@ -418,10 +585,16 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.row(B.btn(f"{E('star')} Pinned", data="v:noop", style="success")),
+                cards.notice_card("Pinned", "It now sits at the top of the chat.", icon="star"),
+                reply_to=message.id,
             )
         except RPCError as exc:
-            await rich.send(client, message.chat.id, f"{E('warn')} {rich.esc(exc)}")
+            await rich.send(
+                client,
+                message.chat.id,
+                cards.notice_card("Telegram refused", rich.esc(exc), tone="error", icon="cross"),
+                reply_to=message.id,
+            )
 
     @client.on_message(filters.command("unpin") & BOT_ADMIN)
     async def _unpin(_: Client, message: Message) -> None:
@@ -432,10 +605,16 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.row(B.btn(f"{E('check')} Unpinned", data="v:noop")),
+                cards.notice_card("Unpinned", tone="info"),
+                reply_to=message.id,
             )
         except RPCError as exc:
-            await rich.send(client, message.chat.id, f"{E('warn')} {rich.esc(exc)}")
+            await rich.send(
+                client,
+                message.chat.id,
+                cards.notice_card("Telegram refused", rich.esc(exc), tone="error", icon="cross"),
+                reply_to=message.id,
+            )
 
     # ── welcome / goodbye ──────────────────────────────────────────────────
     @client.on_message(filters.command("setwelcome") & BOT_ADMIN)
@@ -553,7 +732,12 @@ def register(client: Client) -> None:
                 + B.table(["admin", "role"], rows[:40]),
             )
         except Exception as exc:
-            await rich.send(client, message.chat.id, f"{E('warn')} {rich.esc(exc)}")
+            await rich.send(
+                client,
+                message.chat.id,
+                cards.notice_card("Telegram refused", rich.esc(exc), tone="error", icon="cross"),
+                reply_to=message.id,
+            )
 
 
 __all__ = ["register"]

@@ -17,7 +17,7 @@ from pyrogram.types import ChatPermissions, Message
 from vyron.core import chatcfg
 from vyron.runtime import runtime
 from vyron.ui import blocks as B
-from vyron.ui import rich
+from vyron.ui import cards, rich
 from vyron.ui.theme import E
 from vyron.utils.helpers import command_args, display_name
 
@@ -121,7 +121,13 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.row(B.btn(f"{E('shield')} Admins only", data="v:noop", style="danger")),
+                cards.notice_card(
+                    "Admins only",
+                    "Locks are managed by admins.",
+                    tone="warn",
+                    icon="shield",
+                ),
+                reply_to=message.id,
             )
             return
         locks = await _locks(message.chat.id)
