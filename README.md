@@ -38,7 +38,7 @@ Rich cards · premium emoji · instant search · zero-clutter controls
 | 📡 **Channel play** | `/cplay` streams into the linked channel's voice chat. |
 | 🔎 **Inline mode** | `@VyronMusicBot <song>` returns shareable results in any chat. |
 | 🌐 **Mini App** | A Spotify-style web player served by the bot: local playback with queue/shuffle/repeat, synced lyrics, a ⌘K command palette and full control of the voice-chat stream. |
-| 🔌 **Music API** | An Eldian-compatible `/v1` API on the same URL: download, search, metadata and lyrics for other bots, with Mongo-backed keys and per-key rate limits. |
+| 🔌 **Music API** | An Eldian-compatible `/v1` API on the same URL: downloads, streaming, search, metadata, lyrics and metrics, with hashed keys, scopes, expiry, rotation and per-key rate limits. |
 
 ### Built on the *new* Telegram Bot API
 
@@ -240,52 +240,71 @@ Everything above also works from the inline buttons on the now-playing card.
 
 ---
 
-## 🔌 Music API (Eldian-compatible, same URL)
+## 🔌 Music API — v2, on the same URL
 
-A drop-in music API for *other* bots and apps, served by the same aiohttp
-process as `/health` and the Mini App — **one Render deployment, one URL, no
-second service to pay for**. The wire format follows
-[`Eldian-Network/eldian-music-api`](https://github.com/Eldian-Network/eldian-music-api):
-`POST /v1/track/by-video-id` with `X-API-Key` streams the audio file back.
+A professional music API for *other* bots and apps, served by the same aiohttp
+process as `/health` and the Mini App — **one deploy, one URL, no second
+service**. The legacy wire format from
+[`Eldian-Network/eldian-music-api`](https://github.com/Eldian-Network/eldian-music-api)
+still works (`POST /v1/track/by-video-id` + `X-API-Key` returns audio), and the
+canonical routes add metadata, streaming, scopes, expiry and metrics.
 
-| Method | Path | What it does | Key |
+| Method | Path | What it does | Scope |
 | --- | --- | --- | --- |
-| `GET` | `/v1/health` | status, version, readiness | no |
-| `POST` | `/v1/track/by-video-id` | download audio for a YouTube id | yes |
-| `POST` | `/v1/track/by-query` | download the first match for a query | yes |
-| `POST` | `/v1/search` | search YouTube, returns JSON | yes |
-| `GET` | `/v1/info/by-video-id` | metadata without downloading | yes |
-| `GET` | `/v1/lyrics` | lyrics + synced lines (LRCLIB) | yes |
-| `GET` | `/v1/key` | your key, usage and quota | yes |
-| `GET` | `/v1/docs` · `/v1/openapi.json` | docs page · OpenAPI 3.1 | no |
+| `POST` | `/v1/tracks` | download audio by id, URL or query | `download` |
+| `GET` | `/v1/tracks/{video_id}` | metadata, no download | `read` |
+| `GET` | `/v1/tracks/{video_id}/stream` | inline stream, HTTP Range | `download` |
+| `GET·POST` | `/v1/search?q=` | search YouTube | `search` |
+| `GET·POST` | `/v1/lyrics?title=` | lyrics + synced lines (LRCLIB) | `read` |
+| `GET` | `/v1/me` | your key, scopes, usage, quota | — |
+| `GET·POST` | `/v1/admin/keys` | list / mint keys (raw key returned once) | `admin` |
+| `DELETE` | `/v1/admin/keys/{id}` | revoke by id or prefix | `admin` |
+| `POST` | `/v1/admin/keys/{id}/rotate` | swap a key, old one dies instantly | `admin` |
+| `GET` | `/v1/metrics` | traffic, volume, latency (JSON or Prometheus) | `admin` |
+| `GET` | `/v1/health` · `/v1/version` | status, versions | — |
+| `GET` | `/v1/docs` · `/v1/openapi.json` | docs page · OpenAPI 3.1 | — |
+| `POST` | `/v1/track/by-video-id` | **legacy** Eldian download | `download` |
+| `POST` | `/v1/track/by-query` | **legacy** download by query | `download` |
+| `GET` | `/v1/info/by-video-id` | **legacy** metadata | `read` |
+| `GET` | `/v1/key` | **legacy** key info | — |
 
 ```bash
-curl -X POST "$WEBAPP_URL/v1/track/by-video-id" \
+curl -X POST "$WEBAPP_URL/v1/tracks" \
   -H "X-API-Key: vyrn_xxxxxxxx" -H "Content-Type: application/json" \
   -d '{"video_id":"dQw4w9WgXcQ"}' --output track.mp3
 ```
 
-- **Keys** — `vyrn_` + 40 url-safe characters, stored in the same MongoDB as the
-  bot when `MONGO_URL` is set (JSON otherwise). Mint and revoke them with
-  `/getapi [label]`, `/listkey`, `/revoke <key>` and `/apiusage`, or from the
-  Mini App's **Music API** tab.
-- **Limits** — `MUSIC_API_RATE` requests/minute per key (default 30), with
-  `X-RateLimit-Limit/Remaining/Reset` headers; downloads are queued behind a
-  two-slot semaphore so the bot's own playback never starves.
-- **Auth** — `X-API-Key`, `Authorization: Bearer …` or `?key=`. Revoked keys are
-  `403`, missing keys `401`, over-quota `429`. `MUSIC_API_OPEN=true` disables
-  the check for local development only.
-- **Docs** — a branded page at `/v1/docs` with copy-paste cURL/Python examples,
-  plus `/v1/openapi.json` for generated clients.
+- **Keys** — `vyrn_` + 40 url-safe characters, stored **hashed** (SHA-256) with a
+  12-char prefix for display, so a database dump cannot be replayed. Mint,
+  rotate and revoke them with `/getapi [label] [scopes=…] [days=N]`,
+  `/listkey`, `/rotatekey`, `/revoke` and `/apiusage`, or from the Mini App's
+  **Music API** tab.
+- **Scopes** — `read`, `search`, `download`, `admin` (`admin` implies all).
+  Defaults are the first three; anything missing returns `403 forbidden_scope`.
+- **Limits** — 25 active keys per owner, optional per-key expiry (`days=30`) and
+  a per-key rate override (`rate=60`), all visible in `/listkey` and the app.
+  Downloads are queued behind a two-slot semaphore so API traffic never starves
+  voice-chat playback.
+- **Headers** — `X-RateLimit-Limit/Remaining/Reset`, `X-Key-Scopes`,
+  `X-API-Version`, `X-Request-Id`, `X-Response-Time`, `Retry-After` on `429`.
+- **Errors** — one envelope for everything:
+  `{"ok": false, "error": …, "code": "rate_limited", "hint": …, "request_id": …}`
+  with codes `missing_key`, `invalid_key`, `revoked_key`, `expired_key`,
+  `forbidden_scope`, `invalid_video`, `not_ready`, `rate_limited`,
+  `upstream_failed`.
+- **Docs** — a branded, self-contained page at `/v1/docs` (endpoint table,
+  copy-paste snippets, live status check) plus `/v1/openapi.json` for generated
+  clients.
 - **Bring your old keys** — keys live in the `api_keys` collection, exactly like
   the upstream project, so pointing `MONGO_DB=eldian_music` at an existing
-  Eldian database keeps every key already handed out working (prefix-less
-  tokens included).
+  Eldian database keeps every key already handed out working (legacy plaintext
+  records are accepted and migrated on first use).
 
 ```bash
 MUSIC_API=true       # serve /v1 on this deployment (default on)
 MUSIC_API_OPEN=false # dev only: no key required
 MUSIC_API_RATE=30    # requests per minute, per key
+MUSIC_API_CORS=true  # allow browser clients from other origins
 ```
 
 ## 🌐 Web app (Telegram Mini App)

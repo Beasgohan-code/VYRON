@@ -71,9 +71,9 @@ def build_app(*, with_webapp: bool = True) -> web.Application:
     # The music API is independent of the Mini App toggle: it is the same
     # process/port either way, so `/v1` always lives on this URL.
     try:
-        from vyron.web import musicapi as music_api
+        from vyron.api import register as register_music_api
 
-        music_api.register(app)
+        register_music_api(app)
     except Exception as exc:  # pragma: no cover - never block liveness
         logger.warning("music api disabled: %s", exc)
     return app

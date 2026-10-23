@@ -1,9 +1,10 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { CommandPalette } from "./components/CommandPalette";
 import { MobileTabBar, MiniPlayer } from "./components/MobileChrome";
 import { PlayBar } from "./components/PlayBar";
 import { Modal } from "./components/Modal";
 import { NowPlayingRail } from "./components/NowPlayingRail";
+import { ShortcutSheet } from "./components/ShortcutSheet";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { useApp } from "./lib/store";
@@ -19,6 +20,7 @@ import { SearchView } from "./views/SearchView";
 
 export default function App() {
   const { view, audio, toastMessage, toastTone } = useApp();
+  const [shortcuts, setShortcuts] = useState(false);
 
   /* keyboard shortcuts — ignored while typing */
   useEffect(() => {
@@ -38,7 +40,14 @@ export default function App() {
       if (event.key === "ArrowLeft") audio.seekBy(-5);
       if (event.key.toLowerCase() === "n") audio.next();
       if (event.key.toLowerCase() === "m") audio.toggleMute();
-      if (event.key === "Escape") audio.setExpanded(false);
+      if (event.key === "?") {
+        event.preventDefault();
+        setShortcuts((open) => !open);
+      }
+      if (event.key === "Escape") {
+        audio.setExpanded(false);
+        setShortcuts(false);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -74,6 +83,7 @@ export default function App() {
       {audio.expanded && <PlayerView />}
       <Modal />
       <CommandPalette />
+      <ShortcutSheet open={shortcuts} onClose={() => setShortcuts(false)} />
 
       <div className={`toast ${toastMessage ? "show" : ""} ${toastTone}`} role="status" aria-live="polite">
         {toastMessage}

@@ -1,0 +1,330 @@
+# ---------------------------------------------------------------------------
+#  VYRON API — OpenAPI 3.1 description (served at /v1/openapi.json)
+# ---------------------------------------------------------------------------
+from __future__ import annotations
+
+from aiohttp import web
+
+from vyron.config import settings
+from vyron.core.musicapi import SCOPES
+
+
+def _base(request: web.Request) -> str:
+    if settings.api_base:
+        return f"{settings.api_base}/v1"
+    proto = request.headers.get("X-Forwarded-Proto") or request.scheme
+    host = request.headers.get("X-Forwarded-Host") or request.host
+    return f"{proto}://{host}/v1"
+
+
+TRACK = {
+    "type": "object",
+    "properties": {
+        "video_id": {"type": "string"},
+        "title": {"type": "string"},
+        "artist": {"type": "string"},
+        "duration": {"type": "integer"},
+        "thumbnail": {"type": ["string", "null"]},
+        "source": {"type": "string"},
+        "url": {"type": "string"},
+        "stream_url": {"type": "string"},
+        "info_url": {"type": "string"},
+        "lyrics_url": {"type": "string"},
+    },
+}
+
+ERROR = {
+    "type": "object",
+    "properties": {
+        "ok": {"type": "boolean", "const": False},
+        "error": {"type": "string"},
+        "code": {"type": "string"},
+        "hint": {"type": "string"},
+        "request_id": {"type": "string"},
+    },
+}
+
+KEY = {
+    "type": "object",
+    "properties": {
+        "id": {"type": "string"},
+        "prefix": {"type": "string"},
+        "label": {"type": "string"},
+        "owner_id": {"type": "integer"},
+        "scopes": {"type": "array", "items": {"type": "string", "enum": list(SCOPES)}},
+        "active": {"type": "boolean"},
+        "created_at": {"type": "number"},
+        "expires_at": {"type": ["number", "null"]},
+        "last_used_at": {"type": ["number", "null"]},
+        "uses": {"type": "integer"},
+        "bytes": {"type": "integer"},
+        "rate_limit": {"type": ["integer", "null"]},
+    },
+}
+
+
+def _err(*codes: int) -> dict:
+    return {
+        str(code): {
+            "description": "error envelope",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}},
+        }
+        for code in codes
+    }
+
+
+def spec(request: web.Request) -> dict:
+    base = _base(request)
+    secured = [{"ApiKeyAuth": []}]
+    return {
+        "openapi": "3.1.0",
+        "info": {
+            "title": "VYRON Music API",
+            "version": "2.0",
+            "summary": "Downloads, streaming, search, metadata, lyrics and keys for Telegram music bots.",
+            "description": (
+                "A production-grade, Eldian-compatible music API served by the VYRON bot on the "
+                "same URL as its Mini App. Authenticate with `X-API-Key` (or `Authorization: Bearer`). "
+                "Every failure returns `{ok:false, error, code, request_id}`."
+            ),
+            "contact": {"name": "VYRON", "url": settings.git_repo},
+            "license": {"name": "MIT"},
+        },
+        "servers": [{"url": base, "description": "this deployment"}],
+        "tags": [
+            {"name": "System", "description": "health, version and metrics"},
+            {"name": "Tracks", "description": "download and stream audio"},
+            {"name": "Discovery", "description": "search and metadata"},
+            {"name": "Lyrics", "description": "LRCLIB lyrics"},
+            {"name": "Keys", "description": "key introspection and administration"},
+        ],
+        "components": {
+            "securitySchemes": {
+                "ApiKeyAuth": {
+                    "type": "apiKey",
+                    "in": "header",
+                    "name": "X-API-Key",
+                    "description": "A `vyrn_…` key minted in the Mini App (Music API) or with /getapi.",
+                }
+            },
+            "schemas": {
+                "Track": TRACK,
+                "Error": ERROR,
+                "Key": KEY,
+                "SearchResult": {
+                    "type": "object",
+                    "properties": {
+                        "ok": {"type": "boolean"},
+                        "query": {"type": "string"},
+                        "count": {"type": "integer"},
+                        "took_ms": {"type": "number"},
+                        "results": {"type": "array", "items": {"$ref": "#/components/schemas/Track"}},
+                    },
+                },
+            },
+            "parameters": {
+                "VideoId": {
+                    "name": "video_id",
+                    "in": "path",
+                    "required": True,
+                    "schema": {"type": "string", "pattern": "^[A-Za-z0-9_-]{6,24}$"},
+                }
+            },
+        },
+        "security": secured,
+        "paths": {
+            "/health": {
+                "get": {
+                    "tags": ["System"],
+                    "summary": "Liveness + readiness",
+                    "security": [],
+                    "responses": {
+                        "200": {
+                            "description": "service status",
+                            "content": {"application/json": {"schema": {"type": "object"}}},
+                        }
+                    },
+                }
+            },
+            "/version": {
+                "get": {
+                    "tags": ["System"],
+                    "summary": "API and bot versions",
+                    "security": [],
+                    "responses": {"200": {"description": "versions"}},
+                }
+            },
+            "/metrics": {
+                "get": {
+                    "tags": ["System"],
+                    "summary": "Request, download and latency metrics",
+                    "description": "Requires the `admin` scope. `?format=prometheus` returns Prometheus text.",
+                    "parameters": [
+                        {
+                            "name": "format",
+                            "in": "query",
+                            "schema": {"type": "string", "enum": ["json", "prometheus"]},
+                        }
+                    ],
+                    "responses": {"200": {"description": "metrics"}, **_err(403)},
+                }
+            },
+            "/tracks": {
+                "post": {
+                    "tags": ["Tracks"],
+                    "summary": "Download audio (by video id, URL or search query)",
+                    "description": (
+                        "Streams the MP3 back. Requires the `download` scope. "
+                        "Supports HTTP Range, so clients can seek."
+                    ),
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "video_id": {"type": "string"},
+                                        "url": {"type": "string"},
+                                        "query": {"type": "string"},
+                                    },
+                                    "anyOf": [{"required": ["video_id"]}, {"required": ["url"]}, {"required": ["query"]}],
+                                }
+                            }
+                        },
+                    },
+                    "responses": {
+                        "200": {"description": "audio/mpeg", "content": {"audio/mpeg": {}}},
+                        **_err(400, 401, 403, 429, 502, 503),
+                    },
+                }
+            },
+            "/tracks/{video_id}": {
+                "get": {
+                    "tags": ["Discovery"],
+                    "summary": "Track metadata (no download)",
+                    "parameters": [{"$ref": "#/components/parameters/VideoId"}],
+                    "responses": {
+                        "200": {
+                            "description": "track",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {"ok": {"type": "boolean"}, "track": {"$ref": "#/components/schemas/Track"}},
+                                    }
+                                }
+                            },
+                        },
+                        **_err(400, 403, 429, 502),
+                    },
+                }
+            },
+            "/tracks/{video_id}/stream": {
+                "get": {
+                    "tags": ["Tracks"],
+                    "summary": "Stream audio inline (Range supported)",
+                    "parameters": [
+                        {"$ref": "#/components/parameters/VideoId"},
+                        {"name": "download", "in": "query", "schema": {"type": "boolean"}},
+                    ],
+                    "responses": {"200": {"description": "audio"}, **_err(400, 403, 429)},
+                }
+            },
+            "/search": {
+                "get": {
+                    "tags": ["Discovery"],
+                    "summary": "Search YouTube",
+                    "parameters": [
+                        {"name": "q", "in": "query", "required": True, "schema": {"type": "string"}},
+                        {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 25}},
+                    ],
+                    "responses": {
+                        "200": {"description": "results", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SearchResult"}}}},
+                        **_err(400, 403, 429, 502),
+                    },
+                },
+                "post": {
+                    "tags": ["Discovery"],
+                    "summary": "Search YouTube (JSON body)",
+                    "responses": {"200": {"description": "results"}, **_err(400, 403, 429, 502)},
+                },
+            },
+            "/lyrics": {
+                "get": {
+                    "tags": ["Lyrics"],
+                    "summary": "Lyrics from LRCLIB",
+                    "parameters": [
+                        {"name": "title", "in": "query", "required": True, "schema": {"type": "string"}},
+                        {"name": "artist", "in": "query", "schema": {"type": "string"}},
+                        {"name": "duration", "in": "query", "schema": {"type": "integer"}},
+                    ],
+                    "responses": {"200": {"description": "lyrics"}, **_err(400, 403, 404, 503)},
+                }
+            },
+            "/me": {
+                "get": {
+                    "tags": ["Keys"],
+                    "summary": "The calling key: scopes, usage and quota",
+                    "responses": {"200": {"description": "key info"}, **_err(403, 429)},
+                }
+            },
+            "/admin/keys": {
+                "get": {
+                    "tags": ["Keys"],
+                    "summary": "List every key (masked)",
+                    "description": "Requires the `admin` scope.",
+                    "responses": {"200": {"description": "keys"}, **_err(403)},
+                },
+                "post": {
+                    "tags": ["Keys"],
+                    "summary": "Mint a key",
+                    "description": "Requires the `admin` scope. The raw key is returned exactly once.",
+                    "responses": {"201": {"description": "created"}, **_err(400, 403)},
+                },
+            },
+            "/admin/keys/{identifier}": {
+                "delete": {
+                    "tags": ["Keys"],
+                    "summary": "Revoke a key by id or prefix",
+                    "responses": {"200": {"description": "revoked"}, **_err(403, 404)},
+                }
+            },
+            # ── legacy (Eldian) aliases ────────────────────────────────────
+            "/track/by-video-id": {
+                "post": {
+                    "tags": ["Tracks"],
+                    "summary": "Legacy alias for POST /tracks",
+                    "deprecated": True,
+                    "responses": {"200": {"description": "audio/mpeg"}, **_err(400, 401, 403, 429)},
+                }
+            },
+            "/track/by-query": {
+                "post": {
+                    "tags": ["Tracks"],
+                    "summary": "Legacy alias for POST /tracks (query)",
+                    "deprecated": True,
+                    "responses": {"200": {"description": "audio/mpeg"}, **_err(400, 401, 403, 429)},
+                }
+            },
+            "/info/by-video-id": {
+                "get": {
+                    "tags": ["Discovery"],
+                    "summary": "Legacy alias for GET /tracks/{video_id}",
+                    "deprecated": True,
+                    "responses": {"200": {"description": "track"}, **_err(400, 403)},
+                }
+            },
+            "/key": {
+                "get": {
+                    "tags": ["Keys"],
+                    "summary": "Legacy alias for GET /me",
+                    "deprecated": True,
+                    "responses": {"200": {"description": "key info"}, **_err(403)},
+                }
+            },
+        },
+    }
+
+
+__all__ = ["spec"]

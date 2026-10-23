@@ -118,6 +118,7 @@ class Settings:
     music_api: bool = field(default_factory=lambda: _flag("MUSIC_API", True))
     music_api_open: bool = field(default_factory=lambda: _flag("MUSIC_API_OPEN", False))
     music_api_rate: int = field(default_factory=lambda: max(1, _int("MUSIC_API_RATE", 30)))
+    music_api_cors: bool = field(default_factory=lambda: _flag("MUSIC_API_CORS", True))
 
     # ── Runtime ─────────────────────────────────────────────────────────────
     port: int = field(default_factory=lambda: _int("PORT", 8080))

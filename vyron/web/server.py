@@ -20,7 +20,7 @@ from vyron.core import playlists as pl
 from vyron.core.lyrics import parse_lrc
 from vyron.core.queue import LoopMode, Track
 from vyron.runtime import runtime
-from vyron.core.musicapi import get_music_api, mask_key
+from vyron.core.musicapi import find_key, get_music_api, mask_key
 from vyron.web import stream as audio
 from vyron.web.auth import WebUser, make_token, resolve_user
 
@@ -457,21 +457,47 @@ async def lyrics(request: web.Request) -> web.Response:
 
 _DEMO_KEYS = [
     {
+        "id": "key_preview0001",
+        "prefix": "vyrn_preview",
         "key": "vyrn_previewKEYdemo0000000000000000000000",
         "masked": "vyrn_pre…0000",
         "label": "preview-bot",
         "owner_id": 0,
+        "scopes": ["read", "search", "download"],
         "active": True,
         "uses": 128,
         "bytes": 734003200,
         "created_at": 1750000000.0,
         "last_used_at": 1759999999.0,
-    }
+        "expires_at": None,
+        "rate_limit": None,
+    },
+    {
+        "id": "key_preview0002",
+        "prefix": "vyrn_ci",
+        "key": "vyrn_ciKEYdemo00000000000000000000000000",
+        "masked": "vyrn_ciK…0000",
+        "label": "ci-pipeline",
+        "owner_id": 0,
+        "scopes": ["read", "search", "download", "admin"],
+        "active": False,
+        "uses": 41,
+        "bytes": 52428800,
+        "created_at": 1745000000.0,
+        "last_used_at": 1749000000.0,
+        "revoked_at": 1749500000.0,
+        "expires_at": None,
+        "rate_limit": 60,
+    },
 ]
 
 
 async def api_keys(request: web.Request) -> web.Response:
-    """Music-API key management for the Mini App (owner-only, initData auth)."""
+    """Music-API console for the Mini App (initData auth).
+
+    GET  → base URL, docs links, the caller's keys and aggregate stats.
+    POST → {action: create|revoke|rotate, ...} with scopes/days/rate_limit.
+    """
     user = await _identify(request)
     denied = _denied(user)
     if denied:
@@ -479,24 +505,43 @@ async def api_keys(request: web.Request) -> web.Response:
 
     api = get_music_api()
     base = settings.api_base or _public_base(request)
+    docs = f"{base}/v1/docs" if base else "/v1/docs"
+    meta = {
+        "scopes": ["read", "search", "download", "admin"],
+        "default_scopes": ["read", "search", "download"],
+        "version": "2.0",
+    }
 
     if _is_preview(user):
         payload = {
             "ok": True,
             "preview": True,
             "base": base,
-            "docs": f"{base}/v1/docs" if base else "/v1/docs",
+            "docs": docs,
+            "openapi": f"{base}/v1/openapi.json" if base else "/v1/openapi.json",
             "is_owner": True,
             "keys": _DEMO_KEYS,
             "stats": {
                 "enabled": True,
                 "open": True,
                 "keys": 1,
+                "keys_total": 2,
                 "requests": 128,
                 "bytes": 734003200,
                 "rate_limit": settings.music_api_rate,
                 "storage": "demo",
+                "version": "2.0",
             },
+            "metrics": {
+                "requests": 128,
+                "downloads": 31,
+                "bytes_served": 734003200,
+                "rate_limited": 2,
+                "uptime_seconds": 3600,
+                "latency_ms": {"avg": 18.0, "p50": 12.0, "p95": 34.0, "p99": 61.0},
+                "by_status": {"200": 126, "429": 2},
+            },
+            **meta,
         }
         if request.method == "GET":
             return web.json_response(payload)
@@ -505,29 +550,38 @@ async def api_keys(request: web.Request) -> web.Response:
         if action == "create":
             record = {
                 "key": "vyrn_" + "demo" * 10,
-                "masked": "vyrn_dem…demo",
+                "masked": "vyrn_demo…demo",
+                "id": "key_demo0001",
+                "prefix": "vyrn_demo",
                 "label": str(body.get("label") or "web")[:40],
+                "scopes": body.get("scopes") or meta["default_scopes"],
                 "owner_id": 0,
                 "active": True,
                 "uses": 0,
                 "bytes": 0,
+                "expires_at": None,
                 "created_at": time.time(),
             }
             return web.json_response({**payload, "ok": True, "created": record})
-        return web.json_response({**payload, "ok": True, "revoked": True})
+        return web.json_response({**payload, "ok": True, "revoked": True, "rotated": action == "rotate"})
 
     is_owner = user.user_id in settings.owners
     if request.method == "GET":
-        keys = await api.keys(user.user_id if not is_owner else None, reveal=is_owner)
+        keys = await api.keys(None if is_owner else user.user_id, reveal=False)
         stats = await api.stats()
+        from vyron.api.metrics import METRICS
+
         return web.json_response(
             {
                 "ok": True,
                 "base": base,
-                "docs": f"{base}/v1/docs" if base else "/v1/docs",
+                "docs": docs,
+                "openapi": f"{base}/v1/openapi.json" if base else "/v1/openapi.json",
                 "is_owner": is_owner,
-                "keys": keys if is_owner else [],
+                "keys": keys,
                 "stats": stats,
+                "metrics": METRICS.snapshot(),
+                **meta,
             }
         )
 
@@ -538,20 +592,48 @@ async def api_keys(request: web.Request) -> web.Response:
 
     body = await _read_json(request)
     action = str(body.get("action") or "create")
+    keys = await api.keys(reveal=False)
+
     if action == "create":
-        record, error = await api.issue(user.user_id, str(body.get("label") or "web"))
+        scopes = body.get("scopes")
+        if isinstance(scopes, str):
+            scopes = [chunk for chunk in scopes.replace(";", ",").split(",") if chunk.strip()]
+        days = body.get("days")
+        rate_limit = body.get("rate_limit")
+        record, error = await api.issue(
+            user.user_id,
+            str(body.get("label") or "web")[:40],
+            scopes=scopes,
+            days=int(days) if str(days or "").isdigit() else None,
+            rate_limit=int(rate_limit) if str(rate_limit or "").isdigit() else None,
+        )
         if record is None:
             return web.json_response({"ok": False, "error": error or "could not create key"}, status=400)
-        logger.info("music api key issued to %s (%s)", user.user_id, record["label"])
-        record = {**record, "masked": mask_key(str(record["key"]))}
-        return web.json_response({"ok": True, "created": record})
+        logger.info("music api key issued to %s (%s)", user.user_id, record.get("label"))
+        return web.json_response(
+            {"ok": True, "created": {**record, "masked": mask_key(str(record["key"]))}}
+        )
+
+    identifier = str(body.get("id") or body.get("key") or body.get("prefix") or "").strip()
+    if not identifier:
+        return web.json_response({"ok": False, "error": "id is required"}, status=400)
+    if not find_key(keys, identifier):
+        return web.json_response({"ok": False, "error": "key not found"}, status=404)
 
     if action == "revoke":
-        key = str(body.get("key") or "").strip()
-        if not key:
-            return web.json_response({"ok": False, "error": "key is required"}, status=400)
-        revoked = await api.revoke(None, key, force=True)
-        return web.json_response({"ok": revoked, "revoked": revoked, **({"error": "key not found"} if not revoked else {})})
+        revoked = await api.revoke(None, identifier, force=True)
+        return web.json_response(
+            {"ok": revoked, "revoked": revoked, **({} if revoked else {"error": "key not found"})}
+        )
+
+    if action == "rotate":
+        match = find_key(keys, identifier) or {}
+        record, error = await api.rotate(int(match.get("owner_id") or user.user_id), str(match.get("id")))
+        if record is None:
+            return web.json_response({"ok": False, "error": error or "could not rotate"}, status=400)
+        return web.json_response(
+            {"ok": True, "created": {**record, "masked": mask_key(str(record["key"]))}}
+        )
 
     return web.json_response({"ok": False, "error": f"unknown action {action!r}"}, status=400)
 

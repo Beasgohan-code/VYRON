@@ -196,15 +196,40 @@ class JsonStorage(Storage):
             keys = [item for item in keys if int(item.get("owner_id", 0)) == int(owner_id)]
         return sorted(keys, key=lambda item: item.get("created_at") or 0, reverse=True)
 
+    # API keys are stored under their opaque `id` (never the raw key, which is
+    # only ever held as a SHA-256 hash).  Legacy plaintext records written by
+    # older builds are still readable because the lookup falls back to a scan.
+    @staticmethod
+    def _key_ref(record: dict) -> str:
+        return str(record.get("id") or record.get("hash") or record.get("key") or record.get("prefix") or "")
+
+    def _find_key(self, bucket: dict, reference: str) -> dict | None:
+        reference = str(reference or "")
+        if not reference:
+            return None
+        if reference in bucket:
+            return bucket[reference]
+        for record in bucket.values():
+            if reference in {str(record.get("id") or ""), str(record.get("prefix") or ""),
+                             str(record.get("hash") or ""), str(record.get("key") or "")}:
+                return record
+        return None
+
     async def add_api_key(self, record: dict) -> None:
         async with self._lock:
-            self._data.setdefault("api_keys", {})[str(record["key"])] = dict(record)
+            bucket = self._data.setdefault("api_keys", {})
+            reference = self._key_ref(record)
+            # migrate a legacy plaintext row in place instead of duplicating it
+            existing = self._find_key(bucket, reference) or self._find_key(bucket, str(record.get("key") or ""))
+            if existing is not None and existing is not bucket.get(reference):
+                bucket.pop(str(existing.get("key") or existing.get("id") or ""), None)
+            bucket[reference] = dict(record)
             await self._flush()
 
     async def update_api_key(self, key: str, patch: dict) -> bool:
         async with self._lock:
             bucket = self._data.setdefault("api_keys", {})
-            record = bucket.get(str(key))
+            record = self._find_key(bucket, key)
             if record is None:
                 return False
             record.update(patch)
@@ -213,7 +238,7 @@ class JsonStorage(Storage):
 
     async def bump_api_key(self, key: str, *, uses: int = 1, size: int = 0, stamp: float | None = None) -> None:
         async with self._lock:
-            record = self._data.setdefault("api_keys", {}).get(str(key))
+            record = self._find_key(self._data.setdefault("api_keys", {}), key)
             if record is None:
                 return
             record["uses"] = int(record.get("uses") or 0) + int(uses)
@@ -295,7 +320,17 @@ class MongoStorage(Storage):
         self._db.favorites.create_index([("user_id", 1)])
         self._db.history.create_index([("user_id", 1)])
         self._db.playlists.create_index([("user_id", 1)])
-        self._db.api_keys.create_index("key", unique=True)
+        # Keys are stored by opaque id; the raw key never touches the database.
+        # Index problems must never block a boot, so each step is guarded.
+        try:
+            self._db.api_keys.drop_index("key_1")  # legacy plaintext index
+        except Exception:
+            pass
+        try:
+            self._db.api_keys.create_index("id", unique=True, sparse=True)
+            self._db.api_keys.create_index("prefix")
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("api_keys indexes not created: %s", exc)
 
     async def close(self) -> None:
         if self._client is not None:
@@ -432,6 +467,54 @@ class MongoStorage(Storage):
             return removed
 
         return await asyncio.to_thread(_prune)
+
+    # ── API keys ───────────────────────────────────────────────────────────
+    async def api_keys(self, owner_id: int | None = None) -> list[dict]:
+        query = {} if owner_id is None else {"owner_id": int(owner_id)}
+
+        def _load() -> list[dict]:
+            rows = []
+            for doc in self._db.api_keys.find(query):
+                doc.pop("_id", None)
+                rows.append(doc)
+            return sorted(rows, key=lambda item: item.get("created_at") or 0, reverse=True)
+
+        return await asyncio.to_thread(_load)
+
+    async def add_api_key(self, record: dict) -> None:
+        reference = str(record.get("id") or record.get("hash") or record.get("key") or "")
+        if not reference:
+            raise ValueError("api key record needs an id")
+
+        def _save():
+            self._db.api_keys.update_one(
+                {"_id": reference}, {"$set": {**record, "_id": reference}}, True
+            )
+
+        await asyncio.to_thread(_save)
+
+    @staticmethod
+    def _key_query(reference: str) -> dict:
+        return {"$or": [{"_id": reference}, {"id": reference}, {"prefix": reference}, {"hash": reference}, {"key": reference}]}
+
+    async def update_api_key(self, key: str, patch: dict) -> bool:
+        def _update():
+            result = self._db.api_keys.update_one(self._key_query(str(key)), {"$set": patch})
+            return bool(result.modified_count or result.matched_count)
+
+        return bool(await asyncio.to_thread(_update))
+
+    async def bump_api_key(self, key: str, *, uses: int = 1, size: int = 0, stamp: float | None = None) -> None:
+        def _bump():
+            self._db.api_keys.update_one(
+                self._key_query(str(key)),
+                {
+                    "$inc": {"uses": int(uses), "bytes": max(0, int(size))},
+                    "$set": {"last_used_at": stamp or time.time()},
+                },
+            )
+
+        await asyncio.to_thread(_bump)
 
     async def bump(self, key: str, amount: int = 1) -> None:
         await asyncio.to_thread(

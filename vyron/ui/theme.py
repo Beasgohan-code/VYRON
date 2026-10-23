@@ -105,6 +105,10 @@ GLYPHS: dict[str, str] = {
     "next": "⏭️",
     "web": "🌐",
     "interface": "🪄",
+    "knot": "🪢",
+    "infinity": "♾️",
+    "api": "🔌",
+    "meter": "📈",
 }
 
 # ── Premium-emoji pack loader ───────────────────────────────────────────────

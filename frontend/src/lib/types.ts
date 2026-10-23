@@ -55,16 +55,36 @@ export interface Room {
   effects?: string[];
 }
 
+export type ApiScope = "read" | "search" | "download" | "admin";
+
 export interface ApiKey {
-  key: string;
+  key?: string;
   masked?: string;
+  preview?: string;
+  id?: string;
+  prefix?: string;
   label?: string;
   owner_id?: number;
+  scopes?: ApiScope[];
   active?: boolean;
   uses?: number;
   bytes?: number;
   created_at?: number;
   last_used_at?: number | null;
+  expires_at?: number | null;
+  expired?: boolean;
+  revoked_at?: number | null;
+  rate_limit?: number | null;
+}
+
+export interface ApiMetrics {
+  requests: number;
+  downloads: number;
+  bytes_served: number;
+  rate_limited: number;
+  uptime_seconds: number;
+  latency_ms: { avg: number; p50: number; p95: number; p99: number };
+  by_status?: Record<string, number>;
 }
 
 export interface ApiKeyPayload {
@@ -73,7 +93,12 @@ export interface ApiKeyPayload {
   base: string;
   docs: string;
   is_owner: boolean;
+  openapi?: string;
   keys: ApiKey[];
+  scopes?: ApiScope[];
+  default_scopes?: ApiScope[];
+  version?: string;
+  metrics?: ApiMetrics;
   stats: {
     enabled: boolean;
     open: boolean;
@@ -83,13 +108,22 @@ export interface ApiKeyPayload {
     bytes: number;
     rate_limit: number;
     storage: string;
+    version?: string;
   };
   created?: ApiKey;
   revoked?: boolean;
 }
 
+export interface ApiKeyOptions {
+  label?: string;
+  scopes?: ApiScope[];
+  days?: number | null;
+  rate_limit?: number | null;
+}
+
 export interface ApiHealth {
   status: string;
+  streaming?: boolean;
   ok: boolean;
   service: string;
   version: string;

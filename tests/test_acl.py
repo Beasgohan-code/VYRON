@@ -210,9 +210,13 @@ def test_mongo_connect_does_not_await_create_index(monkeypatch):
         def __init__(self, name):
             self.name = name
 
-        def create_index(self, keys, unique=False):
+        def create_index(self, keys, unique=False, **options):
             calls[f"index:{self.name}"] = (keys, unique)
             return f"{self.name}_idx"          # a plain string, like pymongo
+
+        def drop_index(self, name):
+            calls[f"drop:{self.name}"] = name
+            return name
 
     class FakeDB:
         def __init__(self):

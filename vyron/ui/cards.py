@@ -11,6 +11,8 @@
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 
+import time
+
 from typing import Iterable
 
 from vyron.config import settings
@@ -224,8 +226,8 @@ _HELP: dict[str, tuple[str, list[tuple[str, str]]]] = {
             ("/sudolist", "who can operate the bot"),
             ("/stats · /activevc", "usage and live sessions"),
             ("/api", "music API card, docs and endpoints"),
-            ("/getapi [label]", "mint an API key (owner)"),
-            ("/listkey · /revoke", "manage API keys (owner)"),
+            ("/getapi [label] [scopes=…]", "mint an API key (owner)"),
+            ("/listkey · /revoke · /rotatekey", "manage API keys (owner)"),
             ("/apiusage", "API traffic per key (owner)"),
             ("/assistant · /setname", "rebrand the voice-chat account"),
             ("/setbio · /setpfp", "bio and profile picture"),
@@ -606,99 +608,177 @@ def _ago(stamp: float | int | None) -> str:
     return f"{delta // 86400}d ago"
 
 
-def music_api_card(base: str, stats: dict, *, compact: bool = False) -> str:
-    """Card for /api — the Eldian-compatible music API on this deployment."""
+def _scope_chips(scopes) -> str:
+    """`read · search · download` — compact, monospace, no emoji spam."""
+    values = [str(item) for item in (scopes or [])]
+    if not values:
+        return "<i>default</i>"
+    return " ".join(f"<code>{esc(scope[:4])}</code>" for scope in values)
+
+
+def _expiry_state(item: dict) -> str:
+    if not item.get("active", True):
+        return f"{E('cross')} revoked"
+    expires_at = item.get("expires_at")
+    if not expires_at:
+        return f"{E('infinity')} never"
+    if item.get("expired"):
+        return f"{E('cross')} expired"
+    return f"<b>{_ago(expires_at).replace(' ago', '')}</b>"
+
+
+def music_api_card(
+    base: str,
+    stats: dict,
+    *,
+    compact: bool = False,
+    metrics: dict | None = None,
+) -> str:
+    """Card for /api — the professional music API served by this deployment."""
     root = (base or "").rstrip("/")
     docs = f"{root}/v1/docs" if root else "/v1/docs"
+    openapi = f"{root}/v1/openapi.json" if root else "/v1/openapi.json"
     enabled = bool(stats.get("enabled", True))
-    status = (
-        f"{E('check')} live" if enabled else f"{E('cross')} disabled"
-    )
-    key_row = (
-        f"{E('warn')} open mode — no key required"
+    status = f"{E('check')} live" if enabled else f"{E('cross')} disabled"
+    auth = (
+        f"{E('warn')} open — no key needed"
         if stats.get("open")
         else f"{E('shield')} <code>X-API-Key</code> required"
     )
+    served = int(stats.get("requests") or 0)
     body = B.kv(
         [
             (f"{E('globe')} Base URL", f"<code>{esc(root or 'set WEBAPP_URL')}</code>"),
-            (f"{E('bolt')} Status", f"<b>{status}</b> {BULLET} {key_row}"),
+            (f"{E('bolt')} Status", f"<b>{status}</b> {BULLET} {auth}"),
             (f"{E('clock')} Rate limit", f"<b>{int(stats.get('rate_limit') or 0)}</b> req/min per key"),
-            (f"{E('key')} Active keys", f"<b>{int(stats.get('keys') or 0)}</b>"),
-            (f"{E('download')} Served", f"<b>{int(stats.get('requests') or 0)}</b> requests "
-                                        f"{BULLET} {human_size(int(stats.get('bytes') or 0))}"),
-            (f"{E('cloud')} Storage", f"<b>{esc(str(stats.get('storage') or 'json'))}</b>"),
+            (f"{E('key')} Active keys", f"<b>{int(stats.get('keys') or 0)}</b> of {int(stats.get('keys_total') or 0)}"),
+            (f"{E('download')} Served", f"<b>{served}</b> requests {BULLET} {human_size(int(stats.get('bytes') or 0))}"),
+            (f"{E('cloud')} Storage", f"<b>{esc(str(stats.get('storage') or 'json'))}</b> {BULLET} API v2.0"),
         ]
     )
+    if metrics:
+        body += B.kv(
+            [
+                (f"{E('stats')} Hits today", f"<b>{int(metrics.get('requests') or 0)}</b> {BULLET} "
+                                            f"{int(metrics.get('downloads') or 0)} downloads"),
+                (f"{E('clock')} Latency", f"p50 <b>{metrics.get('latency_ms', {}).get('p50', 0)}ms</b> {BULLET} "
+                                         f"p95 <b>{metrics.get('latency_ms', {}).get('p95', 0)}ms</b>"),
+            ]
+        )
     endpoints = B.details(
-        f"{E('code')} <b>Endpoints</b>",
+        f"{E('code')} <b>Endpoints</b> {DASH} canonical",
+        B.table(
+            ["Method", "Path", "Scope"],
+            [
+                ("<b>POST</b>", "/v1/tracks", "<code>down</code>"),
+                ("<b>GET</b>", "/v1/tracks/{id}", "<code>read</code>"),
+                ("<b>GET</b>", "/v1/tracks/{id}/stream", "<code>down</code>"),
+                ("<b>GET</b>", "/v1/search?q=", "<code>srch</code>"),
+                ("<b>GET</b>", "/v1/lyrics?title=", "<code>read</code>"),
+                ("<b>GET</b>", "/v1/me", "<code>—</code>"),
+                ("<b>GET</b>", "/v1/metrics", "<code>adm</code>"),
+            ],
+        ),
+        open=not compact,
+    )
+    legacy = B.details(
+        f"{E('shield')} <b>Eldian-compatible</b>",
         B.table(
             ["Method", "Path"],
             [
                 ("<b>POST</b>", "/v1/track/by-video-id"),
                 ("<b>POST</b>", "/v1/track/by-query"),
-                ("<b>POST</b>", "/v1/search"),
                 ("<b>GET</b>", "/v1/info/by-video-id"),
-                ("<b>GET</b>", "/v1/lyrics"),
                 ("<b>GET</b>", "/v1/key"),
-                ("<b>GET</b>", "/v1/health"),
             ],
-        ),
-        open=not compact,
+        )
+        + B.note(f"{E('info')} Existing Eldian clients keep working — just swap the base URL."),
+        open=False,
     )
     snippet = (
-        f"curl -X POST {docs.rsplit('/v1/docs', 1)[0]}/v1/track/by-video-id \\\n"
-        f'  -H "X-API-Key: vyrn_…" -H "Content-Type: application/json" \\\n'
-        f"  -d '{{\"video_id\":\"dQw4w9WgXcQ\"}}' --output track.mp3"
+        f"curl -X POST {root}/v1/tracks \\\n"
+        f'  -H "X-API-Key: vyrn_..." -H "Content-Type: application/json" \\\n'
+        f"  -d '{{\\\"video_id\\\":\\\"dQw4w9WgXcQ\\\"}}' --output track.mp3"
     )
     usage = (
         B.note(f"{E('code')} <b>Quick start</b>\n<pre>{esc(snippet)}</pre>")
         if not compact
         else ""
     )
+    scopes_line = B.note(
+        f"{E('shield')} scopes: <code>read</code> {BULLET} <code>search</code> {BULLET} "
+        f"<code>download</code> {BULLET} <code>admin</code> — mint with "
+        f"<code>/getapi label scopes=read,search days=30</code>"
+    )
     return (
         B.heading(f"{E('globe')} {small_caps('music api')} {DASH} VYRON", 2)
         + B.note(
-            f"{SPARK} A drop-in music API for other bots and apps — same URL as this "
-            f"bot and its Mini App, no second deployment."
+            f"{SPARK} A music API for other bots and apps {DASH} same URL as this bot "
+            f"and its Mini App. No second deployment, no extra port."
         )
         + body
+        + scopes_line
         + endpoints
+        + legacy
         + usage
         + B.divider()
         + B.row(
             B.btn(f"{E('code')} Docs", url=docs, style="primary"),
-            B.btn(f"{E('globe')} Open app", url=f"{root}/app/" if root else settings.git_repo, style="link"),
+            B.btn(f"{E('globe')} Open API", url=f"{root}/v1/" if root else settings.git_repo, style="link"),
         )
         + B.row(
-            B.btn(f"{E('queue')} Commands", data="v:help:main", style="success"),
+            B.btn(f"{E('spark')} Spec", url=openapi, style="success"),
+            B.btn(f"{E('queue')} Commands", data="v:help:main", style="link"),
             B.btn(f"{E('close')} Close", data="v:close", style="danger"),
         )
         + B.footer(
-            f"{E('info')} keys: owner-only <code>/getapi</code> {BULLET} "
-            f"Mini App → API tab {BULLET} docs at <code>/v1/docs</code>"
+            f"{E('info')} keys: <code>/getapi</code> {BULLET} Mini App → Music API "
+            f"{BULLET} docs at <code>/v1/docs</code>"
         )
     )
 
 
-def api_key_card(key: str, label: str, base: str, rate: int) -> str:
+def api_key_card(
+    key: str,
+    label: str,
+    base: str,
+    rate: int,
+    *,
+    scopes=None,
+    expires_at: float | None = None,
+    owner_id: int | None = None,
+) -> str:
+    """The one-and-only view of a freshly minted key."""
     root = (base or "").rstrip("/")
+    expiry = (
+        "never expires"
+        if not expires_at
+        else f"expires {time.strftime('%d %b %Y', time.gmtime(expires_at))}"
+    )
     return (
         B.heading(f"{E('key')} {small_caps('api key')} {DASH} ready", 2)
         + B.note(
-            f"{E('warn')} <b>Copy it now</b> — this is the only time the full key is shown."
+            f"{E('warn')} <b>Copy it now</b> {DASH} this is the only time the full key is shown. "
+            f"It is stored hashed, so nobody (not even the bot) can show it again."
         )
         + B.note(f"{E('key')} <code>{esc(key)}</code>")
         + B.kv(
             [
                 (f"{E('note')} Label", f"<b>{esc(label)}</b>"),
-                (f"{E('clock')} Rate limit", f"<b>{rate}</b> req/min"),
+                (f"{E('shield')} Scopes", _scope_chips(scopes or ["read", "search", "download"])),
+                (f"{E('clock')} Rate limit", f"<b>{rate}</b> req/min {BULLET} {expiry}"),
                 (f"{E('globe')} Base URL", f"<code>{esc(root or 'set WEBAPP_URL')}</code>"),
             ]
         )
         + B.details(
             f"{E('code')} <b>Try it</b>",
-            "<pre>" + esc(f'curl {root}/v1/key -H "X-API-Key: {key}"') + "</pre>",
+            "<pre>"
+            + esc(
+                f'curl {root}/v1/me -H "X-API-Key: {key}"\n'
+                f'curl -X POST {root}/v1/tracks -H "X-API-Key: {key}" \\\n'
+                f'  -H "Content-Type: application/json" -d \'{{"video_id":"dQw4w9WgXcQ"}}\' -o track.mp3'
+            )
+            + "</pre>",
             open=True,
         )
         + B.divider()
@@ -707,8 +787,8 @@ def api_key_card(key: str, label: str, base: str, rate: int) -> str:
             B.btn(f"{E('queue')} List keys", data="v:noop", style="link"),
         )
         + B.footer(
-            f"{E('info')} revoke with <code>/revoke {key[:10]}…</code> {BULLET} "
-            f"keep it in an env var, never in a public repo"
+            f"{E('info')} revoke with <code>/revoke {key[:12]}…</code> {BULLET} "
+            f"rotate with <code>/rotatekey {key[:12]}…</code>"
         )
     )
 
@@ -717,35 +797,43 @@ def api_keys_card(keys: list[dict], base: str) -> str:
     if not keys:
         return (
             B.heading(f"{E('key')} {small_caps('api keys')}", 2)
-            + B.note(f"{E('moon')} No keys yet — mint one with <code>/getapi label</code>.")
+            + B.note(f"{E('moon')} No keys yet {DASH} mint one with <code>/getapi label</code>.")
             + B.row(B.btn(f"{E('code')} Docs", url=f"{(base or '').rstrip('/')}/v1/docs", style="primary"))
         )
+    active = sum(1 for item in keys if item.get("active", True))
     rows = [
         (
-            f"<b>{esc(str(item.get('label') or 'key'))[:18]}</b>",
+            f"<b>{esc(str(item.get('label') or 'key'))[:16]}</b>",
             f"<code>{esc(str(item.get('masked') or mask_ish(item)))}</code>",
+            _scope_chips(item.get("scopes")),
             f"{int(item.get('uses') or 0)}",
-            _ago(item.get("last_used_at")),
-            f"{E('check')} on" if item.get("active", True) else f"{E('cross')} off",
+            _expiry_state(item),
         )
         for item in keys
     ]
     return (
-        B.heading(f"{E('key')} {small_caps('api keys')} {DASH} {len(keys)}", 2)
-        + B.table(["Label", "Key", "Uses", "Last used", "State"], rows)
+        B.heading(f"{E('key')} {small_caps('api keys')} {DASH} {active}/{len(keys)} active", 2)
+        + B.table(["Label", "Key", "Scopes", "Uses", "State"], rows)
         + B.note(
-            f"{E('shield')} Full keys are only shown when minted. Store them in your "
-            f"client's environment, never in a public repo."
+            f"{E('shield')} Keys are stored as SHA-256 hashes. The full value is only shown "
+            f"when it is minted {DASH} rotate anything you have lost."
         )
         + B.row(
             B.btn(f"{E('code')} Docs", url=f"{(base or '').rstrip('/')}/v1/docs", style="primary"),
-            B.btn(f"{E('bolt')} Usage", data="v:noop", style="link"),
+            B.btn(f"{E('spark')} New key", data="v:noop", style="link"),
         )
-        + B.footer(f"revoke with <code>/revoke &lt;key&gt;</code> {BULLET} {BRAND}")
+        + B.footer(f"revoke <code>/revoke &lt;id|prefix&gt;</code> {BULLET} rotate <code>/rotatekey</code> {BULLET} {BRAND}")
     )
 
 
-def api_usage_card(stats: dict, keys: list[dict], base: str, *, sudo: bool = False) -> str:
+def api_usage_card(
+    stats: dict,
+    keys: list[dict],
+    base: str,
+    *,
+    sudo: bool = False,
+    metrics: dict | None = None,
+) -> str:
     totals = B.kv(
         [
             (f"{E('key')} Active keys", f"<b>{int(stats.get('keys') or 0)}</b> / {int(stats.get('keys_total') or 0)}"),
@@ -753,15 +841,27 @@ def api_usage_card(stats: dict, keys: list[dict], base: str, *, sudo: bool = Fal
             (f"{E('cloud')} Bytes served", f"<b>{human_size(int(stats.get('bytes') or 0))}</b>"),
             (f"{E('clock')} Rate limit", f"<b>{int(stats.get('rate_limit') or 0)}</b> req/min"),
             (f"{E('globe')} Mode", "open" if stats.get("open") else "keyed"),
+            (f"{E('cloud')} Storage", f"<b>{esc(str(stats.get('storage') or 'json'))}</b>"),
         ]
     )
+    if metrics:
+        totals += B.kv(
+            [
+                (f"{E('bolt')} This process", f"<b>{int(metrics.get('requests') or 0)}</b> hits "
+                                              f"{BULLET} <b>{int(metrics.get('rate_limited') or 0)}</b> throttled"),
+                (f"{E('clock')} Latency", f"p50 <b>{metrics.get('latency_ms', {}).get('p50', 0)}ms</b> "
+                                         f"{BULLET} p95 <b>{metrics.get('latency_ms', {}).get('p95', 0)}ms</b> "
+                                         f"{BULLET} p99 <b>{metrics.get('latency_ms', {}).get('p99', 0)}ms</b>"),
+            ]
+        )
     by_key = ""
     if keys and sudo:
         by_key = B.table(
-            ["Label", "Uses", "Bytes", "Last used"],
+            ["Label", "Scopes", "Uses", "Bytes", "Last used"],
             [
                 (
                     f"<b>{esc(str(item.get('label') or 'key'))[:16]}</b>",
+                    _scope_chips(item.get("scopes")),
                     str(int(item.get("uses") or 0)),
                     human_size(int(item.get("bytes") or 0)),
                     _ago(item.get("last_used_at")),
@@ -773,13 +873,16 @@ def api_usage_card(stats: dict, keys: list[dict], base: str, *, sudo: bool = Fal
         B.heading(f"{E('stats')} {small_caps('api usage')}", 2)
         + totals
         + by_key
-        + B.row(B.btn(f"{E('code')} Docs", url=f"{(base or '').rstrip('/')}/v1/docs", style="primary"))
+        + B.row(
+            B.btn(f"{E('code')} Docs", url=f"{(base or '').rstrip('/')}/v1/docs", style="primary"),
+            B.btn(f"{E('spark')} Metrics", url=f"{(base or '').rstrip('/')}/v1/metrics", style="link"),
+        )
         + B.footer(f"{E('spark')} every request is metered per key {BULLET} {BRAND}")
     )
 
 
 def mask_ish(item: dict) -> str:
-    key = str(item.get("key") or "")
+    key = str(item.get("key") or item.get("prefix") or "")
     return f"{key[:8]}…{key[-4:]}" if len(key) > 12 else key
 
 

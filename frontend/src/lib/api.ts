@@ -1,4 +1,14 @@
-import type { ActionResult, ApiHealth, ApiKeyPayload, AppState, HomePayload, Playlist, Room, Track } from "./types";
+import type {
+  ActionResult,
+  ApiHealth,
+  ApiKeyOptions,
+  ApiKeyPayload,
+  AppState,
+  HomePayload,
+  Playlist,
+  Room,
+  Track,
+} from "./types";
 
 declare global {
   interface Window {
@@ -99,11 +109,17 @@ export const api = {
   /* ── music API (Eldian-compatible, same origin) ─────────────────────── */
   keys: () => request<ApiKeyPayload>("/api/keys"),
 
-  createKey: (label = "web") =>
-    request<ApiKeyPayload>("/api/keys", { action: "create", label }),
+  createKey: (options: string | ApiKeyOptions = "web") =>
+    request<ApiKeyPayload>("/api/keys", {
+      action: "create",
+      ...(typeof options === "string" ? { label: options } : options),
+    }),
 
-  revokeKey: (key: string) =>
-    request<ApiKeyPayload & { error?: string }>("/api/keys", { action: "revoke", key }),
+  revokeKey: (id: string) =>
+    request<ApiKeyPayload & { error?: string }>("/api/keys", { action: "revoke", id }),
+
+  rotateKey: (id: string) =>
+    request<ApiKeyPayload & { error?: string }>("/api/keys", { action: "rotate", id }),
 
   apiHealth: async (): Promise<ApiHealth> => {
     const response = await fetch("/v1/health", { credentials: "same-origin" });
