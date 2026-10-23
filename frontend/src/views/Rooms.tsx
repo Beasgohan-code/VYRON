@@ -1,10 +1,12 @@
-import { Radio, RefreshCw, Users } from "lucide-react";
+import { useState } from "react";
+import { Check, Radio, RefreshCw, Users } from "lucide-react";
 import { useApp } from "../lib/store";
 import { Cover } from "../components/Cover";
 import { useViewReveal } from "../lib/anim";
 
 export function Rooms() {
-  const { rooms, refreshRooms, state } = useApp();
+  const { rooms, refreshRooms, state, attachRoom } = useApp();
+  const [busy, setBusy] = useState<number | null>(null);
   const stage = useViewReveal<HTMLDivElement>("rooms", ".room-card");
   const live = rooms.filter((room) => room.playing && !room.paused).length;
 
@@ -48,9 +50,27 @@ export function Rooms() {
                   <Users size={12} /> {room.listeners} listening · vol {room.volume}
                 </span>
               </div>
-              <span className={`room-state ${room.playing && !room.paused ? "on" : ""}`}>
-                {room.playing && !room.paused ? "live" : room.paused ? "paused" : "idle"}
-              </span>
+              <div className="room-side">
+                <span className={`room-state ${room.playing && !room.paused ? "on" : ""}`}>
+                  {room.playing && !room.paused ? "live" : room.paused ? "paused" : "idle"}
+                </span>
+                {/* Telegram opens Mini Apps only in DMs, so this is how a group
+                    player is driven from the app — no URL, no browser. */}
+                <button
+                  type="button"
+                  className={`room-attach ${state?.chat?.id === room.chat_id ? "on" : ""}`}
+                  disabled={busy === room.chat_id}
+                  onClick={async () => {
+                    setBusy(room.chat_id);
+                    await attachRoom(room.chat_id);
+                    setBusy(null);
+                    void refreshRooms();
+                  }}
+                >
+                  {state?.chat?.id === room.chat_id ? <Check size={13} /> : <Radio size={13} />}
+                  {state?.chat?.id === room.chat_id ? "Controlling" : "Control"}
+                </button>
+              </div>
             </article>
           ))}
         </div>

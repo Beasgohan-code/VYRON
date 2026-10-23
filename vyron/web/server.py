@@ -467,6 +467,45 @@ async def mix(request: web.Request) -> web.Response:
 
 
 # ── rooms (listen together) ─────────────────────────────────────────────────
+async def room_attach(request: web.Request) -> web.Response:
+    """Mint a chat-scoped token for a room the caller administers.
+
+    Telegram only allows `web_app` buttons in private chats, so a group entry
+    point sends people to the DM. This keeps the *group* controllable from the
+    app once they are there — without ever printing a URL with a token in it.
+    """
+    user = await _identify(request)
+    denied = _denied(user)
+    if denied:
+        return denied
+
+    body = await _read_json(request)
+    try:
+        chat_id = int(body.get("chat_id") or 0)
+    except (TypeError, ValueError):
+        chat_id = 0
+    if chat_id >= 0:
+        return web.json_response({"ok": False, "error": "not a group chat"}, status=400)
+    if runtime.bot is None or not settings.bot_token:
+        return web.json_response({"ok": False, "error": "the bot is not ready yet"}, status=503)
+
+    from vyron.utils.helpers import is_chat_admin
+
+    if not await is_chat_admin(runtime.bot, chat_id, user.user_id):
+        return web.json_response(
+            {"ok": False, "error": "only an admin of that chat can control it"}, status=403
+        )
+
+    logger.info("webapp: %s attached to chat %s", user.user_id, chat_id)
+    return web.json_response(
+        {
+            "ok": True,
+            "chat_id": chat_id,
+            "token": make_token(chat_id, user.user_id, settings.bot_token),
+        }
+    )
+
+
 async def rooms(request: web.Request) -> web.Response:
     user = await _identify(request)
     denied = _denied(user)
@@ -883,6 +922,7 @@ def register(app: web.Application) -> None:
     app.router.add_get("/api/info", info)
     app.router.add_get("/api/home", home)
     app.router.add_get("/api/rooms", rooms)
+    app.router.add_post("/api/room", room_attach)
     app.router.add_get("/api/playlists", playlists_route)
     app.router.add_get("/api/mix", mix)
     app.router.add_get("/api/state", state)

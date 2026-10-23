@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ApiError, api, haptic, notify, telegram } from "./api";
+import { ApiError, api, haptic, notify, setToken, telegram } from "./api";
 import { resolveTrack, useAudioEngine, type AudioEngine } from "./audio";
 import type { AppState, HomePayload, Playlist, Room, Track, View } from "./types";
 
@@ -64,6 +64,8 @@ interface Store {
   loadMix: (key: string) => Promise<void>;
   refreshState: () => Promise<void>;
   refreshRooms: () => Promise<void>;
+  /** Point the app at a voice chat the user administers. */
+  attachRoom: (chatId: number) => Promise<boolean>;
   refreshPlaylists: () => Promise<void>;
   recent: string[];
   rememberSearch: (term: string) => void;
@@ -182,6 +184,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
       /* rooms are decorative — never block the UI */
     }
   }, []);
+
+  const attachRoom = useCallback(
+    async (chatId: number) => {
+      try {
+        const payload = await api.attachRoom(chatId);
+        setToken(payload.token);
+        await refreshState();
+        toast("Now controlling that voice chat", "success");
+        return true;
+      } catch (error) {
+        toast(error instanceof Error ? error.message : "Could not attach to that chat", "error");
+        return false;
+      }
+    },
+    [refreshState, toast]
+  );
 
   const refreshPlaylists = useCallback(async () => {
     try {
@@ -396,6 +414,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       loadMix,
       refreshState,
       refreshRooms,
+      attachRoom,
       refreshPlaylists,
       recent,
       rememberSearch,
@@ -408,7 +427,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       state, home, rooms, playlists, results, view, setView, query, searchFilter, libraryFilter,
       selectedPlaylist, openPlaylist, theme, setTheme, accent, setAccent, normalise, setNormalise,
       toastMessage, toast, toastTone, modal, openModal, closeModal, act, play, runSearch, loadMix,
-      refreshState, refreshRooms, refreshPlaylists, recent, rememberSearch, searching, access,
+      refreshState, refreshRooms, attachRoom, refreshPlaylists, recent, rememberSearch, searching, access,
       dragging,
       audio, cast,
     ]

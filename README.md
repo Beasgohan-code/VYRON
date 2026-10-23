@@ -368,8 +368,10 @@ WEBAPP_URL=https://your-deployment        # Render/Koyeb URL
   `/api/home`, `/api/search`, `/api/mix`, `/api/rooms`, `/api/playlists`,
   `/api/lyrics` and streaming audio at `/api/stream/{id}` (HTTP Range, so seeking
   works) over the *same* `Player` the bot uses, so chat and app never disagree.
-- **Auth** — Telegram `initData` (HMAC-verified) or a signed chat token, so the
-  app can control a *group* player opened from a `/app` link.
+- **Auth** — Telegram `initData` (HMAC-verified) or a signed chat token. A group
+  player is reached from inside the app: *Rooms → Control* asks
+  `POST /api/room` for a chat-scoped token, which the server only mints for an
+  admin of that chat (owners always).
 - **Swap the UI** — `frontend/` is self-contained; any bundle dropped in
   `webapp/dist` (or set `WEBAPP_DIR`) is served instead. Contract:
   [`webapp/README.md`](webapp/README.md).

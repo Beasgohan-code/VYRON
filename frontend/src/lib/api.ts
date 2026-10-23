@@ -60,6 +60,12 @@ export function token(): string {
   return localStorage.getItem(TOKEN_KEY) ?? "";
 }
 
+/** Keep a chat-scoped token so the app can drive a group player later. */
+export function setToken(value: string): void {
+  if (value) localStorage.setItem(TOKEN_KEY, value);
+  else localStorage.removeItem(TOKEN_KEY);
+}
+
 /** Signed owner token from `/apitoken` (`?ot=…` links). */
 export function ownerToken(): string {
   return localStorage.getItem(OWNER_KEY) ?? "";
@@ -114,6 +120,10 @@ export const api = {
   mix: (key: string) => request<{ tracks: Track[]; preview?: boolean }>(`/api/mix?key=${encodeURIComponent(key)}`),
 
   rooms: () => request<{ rooms: Room[]; preview?: boolean }>("/api/rooms"),
+
+  /** Ask the server for a chat-scoped token for a room the user administers. */
+  attachRoom: (chatId: number) =>
+    request<{ ok: boolean; chat_id: number; token: string }>("/api/room", { chat_id: chatId }),
 
   playlists: () => request<{ playlists: Playlist[]; preview?: boolean }>("/api/playlists"),
 

@@ -99,6 +99,7 @@ every owner token at once.
 | `POST` | `/api/search` | `{query, limit}` | `results[]` |
 | `GET` | `/api/mix` | `?key=daily\|chill\|…` | `tracks[]` |
 | `GET` | `/api/rooms` | – | `rooms[]` (`chat_id`, `title`, `username`, `listeners`, `playing`, `paused`, `track`, `volume`, `effects`) |
+| `POST` | `/api/room` | `{chat_id}` | `{token, chat_id}` — a chat-scoped token for a group the caller **administers**, so the Mini App can drive that voice chat without a URL |
 | `GET` | `/api/playlists` | – | `playlists[]` (`id`, `name`, `count`, `duration`, `covers[]` (real thumbnail URLs from the playlist), `tracks[]`) |
 | `POST` | `/api/action` | `{action, value}` | action result |
 | `POST` | `/api/auth` | – | `{token}` scoped to the current chat |

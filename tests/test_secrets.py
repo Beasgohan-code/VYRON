@@ -182,7 +182,7 @@ def test_app_command_in_a_dm_sends_a_web_app_button(webapp_configured, sent):
     buttons = [button for row in keyboard.inline_keyboard for button in row]
     webapp_buttons = [button for button in buttons if getattr(button, "web_app", None)]
     assert webapp_buttons, "the DM must carry a web_app button"
-    assert webapp_buttons[0].web_app.url == "https://vyron.test/app"
+    assert webapp_buttons[0].web_app.url == "https://vyron.test/app/"
 
 
 # ── ordinary users never get one ─────────────────────────────────────────────

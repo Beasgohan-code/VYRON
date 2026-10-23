@@ -602,3 +602,61 @@ def test_logs_action_clear_is_owner_only():
         assert payload["ok"] is True and "stats" in payload
 
     asyncio.run(_with_client(scenario))
+
+
+# ── rooms: attach from the Mini App (no URL, no browser) ────────────────────
+def test_room_attach_requires_admin_and_mints_a_chat_token(monkeypatch):
+    from pyrogram.enums import ChatMemberStatus
+
+    from vyron.runtime import runtime
+
+    class FakeMember:
+        def __init__(self, status):
+            self.status = status
+
+    class FakeBot:
+        def __init__(self, status):
+            self.status = status
+            self.calls: list[tuple[int, int]] = []
+
+        async def get_chat_member(self, chat_id, user_id):
+            self.calls.append((chat_id, user_id))
+            if self.status is None:
+                raise RuntimeError("not a member")
+            return FakeMember(self.status)
+
+    chat_id = -1009876543210
+    outsider = auth.make_token(0, 555001, TOKEN)
+
+    async def scenario(client):
+        admin_bot = FakeBot(ChatMemberStatus.ADMINISTRATOR)
+        monkeypatch.setattr(runtime, "bot", admin_bot, raising=False)
+
+        attached = await client.post(
+            "/api/room", json={"chat_id": chat_id}, headers={"X-Vyron-Token": outsider}
+        )
+        body = await attached.json()
+        assert attached.status == 200 and body["ok"] is True
+        assert body["chat_id"] == chat_id
+        who = auth.verify_token(body["token"], TOKEN)
+        assert who is not None and who.chat_id == chat_id and who.user_id == 555001
+        assert admin_bot.calls == [(chat_id, 555001)]
+
+        # a plain member cannot take over somebody else's room
+        monkeypatch.setattr(runtime, "bot", FakeBot(ChatMemberStatus.MEMBER), raising=False)
+        denied = await client.post(
+            "/api/room", json={"chat_id": chat_id}, headers={"X-Vyron-Token": outsider}
+        )
+        assert denied.status == 403
+
+        # private chats are not rooms
+        private = await client.post(
+            "/api/room", json={"chat_id": 555001}, headers={"X-Vyron-Token": outsider}
+        )
+        assert private.status == 400
+
+        # the endpoint is not a way to probe chats anonymously
+        anonymous = await client.post("/api/room", json={"chat_id": chat_id})
+        assert anonymous.status == 401
+
+    asyncio.run(_with_client(scenario))
