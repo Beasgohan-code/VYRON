@@ -4,6 +4,7 @@ import { BootScreen } from "./components/BootScreen";
 import { Dock } from "./components/Dock";
 import { Rail, Tabs } from "./components/Nav";
 import { Sheet } from "./components/Sheet";
+import { setOwnerToken } from "./lib/api";
 import { useApp } from "./lib/store";
 import { Home } from "./views/Home";
 import { Library } from "./views/Library";
@@ -170,6 +171,17 @@ function LockedGate({
   onRetry: () => Promise<void>;
 }) {
   const handle = bot || "VyronMusicBot";
+  const [token, setToken] = useState("");
+  const [tried, setTried] = useState(false);
+
+  const submit = async () => {
+    const clean = token.trim();
+    if (!clean) return;
+    setOwnerToken(clean);
+    setTried(true);
+    await onRetry();
+  };
+
   return (
     <section className="gate">
       <div className="gate-art" aria-hidden="true" />
@@ -206,6 +218,38 @@ function LockedGate({
             <b>3</b> The app unlocks with your account
           </li>
         </ol>
+
+        {/* A browser has no Telegram session, so the owner gets a real key. */}
+        <form
+          className="gate-token"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void submit();
+          }}
+        >
+          <label htmlFor="owner-token">Owner access</label>
+          <input
+            id="owner-token"
+            type="password"
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="paste your owner token"
+            value={token}
+            onChange={(event) => setToken(event.target.value)}
+          />
+          <div className="row">
+            <button type="submit" className="btn btn-primary sm" disabled={!token.trim() || retrying}>
+              Unlock this browser
+            </button>
+            <small>Run <code>/apitoken</code> in the bot and open the link it sends.</small>
+          </div>
+          {tried && (
+            <small>
+              Still locked? The token may have expired — mint a new one with{" "}
+              <code>/apitoken</code>, or revoke old ones in <code>/apitoken list</code>.
+            </small>
+          )}
+        </form>
       </div>
     </section>
   );

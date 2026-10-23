@@ -71,6 +71,16 @@ export function ownerToken(): string {
   return localStorage.getItem(OWNER_KEY) ?? "";
 }
 
+/** Paste an owner token (from `/apitoken`) to unlock a plain browser. */
+export function setOwnerToken(value: string): void {
+  if (value) localStorage.setItem(OWNER_KEY, value);
+  else localStorage.removeItem(OWNER_KEY);
+}
+
+/** How long a request may take before we assume the deployment is asleep. */
+const REQUEST_TIMEOUT_MS = 14000;
+const COLD_START_TIMEOUT_MS = 26000;
+
 export class ApiError extends Error {
   status: number;
 
@@ -81,17 +91,39 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, body?: unknown): Promise<T> {
-  const response = await fetch(path, {
-    method: body === undefined ? "GET" : "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Init-Data": telegram()?.initData ?? "",
-      "X-Vyron-Token": token(),
-      ...(ownerToken() ? { "X-Owner-Token": ownerToken() } : {}),
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-    credentials: "same-origin",
-  });
+  // A free Render instance can take ~40 s to wake. Without a timeout the
+  // request (and the boot screen behind it) simply hangs forever, which looks
+  // like a broken app rather than a starting one.
+  const long = path.includes("/search") || path.includes("/mix");
+  const controller = typeof AbortController === "function" ? new AbortController() : null;
+  const limit = long ? COLD_START_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
+  const timer = controller ? window.setTimeout(() => controller.abort(), limit) : 0;
+
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      method: body === undefined ? "GET" : "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Init-Data": telegram()?.initData ?? "",
+        "X-Vyron-Token": token(),
+        ...(ownerToken() ? { "X-Owner-Token": ownerToken() } : {}),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      credentials: "same-origin",
+      signal: controller?.signal,
+    });
+  } catch (error) {
+    if ((error as Error)?.name === "AbortError") {
+      throw new ApiError("the server is still starting — give it a moment", 0);
+    }
+    throw new ApiError(
+      error instanceof Error ? error.message : "the server could not be reached",
+      0
+    );
+  } finally {
+    window.clearTimeout(timer);
+  }
 
   let payload: Record<string, unknown> = {};
   try {

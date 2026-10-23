@@ -376,6 +376,18 @@ def register(client: Client) -> None:
             await cq.answer()
             return
 
+        if action == "ui":
+            from vyron.modules import uistyle
+
+            actor = cq.from_user.id if cq.from_user else 0
+            if not is_owner(actor):
+                await cq.answer("Owner only", show_alert=True)
+                return
+            chosen = await uistyle.set_style(arg)
+            await _show(client, cq, uistyle.card(), keyboards.back_close("v:help:main"))
+            await cq.answer(f"Interface: {uistyle.STYLES.get(chosen, chosen)}")
+            return
+
         if action == "settings":
             # A fresh process starts from defaults; the persisted loop/volume
             # only arrive through restore_settings, so ask before showing them.

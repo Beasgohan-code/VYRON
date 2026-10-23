@@ -106,6 +106,32 @@ async def lookup_async(media_id: str, *, user_id: int = 0) -> Track | None:
     return None
 
 
+_DIRECT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
+
+
+async def lookup_playable(media_id: str, *, user_id: int = 0) -> Track | None:
+    """Find a track the app ask to play, even after a restart.
+
+    The registry is per-process: a redeploy (or Render putting the instance to
+    sleep) empties it, and every track the UI still shows suddenly became
+    "unknown track". A YouTube id is self-describing, so resolve it directly
+    instead of failing the listener.
+    """
+    found = await lookup_async(media_id, user_id=user_id)
+    if found is not None:
+        return found
+    youtube = runtime.youtube
+    if youtube is None or not _DIRECT_ID_RE.match(media_id):
+        return None
+    try:
+        track = await youtube.resolve(f"https://youtu.be/{media_id}")
+    except Exception as exc:
+        logger.info("direct resolve failed for %s: %s", media_id, exc)
+        return None
+    remember(track)
+    return track
+
+
 def registry_size() -> int:
     return len(_REGISTRY)
 
@@ -223,7 +249,7 @@ async def stream(request: web.Request) -> web.StreamResponse:
     if not media_id or "/" in media_id or ".." in media_id:
         return web.json_response({"ok": False, "error": "bad id"}, status=400)
 
-    track = await lookup_async(media_id, user_id=user.user_id)
+    track = await lookup_playable(media_id, user_id=user.user_id)
     if track is None:
         return web.json_response(
             {"ok": False, "error": "unknown track", "hint": "search for it first"},
@@ -302,7 +328,7 @@ async def stream(request: web.Request) -> web.StreamResponse:
 async def audio_info(request: web.Request) -> web.Response:
     user = _identity(request)
     media_id = (request.match_info.get("media_id") or "").strip()
-    track = await lookup_async(media_id, user_id=user.user_id)
+    track = await lookup_playable(media_id, user_id=user.user_id)
     if track is None:
         return web.json_response({"ok": False, "error": "unknown track"}, status=404)
     cached = runtime.downloader.cached(track) if runtime.downloader else None

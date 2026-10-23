@@ -19,7 +19,7 @@ from pyrogram.types import Message
 from vyron.core import playlists as store
 from vyron.runtime import runtime
 from vyron.ui import blocks as B
-from vyron.ui import rich
+from vyron.ui import keyboards, rich
 from vyron.ui.progress import fmt_duration, truncate
 from vyron.ui.theme import E
 from vyron.utils.helpers import command_args
@@ -117,7 +117,7 @@ def register(client: Client) -> None:
         )
 
     # ── /pl <name>──────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["pl", "playlistplay", "plplay", "loadpl", "loadplaylist"]))
+    @client.on_message(filters.command(["pl", "pplay", "playlistplay", "plplay", "loadpl", "loadplaylist"]))
     async def _play_saved(_: Client, message: Message) -> None:
         name = command_args(message)
         if not name:
@@ -160,7 +160,7 @@ def register(client: Client) -> None:
         )
 
     # ── /pldel ─────────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["pldel", "plremove", "playlistdelete", "rmplaylist", "delpl", "deleteplaylist"]))
+    @client.on_message(filters.command(["pldel", "pdelete", "plremove", "playlistdelete", "rmplaylist", "delpl", "deleteplaylist"]))
     async def _delete(_: Client, message: Message) -> None:
         name = command_args(message)
         playlist = await store.find(_uid(message), name) if name else None
@@ -179,6 +179,169 @@ def register(client: Client) -> None:
             B.note(f"{E('check')} Deleted <b>{rich.esc(playlist['name'])}</b>."),
             reply_to=message.id,
         )
+    # ── /pcreate · /padd · /pview · /premove (Shizu command names) ─────────
+    @client.on_message(filters.command(["pcreate", "newpl"]))
+    async def _pcreate(_: Client, message: Message) -> None:
+        name = store.clean_name(command_args(message) or "")
+        if not name:
+            await rich.send(
+                client,
+                message.chat.id,
+                B.note(f"{E('info')} Usage: <code>/pcreate chill nights</code>"),
+                reply_to=message.id,
+            )
+            return
+        if await store.find(_uid(message), name):
+            await rich.send(
+                client,
+                message.chat.id,
+                B.note(f"{E('warn')} You already have a playlist called <b>{rich.esc(name)}</b>."),
+                reply_to=message.id,
+            )
+            return
+        playlist = await store.create(_uid(message), name)
+        await rich.send(
+            client,
+            message.chat.id,
+            B.heading(f"{E('playlist')} playlist created", 3)
+            + B.kv(
+                [
+                    (f"{E('name')} name", f"<b>{rich.esc(playlist['name'])}</b>"),
+                    (f"{E('plus')} tracks", "<b>0</b>"),
+                ]
+            )
+            + B.note(
+                f"{E('info')} <code>/padd {rich.esc(playlist['name'])}</code> adds what is playing now."
+            ),
+            reply_to=message.id,
+        )
+
+    @client.on_message(filters.command(["padd", "pladd"]))
+    async def _padd(_: Client, message: Message) -> None:
+        """Add the current track (or a replied audio) to a named playlist."""
+        name = store.clean_name(command_args(message) or "")
+        if not name:
+            await rich.send(
+                client,
+                message.chat.id,
+                B.note(f"{E('info')} Usage: <code>/padd chill nights</code>"),
+                reply_to=message.id,
+            )
+            return
+        playlist = await store.find(_uid(message), name)
+        if playlist is None:
+            playlist = await store.create(_uid(message), name)
+
+        track = None
+        replied = message.reply_to_message
+        if replied is not None and getattr(replied, "audio", None):
+            from vyron.utils.helpers import track_from_message
+
+            track = track_from_message(replied)
+        if track is None and runtime.player:
+            chat_state = runtime.player.queues.get(message.chat.id)
+            track = chat_state.current
+        if track is None:
+            await rich.send(
+                client,
+                message.chat.id,
+                B.note(f"{E('warn')} Nothing is playing — start a track or reply to an audio file."),
+                reply_to=message.id,
+            )
+            return
+
+        added = await store.add_tracks(_uid(message), playlist["id"], [track])
+        await rich.send(
+            client,
+            message.chat.id,
+            B.note(
+                f"{E('check')} <b>{'Added' if added else 'Already there'}</b> · "
+                f"{rich.esc(truncate(track.title, 44))} → <b>{rich.esc(playlist['name'])}</b>"
+            ),
+            reply_to=message.id,
+        )
+
+    @client.on_message(filters.command(["pview", "plview"]))
+    async def _pview(_: Client, message: Message) -> None:
+        name = store.clean_name(command_args(message) or "")
+        playlist = await store.find(_uid(message), name) if name else None
+        if playlist is None:
+            await rich.send(
+                client,
+                message.chat.id,
+                B.note(
+                    f"{E('info')} <code>/pview &lt;name&gt;</code> — "
+                    f"{len(await store.list_playlists(_uid(message)))} playlists saved."
+                ),
+                reply_to=message.id,
+            )
+            return
+        tracks = playlist.get("tracks", [])
+        rows = [
+            (
+                f"<b>{index}</b>",
+                rich.esc(truncate(str(item.get("title") or "—"), 40)),
+                fmt_duration(int(item.get("duration") or 0)),
+            )
+            for index, item in enumerate(tracks[:20], start=1)
+        ]
+        total = sum(int(item.get("duration") or 0) for item in tracks)
+        body = B.heading(f"{E('playlist')} {rich.esc(truncate(playlist['name'], 34))}", 3)
+        body += (
+            B.table(["#", "title", "time"], rows)
+            if rows
+            else B.note(f"{E('moon')} Empty — <code>/padd {rich.esc(playlist['name'])}</code>.")
+        )
+        body += B.note(
+            f"{E('clock')} <b>{len(tracks)}</b> tracks · <b>{fmt_duration(total)}</b> · "
+            f"<code>/pplay {rich.esc(truncate(playlist['name'], 24))}</code>"
+        )
+        await rich.send(
+            client,
+            message.chat.id,
+            body,
+            markup_keyboard=keyboards.back_close("v:help:main"),
+            reply_to=message.id,
+        )
+
+    @client.on_message(filters.command(["premove", "pltrim"]))
+    async def _premove(_: Client, message: Message) -> None:
+        """``/premove <name> <index>`` — the index shown by /pview."""
+        args = command_args(message).split()
+        if len(args) < 2 or not args[-1].isdigit():
+            await rich.send(
+                client,
+                message.chat.id,
+                B.note(f"{E('info')} Usage: <code>/premove chill nights 3</code>"),
+                reply_to=message.id,
+            )
+            return
+        index = int(args[-1])
+        name = store.clean_name(" ".join(args[:-1]))
+        playlist = await store.find(_uid(message), name)
+        tracks = (playlist or {}).get("tracks", [])
+        if playlist is None or not (1 <= index <= len(tracks)):
+            await rich.send(
+                client,
+                message.chat.id,
+                B.note(f"{E('warn')} No track #{index} in that playlist."),
+                reply_to=message.id,
+            )
+            return
+        item = tracks[index - 1]
+        removed = await store.remove_track(_uid(message), playlist["id"], str(item.get("id") or ""))
+        await rich.send(
+            client,
+            message.chat.id,
+            B.note(
+                f"{E('check')} Removed <b>{rich.esc(truncate(str(item.get('title') or '—'), 40))}</b>"
+                f" from <b>{rich.esc(playlist['name'])}</b>"
+                if removed
+                else f"{E('warn')} That track is already gone."
+            ),
+            reply_to=message.id,
+        )
+
 
 
 __all__ = ["register"]

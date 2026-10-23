@@ -34,10 +34,16 @@ export function Dock() {
 
       <div className="dock-info" onClick={() => audio.setExpanded(true)} role="presentation">
         <b className="dock-title">{track.title}</b>
-        <span className="dock-sub">
-          {audio.playing ? <Equalizer playing bars={3} /> : null}
-          {track.uploader || "VYRON"}
-          {total ? ` · ${fmtDuration(audio.position)}` : ""}
+        <span className={`dock-sub ${audio.error ? "err" : ""}`}>
+          {audio.error ? (
+            audio.error
+          ) : (
+            <>
+              {audio.playing ? <Equalizer playing bars={3} /> : null}
+              {track.uploader || "VYRON"}
+              {total ? ` · ${fmtDuration(audio.position)}` : ""}
+            </>
+          )}
         </span>
       </div>
 
@@ -50,6 +56,16 @@ export function Dock() {
         >
           <Heart size={17} fill={liked ? "currentColor" : "none"} />
         </button>
+        {audio.error && (
+          <button
+            type="button"
+            className="btn-icon"
+            aria-label="Retry playback"
+            onClick={() => void audio.play(track)}
+          >
+            <Play size={17} fill="currentColor" />
+          </button>
+        )}
         <button type="button" className="btn-icon" aria-label="Previous" onClick={audio.prev}>
           <SkipBack size={18} fill="currentColor" />
         </button>

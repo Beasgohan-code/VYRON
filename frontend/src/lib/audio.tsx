@@ -210,39 +210,15 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
       setError(null);
       setLoading(true);
 
-      // Preflight tells us whether the server can even resolve this track; a
-      // generic "playback blocked" toast wastes the listener's time.
-      if (typeof fetch === "function") {
-        try {
-          const probe = await fetch(infoUrl(next));
-          const info = (await probe.json()) as {
-            ok?: boolean;
-            playable?: boolean;
-            reason?: string;
-            error?: string;
-          };
-          if (stale()) return;
-          if (info && (info.playable === false || info.ok === false)) {
-            const why = info.reason || info.error || "this track cannot be streamed right now";
-            setLoading(false);
-            setPlaying(false);
-            setError(why);
-            toast?.(why, "error");
-            return;
-          }
-        } catch {
-          /* the probe is a nicety: never block playback on it */
-        }
-      }
-      if (stale()) return;
-
-      // Commit the UI to the new track only once it is safe to play it: a
-      // failed load must not relabel the artwork while the old song plays on.
+      // Start inside the tap. Awaiting the preflight first used to break the
+      // user-gesture chain in Telegram's iOS webview — the element then refused
+      // to start, which looked exactly like "the app cannot play songs".
       setTrack(next);
       if (list) setQueue(list);
       setPosition(0);
       setDuration(next.duration ?? 0);
       retry.current = { key: keyOf(next), attempts: 0 };
+
       try {
         audio.src = streamUrl(next);
         await audio.play();
@@ -253,9 +229,42 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
         setPlaying(false);
         const blocked = cause instanceof DOMException && cause.name === "NotAllowedError";
         setError(blocked ? "tap play to start" : "could not start this track");
-        toast?.(blocked ? "Tap play to start the audio" : "That track would not start — try another", "info");
+        toast?.(
+          blocked ? "Tap play to start the audio" : "That track would not start — try another",
+          "info"
+        );
       } finally {
         if (!stale()) setLoading(false);
+      }
+
+      // The preflight now runs *alongside* playback: it cannot block the start,
+      // but its answer is still the clearest reason we can show when the server
+      // knows the track is unavailable.
+      if (typeof fetch !== "function") return;
+      try {
+        const probe = await fetch(infoUrl(next));
+        const info = (await probe.json()) as {
+          ok?: boolean;
+          playable?: boolean;
+          reason?: string;
+          error?: string;
+        };
+        if (stale()) return;
+        const dead = info && (info.playable === false || info.ok === false);
+        if (!dead) return;
+        // Only take over the UI if nothing is actually playing yet.
+        const silent = !audio.currentTime || audio.paused;
+        if (!silent) return;
+        audio.pause();
+        setPlaying(false);
+        const why =
+          info.error === "unauthorized"
+            ? "Open VYRON inside Telegram (or unlock this browser) to play"
+            : info.reason || info.error || "this track cannot be streamed right now";
+        setError(why);
+        toast?.(why, "error");
+      } catch {
+        /* the probe is a nicety: it must never break playback */
       }
     },
     [el, toast]

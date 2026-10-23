@@ -47,6 +47,8 @@ COMMANDS = [
     ("lyrics", "find lyrics"),
     ("settings", "per-chat settings"),
     ("language", "change VYRON's language"),
+    ("uistyle", "switch rich / classic cards"),
+    ("uicheck", "verify the UI renders here"),
     ("app", "open the player web app"),
     ("api", "music API for other bots"),
     ("getapi", "mint a music API key"),
@@ -254,6 +256,23 @@ async def _async_main() -> int:
         )
 
     await runtime.build_services()
+
+    # the interface style is a deployment choice the owner can flip at runtime
+    from vyron.modules import uistyle
+
+    await uistyle.load()
+    report = uistyle.probe()
+    logger.info(
+        "interface: %s (rich api %s) · /start card %d chars, %d buttons → classic %d chars",
+        report["style"],
+        "yes" if report["rich_api"] else "no",
+        report["rich_chars"],
+        report["buttons"],
+        report["classic_chars"],
+    )
+    if not report["ok"]:
+        logger.error("interface: the start card does not render in either lane")
+
     from vyron.core import logsink
 
     logsink.install(bot)
