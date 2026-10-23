@@ -77,6 +77,13 @@ class Settings:
     stream_cache_ttl: int = field(default_factory=lambda: max(60, _int("STREAM_CACHE_TTL", 1800)))
     download_cache_hours: int = field(default_factory=lambda: max(1, _int("DOWNLOAD_CACHE_HOURS", 24)))
     maintenance_hours: int = field(default_factory=lambda: _int("MAINTENANCE_HOURS", 6))
+    keepalive_minutes: int = field(default_factory=lambda: max(0, _int("KEEPALIVE_MINUTES", 10)))
+    keepalive_url: str = field(
+        default_factory=lambda: (
+            _env("KEEPALIVE_URL") or _env("RENDER_EXTERNAL_URL") or _env("PUBLIC_URL")
+        )
+    )
+    watchdog_seconds: int = field(default_factory=lambda: max(0, _int("WATCHDOG_SECONDS", 60)))
     maintenance_days: int = field(default_factory=lambda: max(1, _int("MAINTENANCE_DAYS", 30)))
     max_download_mb: int = field(default_factory=lambda: max(1, _int("MAX_DOWNLOAD_MB", 200)))
 
@@ -181,6 +188,11 @@ class Settings:
         if self.webapp and not self.webapp_url:
             notes.append("WEBAPP=true but WEBAPP_URL is empty — the Mini App button stays hidden.")
         return notes
+
+    @property
+    def render_external_url(self) -> str:
+        """Render publishes the public URL of the service under this name."""
+        return _env("RENDER_EXTERNAL_URL")
 
     @property
     def webapp_ready(self) -> bool:

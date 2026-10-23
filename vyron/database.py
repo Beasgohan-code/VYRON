@@ -219,16 +219,38 @@ class MongoStorage(Storage):
     async def connect(self) -> None:
         from pymongo import MongoClient
 
+        raw = (self.settings.mongo_url or "").strip()
+        if not raw.startswith(("mongodb://", "mongodb+srv://")):
+            raise ValueError(
+                "MONGO_URL must start with mongodb:// or mongodb+srv:// "
+                "(copy the whole connection string from Atlas)"
+            )
+
         def _connect():
-            client = MongoClient(self.settings.mongo_url, serverSelectionTimeoutMS=8000)
+            client = MongoClient(
+                raw,
+                serverSelectionTimeoutMS=8000,
+                connectTimeoutMS=8000,
+                socketTimeoutMS=20000,
+                # Atlas free tier is reachable from Render, but DNS SRV lookups
+                # occasionally fail on cold start — retry once before giving up.
+                retryWrites=True,
+            )
             client.admin.command("ping")
             return client
 
         self._client = await asyncio.to_thread(_connect)
         self._db = self._client[self.settings.mongo_db]
-        await self._db.chats.create_index("chat_id", unique=True)
-        await self._db.favorites.create_index([("user_id", 1), ("id", 1)])
+        # pymongo's create_index is synchronous — it returns the index *name*,
+        # so awaiting it directly raises "object str can't be used in 'await'".
+        await asyncio.to_thread(self._ensure_indexes)
         logger.info("storage: MongoDB (%s)", self.settings.mongo_db)
+
+    def _ensure_indexes(self) -> None:
+        self._db.chats.create_index("chat_id", unique=True)
+        self._db.favorites.create_index([("user_id", 1)])
+        self._db.history.create_index([("user_id", 1)])
+        self._db.playlists.create_index([("user_id", 1)])
 
     async def close(self) -> None:
         if self._client is not None:
@@ -386,7 +408,12 @@ async def make_storage(settings: Settings) -> Storage:
             await storage.connect()
             return storage
         except Exception as exc:
-            logger.warning("MongoDB unavailable (%s) — falling back to JSON storage", exc)
+            logger.warning(
+                "MongoDB unavailable (%s) — falling back to JSON storage. "
+                "Check MONGO_URL/MONGO_DB and that this host can reach the cluster "
+                "(Atlas → Network Access).",
+                exc,
+            )
     storage = JsonStorage(settings)
     await storage.connect()
     return storage

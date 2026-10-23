@@ -145,6 +145,17 @@ Health check → <http://localhost:8080/health> · Mini App → <http://localhos
 
 `/queue [page]` · `/remove 3` · `/move 3 1` · `/jump 2` · `/clear`
 
+### Convenience
+
+| Command | What it does |
+|---|---|
+| `/timer 30` · `/timer 1h30m` · `/timer off` | stop playback and leave the VC when the timer ends |
+| `/random [mood or query]` | play a surprise track from trending, a mood, or a search |
+| `/exportpl <name>` | send the playlist as a portable JSON file |
+| `/importpl [name]` | reply to that file to restore the playlist |
+| `/replay` | start the current track over |
+| `/daemons` | housekeeping, watchdog, keep-alive and timer status (owner) |
+
 ### Tools
 
 `/lyrics` · `/fav` · `/favs` · `/history` · `/settings` · `/247` · `/stats` · `/ping` · `/id` · `/emojis`
@@ -352,6 +363,9 @@ VYRON/
 │   │   ├── votes.py            # group vote-skip tallies
 │   │   ├── acl.py              # runtime sudo roster (/addsudo)
 │   │   ├── maintenance.py      # periodic downloads + DB sweep
+│   │   ├── keepalive.py        # self-ping so free hosts stay awake
+│   │   ├── watchdog.py         # reconnects a dropped bot/assistant client
+│   │   ├── timers.py           # /timer parsing + per-chat sleep timers
 │   │   ├── playlists.py        # per-user saved playlists
 │   │   └── pending.py          # short-lived picker state
 │   ├── ui/
@@ -363,13 +377,13 @@ VYRON/
 │   ├── modules/                # start, play, controls, queue, settings, tools, effects,
 │   │                           # channel, moderation, locks, admin, extras, inline, callbacks,
 │   │                           # smartqueue, savedplaylists, diagnostics, power,
-│   │                           # assistant_tools
+│   │                           # assistant_tools, convenience
 │   ├── web/                    # Mini App: auth, JSON API
 │   ├── utils/                  # helpers, filters, net, health server, artwork renderer
 │   └── tools/                  # session generator, emoji pack builder, cover generator, preview
 ├── frontend/                   # React + TS + Vite Mini App (src/views · src/components · src/lib)
 ├── webapp/dist/                # built bundle served at /app (regenerate with npm run build)
-└── tests/                      # 126 offline tests
+└── tests/                      # 160 offline tests
 ```
 
 **Design rules**
@@ -408,6 +422,9 @@ The interesting optional ones:
 | `MONGO_URL` | – | persistence (JSON file otherwise) |
 | `PREMIUM_EMOJI_FILE` | `./emoji.json` | custom emoji pack |
 | `RICH_MESSAGES` | `true` | rich cards (set `false` for plain HTML) |
+| `KEEPALIVE_MINUTES` | `10` | ping our own `/health` + `/app/` so free hosts don't sleep (`0` = off) |
+| `KEEPALIVE_URL` | `RENDER_EXTERNAL_URL` | public URL to ping on Koyeb/Railway |
+| `WATCHDOG_SECONDS` | `60` | reconnect the bot/assistant if the socket drops (`0` = off) |
 | `MAINTENANCE_HOURS` | `6` | prune downloads + old DB rows every N hours (`0` = off) |
 | `MAINTENANCE_DAYS` | `30` | history/favourites older than this are pruned |
 | `PORT` | `8080` | health server |
@@ -420,7 +437,7 @@ Full list with comments: [`.env.example`](.env.example).
 
 ```bash
 pip install pytest pytest-asyncio
-python -m pytest tests -q      # 126 passed
+python -m pytest tests -q      # 160 passed
 
 cd frontend && npm test        # 5 component tests (vitest + jsdom)
 ```
@@ -438,6 +455,24 @@ Python 3.11/3.12 and Node 22, and builds + smoke-tests the Docker image.
 
 ---
 
+## 🫀 Staying alive
+
+Two background loops keep a long deployment honest:
+
+- **Keep-alive** — every `KEEPALIVE_MINUTES` the bot GETs `{public}/health` and
+  `{public}/app/`. Render sets `RENDER_EXTERNAL_URL` for you; on Koyeb or
+  Railway set `KEEPALIVE_URL=https://your-service`. This stops a free instance
+  from sleeping (and waking to a cold-start delay in Telegram).
+- **Watchdog** — every `WATCHDOG_SECONDS` it checks that the bot client is
+  connected, calls `get_me()`, and reconnects (`stop()` → `start()`) if the
+  socket died. Two consecutive timeouts trigger a reconnect. The assistant is
+  only checked while streaming is enabled.
+
+Both report into `GET /health` (`watchdog`, `keepalive` objects) and into the
+owner-only `/daemons` card.
+
+---
+
 ## 🩺 Troubleshooting
 
 | Symptom | Fix |
@@ -448,6 +483,9 @@ Python 3.11/3.12 and Node 22, and builds + smoke-tests the Docker image.
 | `Could not resolve that track` | YouTube changed something → `pip install -U yt-dlp`; for age-gated videos set `COOKIES_FILE`. |
 | Bot replies "already in use" | Two instances with the same `STRING_SESSION` — run only one. |
 | Docker build: `error: No such file or directory: 'gcc'` | TgCrypto has no cp312 wheel; the image compiles it in its own stage. Rebuild without cache (`docker compose build --no-cache`). |
+| MongoDB falls back to JSON | `MONGO_URL` must start with `mongodb://` or `mongodb+srv://`; whitelist the host in Atlas → Network Access. The bot keeps running on JSON storage meanwhile. |
+| `PEER_ID_INVALID` on boot | The owner never opened a chat with the bot — send `/start` once; the boot card then arrives next time. |
+| Mini App asleep / slow first load | Keep-alive is off — set `KEEPALIVE_URL` (or deploy on Render, where it is automatic). |
 | `ntgcalls` import error | Python must be 3.10–3.14 on x86-64/arm64; Docker image handles this. |
 | Nothing renders as rich | Server/Kurigram build too old → set `RICH_MESSAGES=false`; everything still works. |
 | Health check fails on Render | Keep `PORT=8080` and `runtime: docker` (Render routes to it automatically). |

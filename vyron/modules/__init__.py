@@ -10,6 +10,7 @@ from pyrogram import Client
 from vyron.modules import (
     admin,
     assistant_tools,
+    convenience,
     callbacks,
     channel,
     controls,
@@ -51,6 +52,7 @@ MODULES = (
     diagnostics,
     power,
     assistant_tools,
+    convenience,
 )
 
 

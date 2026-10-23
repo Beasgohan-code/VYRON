@@ -35,7 +35,26 @@ async def _health(_request: web.Request) -> web.Response:
     whether the bot has finished booting.
     """
     ready = runtime.bot is not None and runtime.storage is not None
-    return web.json_response({"ok": True, "ready": ready})
+    from vyron.core import keepalive, watchdog
+
+    return web.json_response(
+        {
+            "ok": True,
+            "ready": ready,
+            "streaming": runtime.streaming_ready,
+            "uptime": round(runtime.uptime, 1),
+            "watchdog": {
+                key: value
+                for key, value in watchdog.status().items()
+                if key in {"checks", "reconnects", "last", "last_error"}
+            },
+            "keepalive": {
+                key: value
+                for key, value in keepalive.status().items()
+                if key in {"enabled", "runs", "last_ok", "last_status"}
+            },
+        }
+    )
 
 
 def build_app(*, with_webapp: bool = True) -> web.Application:

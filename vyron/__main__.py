@@ -15,7 +15,7 @@ from vyron import __version__, banner_text, setup_logging
 from vyron.clients import build_assistant, build_bot
 from vyron.config import settings
 from vyron.modules import register_all
-from vyron.core import maintenance
+from vyron.core import keepalive, maintenance, watchdog
 from vyron.runtime import runtime
 from vyron.ui import cards, rich
 from vyron.utils import health
@@ -59,6 +59,8 @@ COMMANDS = [
     ("savepl", "save the queue as a playlist"),
     ("suggest", "tracks like this one"),
     ("whoami", "your id, role and chat"),
+    ("timer", "sleep timer for the voice chat"),
+    ("random", "play something unexpected"),
     ("stats", "bot statistics"),
     ("help", "all commands"),
 ]
@@ -101,8 +103,20 @@ async def _notify_owner(bot) -> None:
             markup_keyboard=None,
             silent=True,
         )
-    except Exception:
-        pass
+        logger.info("sent the boot card to the owner DM")
+    except Exception as exc:
+        # PEER_ID_INVALID simply means the owner has never opened a chat with
+        # the bot — that is a user action, not a bot failure.
+        text = str(exc)
+        if "PEER_ID_INVALID" in text or "USER_IS_BLOCKED" in text or "CHAT_NOT_FOUND" in text:
+            logger.info(
+                "could not DM the owner yet (%s) — send /start to @%s once and "
+                "future boot cards will arrive",
+                text.split("]")[-1].strip() or "PEER_ID_INVALID",
+                settings.bot_username,
+            )
+        else:
+            logger.debug("owner boot card failed: %s", exc)
 
 
 async def _async_main() -> int:
@@ -160,6 +174,8 @@ async def _async_main() -> int:
 
     await runtime.player.start_background()
     maintenance.start()
+    watchdog.start()
+    keepalive.start()
     await _notify_owner(bot)
 
     logger.info(
@@ -182,6 +198,8 @@ async def _async_main() -> int:
     finally:
         logger.info("shutting down…")
         await maintenance.stop()
+        await watchdog.stop()
+        await keepalive.stop()
         await runtime.shutdown()
         if runner is not None:
             try:
