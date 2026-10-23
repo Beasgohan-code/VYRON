@@ -1,4 +1,4 @@
-import { Download, Play, Plus, RefreshCw, Search, Sparkles, Users, Zap } from "lucide-react";
+import { Clock3, Download, Headphones, Play, Plus, RefreshCw, Search, Sparkles, Users, Zap } from "lucide-react";
 import { useState } from "react";
 import { api } from "../lib/api";
 import { coverFor, fmtDuration, greeting } from "../lib/format";
@@ -6,6 +6,7 @@ import { useApp } from "../lib/store";
 import { Cover } from "../components/Cover";
 import { Panel, SectionHead } from "../components/Panel";
 import { TrackCard } from "../components/TrackCard";
+import { Equalizer } from "../components/Equalizer";
 
 export function HomeView() {
   const {
@@ -21,6 +22,7 @@ export function HomeView() {
     playlists,
     act,
     toast,
+    audio,
   } = useApp();
   const [miniQuery, setMiniQuery] = useState("");
   const [miniResults, setMiniResults] = useState<{ title: string; duration?: number; query?: string }[]>([]);
@@ -46,9 +48,15 @@ export function HomeView() {
           </h1>
           <p>{home?.hero.subline ?? "Discover, stream, download and listen together — all in one place."}</p>
           <div className="hero-actions">
-            <button type="button" className="pill-btn accent" onClick={() => void play(trending[0]?.query, "play_now")}>
-              <Play size={15} fill="currentColor" /> Surprise me
-            </button>
+            {audio.track ? (
+              <button type="button" className="pill-btn accent" onClick={() => audio.setExpanded(true)}>
+                <Equalizer playing={audio.playing} bars={4} /> Resume “{audio.track.title.slice(0, 18)}”
+              </button>
+            ) : (
+              <button type="button" className="pill-btn accent" onClick={() => void play(trending[0]?.query, "play_now")}>
+                <Play size={15} fill="currentColor" /> Surprise me
+              </button>
+            )}
             <button type="button" className="pill-btn" onClick={() => setView("search")}>
               <Search size={15} /> Search
             </button>
@@ -82,6 +90,43 @@ export function HomeView() {
           </span>
         </div>
       </div>
+
+      {history.length > 0 && (
+        <>
+          <SectionHead right={<span className="muted small">on this device</span>}>
+            <span className="flame">
+              <Clock3 size={15} /> Continue listening
+            </span>
+          </SectionHead>
+          <div className="continue-row">
+            {history.map((track, index) => (
+              <button
+                key={`${track.id ?? track.title}-${index}`}
+                type="button"
+                className={`continue-card ${audio.isCurrent(track) ? "current" : ""}`}
+                onClick={() => void play(track, "play_now")}
+                aria-label={`Play ${track.title}`}
+              >
+                <Cover track={track} />
+                <span className="cc-text">
+                  <b>{track.title}</b>
+                  <span>{track.uploader || "unknown artist"}</span>
+                </span>
+                <span className="cc-go">
+                  {audio.isCurrent(track) && audio.playing ? <Equalizer playing bars={3} /> : <Play size={13} fill="currentColor" />}
+                </span>
+              </button>
+            ))}
+            <button type="button" className="continue-card ghost" onClick={() => setView("library")}>
+              <span className="cc-text">
+                <b>Open library</b>
+                <span>liked · playlists · history</span>
+              </span>
+              <Headphones size={15} />
+            </button>
+          </div>
+        </>
+      )}
 
       <SectionHead right={<button type="button" className="link-btn" onClick={() => setView("search")}>See all</button>}>
         <span className="flame">

@@ -170,6 +170,9 @@ async def _async_main() -> int:
     runtime.handlers_loaded = loaded
     await _set_commands(bot)
     await _setup_menu_button(bot)
+    if settings.music_api:
+        base = settings.api_base or f"http://0.0.0.0:{settings.port}"
+        logger.info("music api → %s/v1/docs  (owner: /getapi to mint a key)", base)
 
     await runtime.player.start_background()
     maintenance.start()

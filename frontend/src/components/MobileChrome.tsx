@@ -3,6 +3,7 @@ import { fmtDuration } from "../lib/format";
 import { useApp } from "../lib/store";
 import type { View } from "../lib/types";
 import { Cover } from "./Cover";
+import { Equalizer } from "./Equalizer";
 
 const TABS: { view: View; label: string; icon: typeof Home }[] = [
   { view: "home", label: "Home", icon: Home },
@@ -34,6 +35,7 @@ export function MiniPlayer() {
         <span className="mini-text">
           <b>{now.title}</b>
           <span>
+            {playing ? <Equalizer playing bars={3} /> : null}
             {now.uploader || "unknown"}
             {now.duration ? ` · ${fmtDuration(elapsed)}` : ""}
             {isLocal ? " · in app" : " · in call"}

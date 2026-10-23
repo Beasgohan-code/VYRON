@@ -57,6 +57,8 @@ VAR_KEYS: tuple[tuple[str, str], ...] = (
     ("PREMIUM_EMOJI", "premium emoji"),
     ("RICH_MESSAGES", "rich cards"),
     ("WEBAPP_URL", "web app"),
+    ("MUSIC_API", "music api"),
+    ("MUSIC_API_RATE", "api rate"),
     ("PORT", "port"),
     ("LOG_LEVEL", "log level"),
 )
