@@ -59,6 +59,8 @@ interface Store {
   play: (value: string | Track | undefined, mode?: "play" | "play_now") => Promise<void>;
   runSearch: (query: string, remember?: boolean) => Promise<void>;
   searching: boolean;
+  /** "ok" · "locked" (no Telegram session) · "offline" (server unreachable) */
+  access: "ok" | "locked" | "offline";
   loadMix: (key: string) => Promise<void>;
   refreshState: () => Promise<void>;
   refreshRooms: () => Promise<void>;
@@ -98,6 +100,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [results, setResults] = useState<Track[]>([]);
   const [searching, setSearching] = useState(false);
+  const [access, setAccess] = useState<"ok" | "locked" | "offline">("ok");
   const [view, setViewState] = useState<View>("home");
   const [query, setQuery] = useState("");
   const [searchFilter, setSearchFilter] = useState<SearchFilter>("all");
@@ -160,9 +163,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       const payload = await api.state();
       setState(payload);
+      setAccess("ok");
     } catch (error) {
-      if (error instanceof ApiError && error.status !== 401) {
-        toast(error.message, "error");
+      if (error instanceof ApiError) {
+        setAccess(error.status === 401 ? "locked" : "offline");
+        if (error.status !== 401) toast(error.message, "error");
+      } else {
+        setAccess("offline");
       }
     }
   }, [toast]);
@@ -361,6 +368,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       playlists,
       results,
       searching,
+      access,
       view,
       setView,
       query,
@@ -400,7 +408,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       state, home, rooms, playlists, results, view, setView, query, searchFilter, libraryFilter,
       selectedPlaylist, openPlaylist, theme, setTheme, accent, setAccent, normalise, setNormalise,
       toastMessage, toast, toastTone, modal, openModal, closeModal, act, play, runSearch, loadMix,
-      refreshState, refreshRooms, refreshPlaylists, recent, rememberSearch, searching, dragging,
+      refreshState, refreshRooms, refreshPlaylists, recent, rememberSearch, searching, access,
+      dragging,
       audio, cast,
     ]
   );

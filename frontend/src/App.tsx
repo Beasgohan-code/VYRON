@@ -5,6 +5,7 @@ import { MobileTabBar, MiniPlayer } from "./components/MobileChrome";
 import { PlayBar } from "./components/PlayBar";
 import { Modal } from "./components/Modal";
 import { NowPlayingRail } from "./components/NowPlayingRail";
+import { SessionGate } from "./components/SessionGate";
 import { ShortcutSheet } from "./components/ShortcutSheet";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
@@ -30,6 +31,20 @@ export default function App() {
     if (!root) return;
     reveal(root.querySelectorAll(":scope > *"), { y: 14, delay: 38, duration: 540 });
   }, [view]);
+
+  /* cards follow the pointer: one delegated listener instead of a handler each */
+  useEffect(() => {
+    const onMove = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      const card = target?.closest<HTMLElement>(".track-card, .playlist-card, .room-card");
+      if (!card) return;
+      const rect = card.getBoundingClientRect();
+      card.style.setProperty("--mx", `${event.clientX - rect.left}px`);
+      card.style.setProperty("--my", `${event.clientY - rect.top}px`);
+    };
+    window.addEventListener("pointermove", onMove, { passive: true });
+    return () => window.removeEventListener("pointermove", onMove);
+  }, []);
 
   /* keyboard shortcuts — ignored while typing */
   useEffect(() => {
@@ -68,6 +83,7 @@ export default function App() {
 
       <main className="main">
         <Topbar />
+        <SessionGate />
         {view === "home" && <HomeView />}
         {view === "search" && <SearchView />}
         {view === "library" && <LibraryView />}

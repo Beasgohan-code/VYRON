@@ -30,16 +30,12 @@ export function hashOf(value: string): number {
   return Math.abs(hash);
 }
 
-const COVER_COUNT = 10;
-
-export function coverFor(track?: { title?: string; uploader?: string } | null): string {
-  const seed = `${track?.title ?? ""}${track?.uploader ?? ""}`;
-  const index = (hashOf(seed) % COVER_COUNT) + 1;
-  return `/app/static/covers/${String(index).padStart(2, "0")}.jpg`;
-}
-
-export function thumbFor(track?: { thumbnail?: string | null; title?: string; uploader?: string } | null): string {
-  return track?.thumbnail || coverFor(track);
+/**
+ * Real artwork only. When a track has no thumbnail the UI draws its own
+ * (see `Cover`), so there is no placeholder folder to ship or keep in sync.
+ */
+export function thumbFor(track?: { thumbnail?: string | null } | null): string | null {
+  return track?.thumbnail || null;
 }
 
 export function initials(name: string | undefined): string {

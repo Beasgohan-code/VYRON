@@ -8,7 +8,6 @@ no UI framework, no CSS framework, one hand-written design system.
 frontend/                     # source of truth
 ├── index.html                # shell (mounts #root, loads telegram-web-app.js)
 ├── vite.config.ts            # base /app/static/ · outDir ../webapp/dist
-├── public/covers/*.jpg       # 10 procedural fallback covers
 └── src/
     ├── main.tsx              # React root + AppProvider
     ├── App.tsx               # shell: sidebar · views · rail · modal · toast
@@ -19,9 +18,10 @@ frontend/                     # source of truth
     │   ├── types.ts          # every API payload
     │   └── format.ts         # durations, greeting, cover hashing
     ├── components/           # Sidebar, Topbar, NowPlayingRail, MobileChrome,
-    │                         # TrackCard, ResultRow, Panel, Cover, Modal
-    └── views/                # Home, Search, Library, Queue, Playlists,
-                              # Rooms, Profile
+    │                         # TrackCard, ResultRow, Panel, Modal, SessionGate,
+    │                         # Cover (procedural SVG art), WaveSeek (scrubber)
+    └── views/                # Home, Search, Player, Library, Queue, Playlists,
+                              # Rooms, Profile, Api
 
 webapp/
 ├── dist/                     # ← what is served (committed so plain `python main.py` works)
@@ -99,11 +99,11 @@ every owner token at once.
 | `POST` | `/api/search` | `{query, limit}` | `results[]` |
 | `GET` | `/api/mix` | `?key=daily\|chill\|…` | `tracks[]` |
 | `GET` | `/api/rooms` | – | `rooms[]` (`chat_id`, `title`, `username`, `listeners`, `playing`, `paused`, `track`, `volume`, `effects`) |
-| `GET` | `/api/playlists` | – | `playlists[]` (`id`, `name`, `count`, `duration`, `covers[]`, `tracks[]`) |
+| `GET` | `/api/playlists` | – | `playlists[]` (`id`, `name`, `count`, `duration`, `covers[]` (real thumbnail URLs from the playlist), `tracks[]`) |
 | `POST` | `/api/action` | `{action, value}` | action result |
 | `POST` | `/api/auth` | – | `{token}` scoped to the current chat |
 | `POST` | `/api/lyrics` | `{title, artist, duration}` | `{text, synced, lines[{time, text}]}` |
-| `GET` | `/api/stream/{id}` | Range supported | audio bytes (`audio/mpeg`, or a generated WAV for demo tracks) |
+| `GET` | `/api/stream/{id}` | Range supported | audio bytes (`audio/mpeg`/`audio/mp4`, Range-aware; falls back to a real cached download when the upstream URL refuses) |
 | `GET` `POST` | `/api/keys` | `{action: "create"\|"rotate"\|"revoke", label?, id?, scopes?, days?, rate_limit?}` | `keys[]`, `stats`, `metrics`, `base`, `docs`, `openapi`, `scopes`, `is_owner`, `created` — owner only |
 
 The public music API (`/v1`, keys, `/v1/docs`, OpenAPI) is documented in the
@@ -121,9 +121,9 @@ Every track object has the same shape everywhere:
 }
 ```
 
-`thumbnail` may be empty — the UI then maps the track to one of
-`/app/static/covers/*.jpg`. Images that fail to load fall back the same way,
-which is what makes demo mode (no network) look complete.
+`thumbnail` may be empty, and thumbnails that fail to load are ignored: the UI
+draws its own cover art (deterministic SVG mesh gradient seeded from the track
+id), so the layout never depends on an image request succeeding.
 
 ### `now` object
 
@@ -178,7 +178,9 @@ player returns **503** — the UI surfaces both as a toast.
    Add `/api/home`, `/api/rooms`, `/api/playlists` for discovery, rooms and lists.
 3. Include `telegram-web-app.js` and send `Telegram.WebApp.initData` in
    `X-Init-Data` so authentication keeps working.
-4. In non-Telegram browsers the API answers with demo data, so your design can be
-   previewed with `python -m vyron.tools.preview`.
+4. In non-Telegram browsers there is no `initData`, so the API answers `401`
+   (or `503` when a service is not configured) and the app shows a locked state.
+   `python -m vyron.tools.preview` runs the same server with the real resolver,
+   so a replacement UI can be developed against it.
 
 Nothing else in the bot needs to change.

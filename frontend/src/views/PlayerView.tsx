@@ -21,6 +21,7 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { Cover } from "../components/Cover";
 import { Equalizer } from "../components/Equalizer";
 import { Reactor } from "../components/Reactor";
+import { WaveSeek } from "../components/WaveSeek";
 import { Sparks } from "../components/Sparks";
 import { reveal, useTilt } from "../lib/anim";
 import { api } from "../lib/api";
@@ -208,14 +209,12 @@ export function PlayerView() {
           )}
 
           <div className="pv-seek">
-            <input
-              type="range"
-              min={0}
-              max={1000}
-              value={Math.round(percent * 10)}
-              aria-label="Seek"
-              style={{ ["--p" as string]: `${percent}%` }}
-              onChange={(event) => audio.seek((Number(event.target.value) / 1000) * total)}
+            <WaveSeek
+              seed={String(track.id ?? track.title ?? "")}
+              position={audio.position}
+              duration={total}
+              playing={audio.playing}
+              onSeek={(seconds) => audio.seek(seconds)}
             />
             <div className="pv-times">
               <span>{fmtDuration(audio.position)}</span>

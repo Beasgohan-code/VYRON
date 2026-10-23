@@ -16,9 +16,8 @@
 #  resolved googlevideo URL is proxied with the browser's Range header, so
 #  seeking works without downloading the whole track first.
 #
-#  Demo tracks (`demo01`…) have no upstream: a deterministic little synth loop
-#  is generated locally, which is what makes the standalone preview playable
-#  without network access.
+#  There is no synthetic fallback: if a track cannot be fetched, the app is told
+#  exactly why instead of being handed a placeholder tone.
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 
@@ -109,63 +108,6 @@ async def lookup_async(media_id: str, *, user_id: int = 0) -> Track | None:
 
 def registry_size() -> int:
     return len(_REGISTRY)
-
-
-# ── demo tone ──────────────────────────────────────────────────────────────
-def _tone_path(media_id: str) -> Path:
-    root = Path(settings.data_dir) / "audio"
-    return root / f"{media_id}.wav"
-
-
-def _synth(seed: str, *, seconds: float = 24.0, rate: int = 16000) -> bytes:
-    """A small deterministic WAV loop so the preview sounds like something."""
-    import math
-    import struct
-    import wave
-
-    import io
-
-    digest = sum(ord(ch) for ch in seed) or 7
-    base = 110 + (digest % 5) * 22           # A2 … C#3
-    scale = (0, 3, 5, 7, 10)                 # minor pentatonic
-    frames = int(rate * seconds)
-    buf = bytearray()
-    note_len = rate // 2                     # half-second notes
-    for index in range(frames):
-        step = index // note_len
-        freq = base * (2 ** (scale[(step + digest) % len(scale)] / 12))
-        # gentle 4-note arpeggio + low pad, then a soft fade at both ends
-        t = index / rate
-        arp = math.sin(2 * math.pi * freq * t) * (0.32 if step % 4 else 0.4)
-        pad = math.sin(2 * math.pi * (base / 2) * t) * 0.14
-        beat = 1.0 if (index // (rate // 4)) % 4 == 0 else 0.6
-        sample = (arp * beat + pad) * 0.55
-        fade = min(1.0, t / 0.6, max(0.0, (seconds - t) / 1.2))
-        buf += struct.pack("<h", int(max(-1.0, min(1.0, sample * fade)) * 30000))
-
-    out = io.BytesIO()
-    with wave.open(out, "wb") as handle:
-        handle.setnchannels(1)
-        handle.setsampwidth(2)
-        handle.setframerate(rate)
-        handle.writeframes(bytes(buf))
-    return out.getvalue()
-
-
-def demo_audio(media_id: str) -> Path:
-    path = _tone_path(media_id)
-    if path.is_file() and path.stat().st_size > 1024:
-        return path
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_bytes(_synth(media_id))
-    tmp.replace(path)
-    return path
-
-
-def demo_video(media_id: str, title: str = "") -> bytes | None:
-    """A tiny MP4 wrapper is out of scope — audio only."""
-    return None
 
 
 # ── helpers ────────────────────────────────────────────────────────────────
@@ -281,11 +223,6 @@ async def stream(request: web.Request) -> web.StreamResponse:
     if not media_id or "/" in media_id or ".." in media_id:
         return web.json_response({"ok": False, "error": "bad id"}, status=400)
 
-    # demo tracks are always available locally
-    if re.fullmatch(r"demo\d{2}", media_id, re.I):
-        path = await asyncio.to_thread(demo_audio, media_id.lower())
-        return _file_response(path, request, mime="audio/wav")
-
     track = await lookup_async(media_id, user_id=user.user_id)
     if track is None:
         return web.json_response(
@@ -341,37 +278,35 @@ async def stream(request: web.Request) -> web.StreamResponse:
             except Exception:
                 break
         except web.HTTPException as exc:
-            # The proxy already answered upstream; turn it into JSON so the app
-            # can show a reason instead of a bare HTML error page.
             logger.info("audio proxy failed for %s: %s", media_id, exc.reason)
-            return _upstream_error(str(exc.reason or "the audio source failed"))
+            break
 
-    return _upstream_error("the audio source rejected the stream", "tap play again, or use /song to get the file")
+    # Last resort, and the one that actually guarantees audio: fetch the real
+    # file once. It costs bandwidth and disk, but a listener gets their song
+    # instead of an error page — and every later play is served from cache.
+    if runtime.downloader is not None and not info.is_live:
+        try:
+            path = await asyncio.wait_for(runtime.downloader.audio(track), timeout=240)
+        except Exception as exc:
+            logger.warning("download fallback failed for %s: %s", media_id, exc)
+        else:
+            logger.info("served %s from the download cache", media_id)
+            return _file_response(path, request)
+
+    return _upstream_error(
+        "the audio source rejected the stream",
+        "tap play again, or use /song in the bot to get the file",
+    )
 
 
 async def audio_info(request: web.Request) -> web.Response:
     user = _identity(request)
     media_id = (request.match_info.get("media_id") or "").strip()
-    # Demo ids are synthetic and locally generated: answer for them first, so a
-    # remembered demo track can never be described as "not streamable".
-    if re.fullmatch(r"demo\d{2}", media_id, re.I):
-        return web.json_response(
-            {
-                "ok": True,
-                "id": media_id,
-                "title": "VYRON demo",
-                "duration": 24,
-                "mime": "audio/wav",
-                "demo": True,
-                "playable": True,
-                "stream": f"/api/stream/{media_id}",
-            }
-        )
     track = await lookup_async(media_id, user_id=user.user_id)
     if track is None:
         return web.json_response({"ok": False, "error": "unknown track"}, status=404)
     cached = runtime.downloader.cached(track) if runtime.downloader else None
-    ready = runtime.youtube is not None
+    ready = runtime.youtube is not None or runtime.downloader is not None
     payload = {
         "ok": True,
         "id": track.id,
@@ -395,4 +330,4 @@ def register(app: web.Application) -> None:
     app.router.add_get("/api/audio/{media_id}", audio_info)
 
 
-__all__ = ["audio_info", "demo_audio", "lookup", "lookup_async", "register", "remember", "registry_size", "stream"]
+__all__ = ["audio_info", "lookup", "lookup_async", "register", "remember", "registry_size", "stream"]

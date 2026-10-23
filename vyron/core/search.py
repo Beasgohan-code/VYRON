@@ -72,6 +72,8 @@ class YouTube:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self._stream_cache: dict[str, StreamInfo] = {}
+        # the player client that last produced a playable URL (None = yt-dlp default)
+        self._client_hint: str | None = None
 
     # ── yt-dlp plumbing ────────────────────────────────────────────────────
     def _opts(self, **extra: Any) -> dict[str, Any]:
@@ -92,16 +94,75 @@ class YouTube:
         if self.settings.proxy:
             opts["proxy"] = self.settings.proxy
         if self.settings.ytdlp_args:
-            try:
-                extra_args = shlex.split(self.settings.ytdlp_args)
-            except ValueError:
-                extra_args = []
-            # e.g. YTDLP_ARGS="--extractor-args youtube:player_client=android"
-            for index, token in enumerate(extra_args):
-                if token.startswith("--") and index + 1 < len(extra_args):
-                    opts[token.lstrip("-").replace("-", "_")] = extra_args[index + 1]
-        opts.update(extra)
+            opts.update(self._parse_ytdlp_args(self.settings.ytdlp_args))
+        # `extra` always wins, but extractor_args are merged key-by-key so a
+        # client passed by the ladder does not silently drop the operator's
+        # own extractor tuning (and vice versa).
+        for key, value in extra.items():
+            if key == "extractor_args" and isinstance(opts.get(key), dict):
+                merged = {name: dict(args) for name, args in opts[key].items()}
+                for name, args in value.items():
+                    bucket = merged.setdefault(name, {})
+                    for flag, setting in args.items():
+                        if flag == "player_client":
+                            # the ladder's client goes first, then whatever the
+                            # operator configured, de-duplicated
+                            first = setting if isinstance(setting, list) else [setting]
+                            rest = bucket.get(flag) or []
+                            rest = rest if isinstance(rest, list) else [rest]
+                            bucket[flag] = list(dict.fromkeys([*first, *rest]))
+                        else:
+                            bucket[flag] = setting
+                opts[key] = merged
+            else:
+                opts[key] = value
         return opts
+
+    @staticmethod
+    def _parse_ytdlp_args(raw: str) -> dict[str, Any]:
+        """Turn ``YTDLP_ARGS`` into yt-dlp Python options.
+
+        `--extractor-args youtube:player_client=android` is the important one
+        for streaming, and it has to become a nested dict — the CLI string form
+        is not understood by ``YoutubeDL`` when passed through `params`.
+        """
+        try:
+            tokens = shlex.split(raw)
+        except ValueError:
+            return {}
+        parsed: dict[str, Any] = {}
+        index = 0
+        while index < len(tokens):
+            token = tokens[index]
+            index += 1
+            if not token.startswith("--"):
+                continue
+            name, inline = token[2:], None
+            if "=" in name:
+                name, inline = name.split("=", 1)
+            value = inline
+            if value is None and index < len(tokens) and not tokens[index].startswith("--"):
+                value = tokens[index]
+                index += 1
+            key = name.strip().replace("-", "_")
+            if key == "extractor_args" and value:
+                for chunk in value.split(";"):
+                    if ":" not in chunk:
+                        continue
+                    extractor, args = chunk.split(":", 1)
+                    bucket = parsed.setdefault("extractor_args", {}).setdefault(
+                        extractor.strip(), {}
+                    )
+                    for pair in args.split(";"):
+                        if "=" not in pair:
+                            continue
+                        flag, setting = pair.split("=", 1)
+                        bucket.setdefault(flag.strip(), []).extend(
+                            part for part in setting.split(",") if part
+                        )
+            elif value is not None:
+                parsed[key] = value
+        return parsed
 
     def _extract(self, target: str, **extra: Any) -> dict[str, Any]:
         with yt_dlp.YoutubeDL(self._opts(**extra)) as ydl:
@@ -290,9 +351,11 @@ class YouTube:
     ) -> StreamInfo:
         """Resolve a direct media URL *and* the headers it must be fetched with.
 
-        YouTube signs URLs for one client fingerprint. Replaying them with a
-        different User-Agent is what turns a perfectly good stream into a 403,
-        so the headers travel with the URL and the proxy reuses them verbatim.
+        YouTube answers different clients differently: `web` is the most
+        accurate but the first to demand a PO token, `android_vr`/`ios`/`tv`
+        often still hand out a playable URL when `web` returns 403. So the
+        resolve walks a client ladder and remembers which one worked — the
+        difference between "the web player plays" and "the web player spins".
         """
         key = f"{track.id}:{'v' if video else 'a'}"
         cached = self._stream_cache.get(key)
@@ -313,7 +376,48 @@ class YouTube:
         else:
             selector = "bestaudio[ext=m4a]/bestaudio[acodec!=none]/best"
 
-        info = await self._async_extract(target, format=selector)
+        last_error: Exception | None = None
+        for client in self._client_ladder():
+            try:
+                info = await self._async_extract(target, format=selector, **self._client_opts(client))
+                result = self._stream_from_info(info, track, video=video, target=target)
+            except Exception as exc:  # MediaError, DownloadError, KeyError…
+                last_error = exc
+                logger.info("resolve via %s failed for %s: %s", client, track.id, exc)
+                continue
+            self._remember_client(client)
+            self._stream_cache[key] = result
+            return result
+
+        self._stream_cache.pop(key, None)
+        raise MediaError(
+            f"no playable stream for this track ({type(last_error).__name__}: {last_error})"
+            if last_error
+            else "no playable stream for this track"
+        )
+
+    # ── stream plumbing ────────────────────────────────────────────────────
+    @staticmethod
+    def _client_opts(client: str | None) -> dict[str, Any]:
+        if not client:
+            return {}
+        return {"extractor_args": {"youtube": {"player_client": [client]}}}
+
+    def _client_ladder(self) -> list[str | None]:
+        """Player clients to try, best-known-first for this deployment."""
+        hint = self._client_hint
+        ladder: list[str | None] = [None, "android_vr", "ios", "tv", "web_safari", "mweb"]
+        if hint:
+            ladder = [hint] + [client for client in ladder if client != hint]
+        return ladder
+
+    def _remember_client(self, client: str | None) -> None:
+        if client:
+            self._client_hint = client
+
+    def _stream_from_info(
+        self, info: dict[str, Any] | None, track: Track, *, video: bool, target: str
+    ) -> StreamInfo:
         if not info:
             raise MediaError("Could not resolve a stream for that track.")
 
@@ -350,18 +454,15 @@ class YouTube:
             for name, value in ((chosen or info).get("http_headers") or {}).items()
             if str(name).lower() not in {"host", "content-length", "accept-encoding"}
         }
-        ttl = self.settings.stream_cache_ttl
-        result = StreamInfo(
+        return StreamInfo(
             url=url,
             is_live=bool(info.get("is_live")),
-            expires_at=time.time() + ttl,
+            expires_at=time.time() + self.settings.stream_cache_ttl,
             headers=headers,
             ext=ext,
             mime=mime or ("video/mp4" if video else "audio/mp4"),
             title=str(info.get("title") or track.title),
         )
-        self._stream_cache[key] = result
-        return result
 
     def invalidate(self, track: Track) -> None:
         self._stream_cache.pop(f"{track.id}:a", None)

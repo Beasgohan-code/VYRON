@@ -365,7 +365,7 @@ WEBAPP_URL=https://your-deployment        # Render/Koyeb URL
 ```bash
 # dev loop with hot reload (API proxied to the preview server)
 cd frontend && npm run dev            # → http://localhost:5173
-python -m vyron.tools.preview --port 8099   # API + demo data
+python -m vyron.tools.preview --port 8099   # API, real resolver
 ```
 
 Preview the built bundle without any credentials:
@@ -374,13 +374,18 @@ Preview the built bundle without any credentials:
 python -m vyron.tools.preview --port 8080   # → http://localhost:8080/app/
 ```
 
-Outside Telegram the page renders read-only demo data — with local gradient
-covers, so the whole layout (shelves, moods, rooms, playlists) is visible even
-with no network access. Regenerate those covers after palette changes:
+The preview attaches the **real** services — yt-dlp resolver, download cache,
+charts and (unless you pass `--no-db`) storage — so search and playback behave
+exactly like the deployed app. Nothing is fabricated: outside Telegram there is
+no `initData`, so the page shows its locked state and the API answers `401`/`503`
+instead of inventing tracks.
 
 ```bash
-python -m vyron.tools.covers
+python -m vyron.tools.preview --port 8080 --no-db   # skip Mongo/JSON storage
 ```
+
+Cover art is generated in the browser (SVG mesh gradients seeded from the track
+id), so there are no bundled cover images to keep in sync.
 
 ---
 

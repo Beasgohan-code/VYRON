@@ -1,7 +1,7 @@
 import { Clock3, Download, Headphones, Play, Plus, RefreshCw, Search, Sparkles, Users, Zap } from "lucide-react";
 import { useState } from "react";
 import { api } from "../lib/api";
-import { coverFor, fmtDuration, greeting } from "../lib/format";
+import { fmtDuration, greeting } from "../lib/format";
 import { useApp } from "../lib/store";
 import { Cover } from "../components/Cover";
 import { Panel, SectionHead } from "../components/Panel";
@@ -34,9 +34,11 @@ export function HomeView() {
   const artRef = useTilt<HTMLDivElement>(6);
   const heroRef = useStagger<HTMLDivElement>(1, ".hero-copy > *");
 
+  const loading = home === null;
   const trending = home?.trending ?? [];
   const shelves = home?.shelves ?? [];
   const moods = home?.moods ?? [];
+  const emptyDiscovery = !loading && trending.length === 0 && shelves.length === 0;
   const history = (state?.history ?? []).slice(0, 5);
 
   return (
@@ -50,7 +52,7 @@ export function HomeView() {
           <h1>
             {greeting()}
             <br />
-            {home?.hero.headline ?? "Music hits different here."}
+            <em>{home?.hero.headline ?? "Music hits different here."}</em>
           </h1>
           <p>{home?.hero.subline ?? "Discover, stream, download and listen together — all in one place."}</p>
           <div className="hero-actions">
@@ -59,7 +61,16 @@ export function HomeView() {
                 <Equalizer playing={audio.playing} bars={4} /> Resume “{audio.track.title.slice(0, 18)}”
               </button>
             ) : (
-              <button type="button" className="pill-btn accent" onClick={() => void play(trending[0]?.query, "play_now")}>
+              <button
+                type="button"
+                className="pill-btn accent"
+                disabled={!trending.length}
+                onClick={() => {
+                  const pick = trending[Math.floor(Math.random() * trending.length)];
+                  if (pick) void play(pick, "play_now");
+                  else setView("search");
+                }}
+              >
                 <Play size={15} fill="currentColor" /> Surprise me
               </button>
             )}
@@ -88,7 +99,11 @@ export function HomeView() {
         <div
           ref={artRef}
           className="hero-art"
-          style={{ backgroundImage: `url("${home?.hero.cover || coverFor({ title: "vyron" })}")` }}
+          style={
+            home?.hero.cover
+              ? { backgroundImage: `url("${home.hero.cover}")` }
+              : undefined
+          }
           aria-hidden="true"
         >
 
@@ -141,22 +156,30 @@ export function HomeView() {
         </span>
       </SectionHead>
       <div className="shelf">
-        {trending.length === 0
-          ? Array.from({ length: 6 }).map((_, index) => (
-              <div key={index} className="skeleton-card" aria-hidden="true" />
-            ))
-          : trending.map((track, index) => (
-              <TrackCard key={`${track.id ?? track.title}-${index}`} track={track} rank={index + 1} delay={index * 40} />
-            ))}
+        {loading &&
+          Array.from({ length: 6 }).map((_, index) => <div key={index} className="skeleton-card" aria-hidden="true" />)}
+        {!loading &&
+          trending.map((track, index) => (
+            <TrackCard key={`${track.id ?? track.title}-${index}`} track={track} rank={index + 1} delay={index * 40} />
+          ))}
+        {!loading && trending.length === 0 && (
+          <div className="empty-state shelf-empty">
+            Charts fill in once the bot has heard a few tracks. Until then, search for something you already love.
+            <button type="button" className="pill-btn accent" onClick={() => setView("search")}>
+              <Search size={14} /> Search music
+            </button>
+          </div>
+        )}
       </div>
 
-      <SectionHead right={<span className="muted small">refreshed every 30 min</span>}>Made for you</SectionHead>
-      <div className="shelf shelf-mixes">
-        {shelves.length === 0
-          ? Array.from({ length: 5 }).map((_, index) => (
-              <div key={index} className="skeleton-card" aria-hidden="true" />
-            ))
-          : shelves.map((shelf, index) => {
+      {(!loading && shelves.length === 0) || loading ? null : (
+        <SectionHead right={<span className="muted small">refreshed every 30 min</span>}>Made for you</SectionHead>
+      )}
+      <div className="shelf shelf-mixes" hidden={!loading && shelves.length === 0}>
+        {loading &&
+          Array.from({ length: 5 }).map((_, index) => <div key={index} className="skeleton-card" aria-hidden="true" />)}
+        {!loading &&
+          shelves.map((shelf, index) => {
               const lead = shelf.tracks?.[0];
               if (!lead) return null;
               return (
@@ -172,14 +195,24 @@ export function HomeView() {
             })}
       </div>
 
-      <SectionHead>Moods</SectionHead>
-      <div className="chips-row">
-        {moods.map((mood) => (
-          <button key={mood.key} type="button" className="chip" onClick={() => void loadMix(mood.key)}>
-            {mood.title}
-          </button>
-        ))}
-      </div>
+      {moods.length > 0 && (
+        <>
+          <SectionHead>Moods</SectionHead>
+          <div className="chips-row">
+            {moods.map((mood) => (
+              <button key={mood.key} type="button" className="chip" onClick={() => void loadMix(mood.key)}>
+                {mood.title}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
+      {emptyDiscovery && (
+        <p className="discovery-note">
+          Discovery is quiet right now — search works even when charts do not.
+        </p>
+      )}
 
       <div className="cards-grid">
         <Panel title="Quick search" icon={<Search size={14} />}>

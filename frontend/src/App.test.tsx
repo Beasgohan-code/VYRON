@@ -149,7 +149,7 @@ describe("VYRON Player", () => {
         "A professional, Eldian-compatible music API served by this exact deployment — no second service, no second port."
       )
     ).toBeInTheDocument();
-    expect(await screen.findByText("vyrn_dem…0000")).toBeInTheDocument();
+    expect(await screen.findByText("vyrn_fix…0000")).toBeInTheDocument();
     expect(document.querySelector(".api-status.on")).not.toBeNull();
   });
 
@@ -161,7 +161,7 @@ describe("VYRON Player", () => {
     expect(await screen.findByText("/v1/tracks")).toBeInTheDocument();
     expect(screen.getByText("http://localhost:8099")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Create key/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Rotate demo-bot/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Rotate api-bot/i })).toBeInTheDocument();
     expect(screen.getByText("Live traffic")).toBeInTheDocument();
   });
 

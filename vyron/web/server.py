@@ -36,118 +36,6 @@ _WEBAPP_ROOT = Path(
 WEB_DIR = _WEBAPP_ROOT / "dist" if (_WEBAPP_ROOT / "dist" / "index.html").is_file() else _WEBAPP_ROOT
 
 
-# ── demo payload (browser preview) ──────────────────────────────────────────
-# Served to anonymous visitors and to the standalone preview server, so the UI
-# can be developed without Telegram credentials or network access.  Covers are
-# the procedural artwork shipped in frontend/public/covers.
-def _demo_track(index: int, title: str, uploader: str, duration: int) -> dict:
-    return {
-        "id": f"demo{index:02d}",
-        "title": title,
-        "uploader": uploader,
-        "duration": duration,
-        "thumbnail": f"/app/static/covers/{index:02d}.jpg",
-        "source": "youtube",
-        "url": "",
-        "query": f"{title} {uploader}",
-        "stream": f"/api/stream/demo{index:02d}",
-    }
-
-
-_DEMO_TRACKS = [
-    _demo_track(1, "Neon Skyline", "VYRON Sessions", 198),
-    _demo_track(2, "Slow Motion", "Aria Vale", 241),
-    _demo_track(3, "Afterglow", "Kite & Co.", 167),
-    _demo_track(4, "Midnight Drive", "Lumen", 212),
-    _demo_track(5, "Paper Planes", "Nova Ray", 189),
-    _demo_track(6, "Golden Hour", "Sable", 233),
-    _demo_track(7, "Static Bloom", "Halcyon", 205),
-    _demo_track(8, "Riverline", "Ora", 176),
-    _demo_track(9, "Glasshouse", "Mirage Club", 254),
-    _demo_track(10, "Ultraviolet", "Neon Hills", 221),
-]
-
-_DEMO_QUEUE = [{**track, "index": index} for index, track in enumerate(_DEMO_TRACKS[:6], 1)]
-
-_DEMO_MIXES = [
-    ("daily", "Daily Mix", "sun"),
-    ("chill", "Chill Vibes", "wave"),
-    ("anime", "Anime Mix", "star"),
-    ("workout", "Workout", "bolt"),
-    ("focus", "Focus", "moon"),
-    ("night", "Night Vibes", "moon"),
-]
-
-DEMO = {
-    "version": "preview",
-    "streaming": True,
-    "bot": "VyronMusicBot",
-    "user": {"id": 0, "name": "Preview Listener", "username": "preview"},
-    "chat": {"id": 0, "title": "VYRON Preview", "is_group": False},
-    "now": {
-        **_DEMO_TRACKS[3],
-        "elapsed": 74.0,
-        "progress": 0.35,
-        "paused": False,
-        "requested_by": "you",
-    },
-    "queue": _DEMO_QUEUE,
-    "settings": {
-        "volume": 100,
-        "loop": "off",
-        "autoplay": True,
-        "always_on": False,
-        "shuffle": False,
-        "effects": [],
-    },
-    "favorites": _DEMO_TRACKS[:5],
-    "history": _DEMO_TRACKS[5:],
-    "playlists": [
-        {
-            "id": "p1",
-            "name": "Late Night",
-            "count": 4,
-            "duration": 848,
-            "covers": [t["thumbnail"] for t in _DEMO_TRACKS[:4]],
-            "tracks": _DEMO_TRACKS[:4],
-        },
-        {
-            "id": "p2",
-            "name": "Focus Session",
-            "count": 3,
-            "duration": 651,
-            "covers": [t["thumbnail"] for t in _DEMO_TRACKS[4:7]],
-            "tracks": _DEMO_TRACKS[4:7],
-        },
-    ],
-    "rooms": [
-        {
-            "chat_id": -1001,
-            "title": "Chill Squad",
-            "username": "vyronmusichub",
-            "listeners": 4,
-            "playing": True,
-            "paused": False,
-            "track": _DEMO_TRACKS[1],
-            "volume": 90,
-            "effects": ["bass"],
-        },
-        {
-            "chat_id": -1002,
-            "title": "Late Night Lo-fi",
-            "username": "",
-            "listeners": 12,
-            "playing": True,
-            "paused": True,
-            "track": _DEMO_TRACKS[6],
-            "volume": 70,
-            "effects": [],
-        },
-    ],
-    "stats": {"users": 4832, "chats": 128, "tracks": 12400},
-}
-
-
 def _track_json(track: Track | None, *, index: int | None = None) -> dict | None:
     if track is None:
         return None
@@ -210,6 +98,18 @@ async def _identify(request: web.Request) -> WebUser:
     )
 
 
+_EMPTY_HOME = {
+    "hero": {
+        "headline": "Music hits different here.",
+        "subline": "Search for a song, or start playback from the bot's voice chat.",
+        "cover": "",
+    },
+    "trending": [],
+    "shelves": [],
+    "moods": [],
+}
+
+
 def _denied(user: WebUser) -> web.Response | None:
     if user.authenticated or user.owner or settings.webapp_allow_anon:
         return None
@@ -217,10 +117,6 @@ def _denied(user: WebUser) -> web.Response | None:
         {"ok": False, "error": "unauthorized", "hint": "open the app from Telegram"},
         status=401,
     )
-
-
-def _is_preview(user: WebUser) -> bool:
-    return user.source == "anon" and runtime.player is None
 
 
 def _is_owner(user: WebUser) -> bool:
@@ -258,9 +154,6 @@ async def state(request: web.Request) -> web.Response:
     denied = _denied(user)
     if denied:
         return denied
-    if _is_preview(user):
-        return web.json_response({"ok": True, "preview": True, **DEMO})
-
     player = runtime.player
     chat_id = _chat_id(user)
     state_obj = player.queues.get(chat_id) if player else None
@@ -338,46 +231,39 @@ async def state(request: web.Request) -> web.Response:
     )
 
 
+_OFFLINE_HINTS = (
+    "getaddrinfo",
+    "urlopen error",
+    "connection refused",
+    "connection reset",
+    "timed out",
+    "timeout",
+    "ssl",
+    "temporary failure in name resolution",
+    "network is unreachable",
+    "eof occurred",
+    "proxy",
+)
+
+
+def _looks_offline(message: str) -> bool:
+    """True when the failure is the network, not the query.
+
+    The difference matters to the listener: "no results" means try a different
+    search, "unreachable" means this host cannot talk to YouTube at all.
+    """
+    lowered = message.lower()
+    return any(hint in lowered for hint in _OFFLINE_HINTS)
+
+
 # ── home / discovery ────────────────────────────────────────────────────────
 async def home(request: web.Request) -> web.Response:
     user = await _identify(request)
     denied = _denied(user)
     if denied:
         return denied
-    if _is_preview(user) or runtime.charts is None:
-        return web.json_response(
-            {
-                "ok": True,
-                "preview": True,
-                "hero": {
-                    "headline": "Music hits different here.",
-                    "subline": "Discover, stream, download and listen together — all in one place.",
-                    "cover": "/app/static/covers/07.jpg",
-                },
-                "trending": _DEMO_TRACKS[:8],
-                "shelves": [
-                    {
-                        "key": key,
-                        "title": title,
-                        "glyph": glyph,
-                        "kind": "mix",
-                        "tracks": [
-                            _DEMO_TRACKS[(index * 2 + offset) % len(_DEMO_TRACKS)]
-                            for offset in range(4)
-                        ],
-                    }
-                    for index, (key, title, glyph) in enumerate(_DEMO_MIXES)
-                ],
-                "moods": [
-                    {"key": key, "title": title.replace(" Mix", ""), "glyph": "note"}
-                    for key, title, _glyph in _DEMO_MIXES
-                ]
-                + [
-                    {"key": "romance", "title": "Romance", "glyph": "heart"},
-                    {"key": "party", "title": "Party", "glyph": "spark"},
-                ],
-            }
-        )
+    if runtime.charts is None:
+        return web.json_response({"ok": True, "ready": False, **_EMPTY_HOME})
 
     payload = await runtime.charts.home()
     return web.json_response({"ok": True, **payload})
@@ -392,39 +278,33 @@ async def search(request: web.Request) -> web.Response:
     query = str(body.get("query") or request.query.get("q") or "").strip()
     if not query:
         return web.json_response({"ok": True, "results": []})
-    if _is_preview(user):
-        return web.json_response({"ok": True, "results": _DEMO_TRACKS, "preview": True})
-
+    if runtime.youtube is None:
+        return web.json_response(
+            {"ok": False, "ready": False, "error": "search is not ready on this deployment",
+             "hint": "install yt-dlp (it is in requirements.txt) and restart"},
+            status=503,
+        )
     limit = min(20, max(4, int(body.get("limit") or 10)))
     try:
         tracks = await runtime.youtube.search(
             query, limit=limit, requester=(user.user_id, user.name or "")
         )
     except Exception as exc:
-        return web.json_response({"ok": False, "error": str(exc)}, status=400)
+        message = str(exc) or "search failed"
+        if _looks_offline(message):
+            return web.json_response(
+                {
+                    "ok": False,
+                    "error": "youtube_unreachable",
+                    "reason": message[:160],
+                    "hint": "this host cannot reach YouTube — set PROXY, or COOKIES_FILE, and retry",
+                },
+                status=502,
+            )
+        return web.json_response({"ok": False, "error": message}, status=400)
     return web.json_response(
         {"ok": True, "query": query, "results": [_track_json(track, index=i) for i, track in enumerate(tracks, 1)]}
     )
-
-
-def _demo_lyrics(span: int) -> list[dict]:
-    """Placeholder synced lyrics used by the anonymous browser preview."""
-    words = (
-        "city lights are bleeding through the window",
-        "we were never meant to slow down",
-        "hold the night a little longer",
-        "every echo pulls me back to you",
-        "static on the radio, still dancing",
-        "nothing here is heavy when you sing",
-        "keep the volume up until the morning",
-        "we are golden in the afterglow",
-        "run the tape again from the beginning",
-        "all the quiet parts are yours",
-        "tell me what the sky is playing",
-        "one more chorus, then we go",
-    )
-    step = span / (len(words) + 1)
-    return [{"time": round(step * (index + 1), 2), "text": line} for index, line in enumerate(words)]
 
 
 async def lyrics(request: web.Request) -> web.Response:
@@ -444,22 +324,6 @@ async def lyrics(request: web.Request) -> web.Response:
     cached = _LYRICS_CACHE.get(key)
     if cached and cached[0] > time.time():
         return web.json_response({"ok": True, **cached[1], "cached": True})
-
-    if _is_preview(user):
-        # The browser preview has no bot runtime and no outbound network: serve a
-        # deterministic lyric sheet so the player's synced-lyrics panel can be
-        # exercised without credentials.
-        span = max(30, duration or 180)
-        lines = _demo_lyrics(span)
-        payload = {
-            "title": title,
-            "artist": artist,
-            "text": "\n".join(line["text"] for line in lines),
-            "synced": True,
-            "lines": lines,
-            "demo": True,
-        }
-        return web.json_response({"ok": True, **payload})
 
     client = runtime.lyrics
     if client is None:
@@ -486,43 +350,6 @@ async def lyrics(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, **payload})
 
 
-_DEMO_KEYS = [
-    {
-        "id": "key_preview0001",
-        "prefix": "vyrn_preview",
-        "key": "vyrn_previewKEYdemo0000000000000000000000",
-        "masked": "vyrn_pre…0000",
-        "label": "preview-bot",
-        "owner_id": 0,
-        "scopes": ["read", "search", "download"],
-        "active": True,
-        "uses": 128,
-        "bytes": 734003200,
-        "created_at": 1750000000.0,
-        "last_used_at": 1759999999.0,
-        "expires_at": None,
-        "rate_limit": None,
-    },
-    {
-        "id": "key_preview0002",
-        "prefix": "vyrn_ci",
-        "key": "vyrn_ciKEYdemo00000000000000000000000000",
-        "masked": "vyrn_ciK…0000",
-        "label": "ci-pipeline",
-        "owner_id": 0,
-        "scopes": ["read", "search", "download", "admin"],
-        "active": False,
-        "uses": 41,
-        "bytes": 52428800,
-        "created_at": 1745000000.0,
-        "last_used_at": 1749000000.0,
-        "revoked_at": 1749500000.0,
-        "expires_at": None,
-        "rate_limit": 60,
-    },
-]
-
-
 async def api_keys(request: web.Request) -> web.Response:
     """Music-API console for the Mini App (initData auth).
 
@@ -542,59 +369,6 @@ async def api_keys(request: web.Request) -> web.Response:
         "default_scopes": ["read", "search", "download"],
         "version": "2.0",
     }
-
-    if _is_preview(user):
-        payload = {
-            "ok": True,
-            "preview": True,
-            "base": base,
-            "docs": docs,
-            "openapi": f"{base}/v1/openapi.json" if base else "/v1/openapi.json",
-            "is_owner": True,
-            "keys": _DEMO_KEYS,
-            "stats": {
-                "enabled": True,
-                "open": True,
-                "keys": 1,
-                "keys_total": 2,
-                "requests": 128,
-                "bytes": 734003200,
-                "rate_limit": settings.music_api_rate,
-                "storage": "demo",
-                "version": "2.0",
-            },
-            "metrics": {
-                "requests": 128,
-                "downloads": 31,
-                "bytes_served": 734003200,
-                "rate_limited": 2,
-                "uptime_seconds": 3600,
-                "latency_ms": {"avg": 18.0, "p50": 12.0, "p95": 34.0, "p99": 61.0},
-                "by_status": {"200": 126, "429": 2},
-            },
-            **meta,
-        }
-        if request.method == "GET":
-            return web.json_response(payload)
-        body = await _read_json(request)
-        action = str(body.get("action") or "create")
-        if action == "create":
-            record = {
-                "key": "vyrn_" + "demo" * 10,
-                "masked": "vyrn_demo…demo",
-                "id": "key_demo0001",
-                "prefix": "vyrn_demo",
-                "label": str(body.get("label") or "web")[:40],
-                "scopes": body.get("scopes") or meta["default_scopes"],
-                "owner_id": 0,
-                "active": True,
-                "uses": 0,
-                "bytes": 0,
-                "expires_at": None,
-                "created_at": time.time(),
-            }
-            return web.json_response({**payload, "ok": True, "created": record})
-        return web.json_response({**payload, "ok": True, "revoked": True, "rotated": action == "rotate"})
 
     is_owner = _is_owner(user)
     if request.method == "GET":
@@ -681,8 +455,8 @@ async def mix(request: web.Request) -> web.Response:
     if denied:
         return denied
     key = request.query.get("key", "")
-    if _is_preview(user) or runtime.charts is None:
-        return web.json_response({"ok": True, "tracks": _DEMO_TRACKS, "preview": True})
+    if runtime.charts is None:
+        return web.json_response({"ok": True, "ready": False, "tracks": []})
     tracks = await runtime.charts.mix(key, limit=25)
     if not tracks:
         tracks = await runtime.charts.mood(key, limit=25)
@@ -697,8 +471,8 @@ async def rooms(request: web.Request) -> web.Response:
     denied = _denied(user)
     if denied:
         return denied
-    if _is_preview(user) or runtime.player is None:
-        return web.json_response({"ok": True, "rooms": DEMO["rooms"], "preview": True})
+    if runtime.player is None:
+        return web.json_response({"ok": True, "ready": False, "rooms": []})
 
     entries = []
     for chat_id in runtime.player.active_chats():
@@ -739,8 +513,8 @@ async def playlists_route(request: web.Request) -> web.Response:
     denied = _denied(user)
     if denied:
         return denied
-    if _is_preview(user):
-        return web.json_response({"ok": True, "playlists": DEMO["playlists"], "preview": True})
+    if not user.authenticated:
+        return web.json_response({"ok": True, "playlists": []})
     return web.json_response(
         {
             "ok": True,
@@ -786,8 +560,11 @@ async def action(request: web.Request) -> web.Response:
     value = body.get("value")
     chat_id = _chat_id(user)
 
-    if _is_preview(user):
-        return web.json_response({"ok": True, "preview": True, "action": name})
+    if not user.authenticated:
+        return web.json_response(
+            {"ok": False, "error": "open the app from Telegram to control playback"},
+            status=401,
+        )
 
     if name not in KNOWN_ACTIONS:
         return web.json_response(
@@ -1020,4 +797,4 @@ def register(app: web.Application) -> None:
     logger.info("web app mounted from %s", WEB_DIR)
 
 
-__all__ = ["DEMO", "WEB_DIR", "chat_link", "register"]
+__all__ = ["WEB_DIR", "chat_link", "register"]

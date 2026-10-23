@@ -517,7 +517,6 @@ def test_api_console_creates_rotates_and_revokes_keys(tmp_path, monkeypatch):
 
     monkeypatch.setattr("vyron.web.server._identify", _identify)
     monkeypatch.setattr("vyron.web.server._denied", lambda _user: None)
-    monkeypatch.setattr("vyron.web.server._is_preview", lambda _user: False)
     monkeypatch.setattr(
         "vyron.web.server.settings", dataclasses.replace(settings, owner_id=424242, webapp=True)
     )
@@ -594,3 +593,39 @@ def test_owner_rate_limit_is_generous(tmp_path, monkeypatch):
         assert result.has("admin") and result.has("download")
 
     asyncio.run(scenario())
+
+
+# ── YTDLP_ARGS parsing ─────────────────────────────────────────────────────
+def _yr(tmp_path, args: str):
+    from dataclasses import replace
+
+    from vyron.config import Settings
+    from vyron.core.search import YouTube
+
+    base = Settings(bot_token="1:a", api_id=1, api_hash="x", owner_id=1)
+    return YouTube(replace(base, ytdlp_args=args, cookies_file=""))
+
+
+def test_extractor_args_become_a_nested_dict(tmp_path):
+    yt = _yr(tmp_path, "--extractor-args youtube:player_client=android,web")
+    assert yt._opts()["extractor_args"] == {"youtube": {"player_client": ["android", "web"]}}
+
+
+def test_client_ladder_prepends_to_configured_clients(tmp_path):
+    yt = _yr(tmp_path, "--extractor-args youtube:player_client=android,web")
+    opts = yt._opts(**yt._client_opts("ios"))
+    assert opts["extractor_args"]["youtube"]["player_client"] == ["ios", "android", "web"]
+
+
+def test_plain_flags_are_translated(tmp_path):
+    yt = _yr(tmp_path, "--no-mtime --retries 7 --extractor-args youtube:player_skip=webpage")
+    opts = yt._opts()
+    assert opts["retries"] == "7"
+    assert opts["extractor_args"]["youtube"]["player_skip"] == ["webpage"]
+
+
+def test_client_ladder_puts_the_hint_first(tmp_path):
+    yt = _yr(tmp_path, "")
+    yt._client_hint = "tv"
+    assert yt._client_ladder()[0] == "tv"
+    assert len(set(yt._client_ladder())) == len(yt._client_ladder())

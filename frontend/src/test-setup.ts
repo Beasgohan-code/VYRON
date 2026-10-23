@@ -29,7 +29,7 @@ Object.defineProperty(window, "matchMedia", {
   }),
 });
 
-export const demoState = {
+export const fixtureState = {
   ok: true,
   preview: true,
   version: "preview",
@@ -58,7 +58,7 @@ export const demoState = {
   playlists: [{ id: "p1", name: "Late Night", count: 2, duration: 400, covers: [], tracks: [] }],
 };
 
-export const demoHome = {
+export const fixtureHome = {
   hero: { headline: "Music hits different here.", subline: "All in one place.", cover: "/app/static/covers/07.jpg" },
   trending: [
     { id: "t1", title: "Neon Skyline", uploader: "VYRON Sessions", duration: 198, query: "neon skyline" },
@@ -79,7 +79,7 @@ export const demoHome = {
   ],
 };
 
-export const demoKeys = {
+export const fixtureKeys = {
   ok: true,
   preview: true,
   base: "http://localhost:8099",
@@ -99,10 +99,10 @@ export const demoKeys = {
   },
   keys: [
     {
-      id: "key_demo",
-      prefix: "vyrn_demo",
-      masked: "vyrn_dem…0000",
-      label: "demo-bot",
+      id: "key_fixture",
+      prefix: "vyrn_fixture",
+      masked: "vyrn_fix…0000",
+      label: "api-bot",
       scopes: ["read", "search", "download"],
       active: true,
       uses: 12,
@@ -118,12 +118,12 @@ export const demoKeys = {
     requests: 12,
     bytes: 5200000,
     rate_limit: 30,
-    storage: "demo",
+    storage: "mongo",
     version: "2.0",
   },
 };
 
-export const demoApiHealth = {
+export const fixtureApiHealth = {
   status: "ok",
   ok: true,
   service: "vyron-music-api",
@@ -145,16 +145,16 @@ export const json = (payload: unknown) =>
 
 /** Fake the whole API — pass overrides to test a variant of the state. */
 export function stubApi(overrides: Record<string, unknown> = {}) {
-  const state = { ...demoState, ...overrides };
+  const state = { ...fixtureState, ...overrides };
   vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
     const url = String(input);
-    if (url.includes("/api/home")) return json(demoHome);
+    if (url.includes("/api/home")) return json(fixtureHome);
     if (url.includes("/api/rooms")) return json({ ok: true, rooms: [] });
-    if (url.includes("/api/playlists")) return json({ ok: true, playlists: demoState.playlists });
-    if (url.includes("/api/search")) return json({ ok: true, results: demoHome.trending });
+    if (url.includes("/api/playlists")) return json({ ok: true, playlists: fixtureState.playlists });
+    if (url.includes("/api/search")) return json({ ok: true, results: fixtureHome.trending });
     if (url.includes("/api/action")) return json({ ok: true });
-    if (url.includes("/api/keys")) return json(demoKeys);
-    if (url.includes("/v1/health")) return json(demoApiHealth);
+    if (url.includes("/api/keys")) return json(fixtureKeys);
+    if (url.includes("/v1/health")) return json(fixtureApiHealth);
     return json(state);
   }));
 }

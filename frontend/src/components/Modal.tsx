@@ -1,8 +1,8 @@
 import { Check, Download, Plus, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useApp } from "../lib/store";
+import { Cover } from "./Cover";
 import type { Track } from "../lib/types";
-import { coverFor } from "../lib/format";
 
 export function Modal() {
   const { modal, closeModal, openModal, act, play, toast, refreshPlaylists, playlists } = useApp();
@@ -164,7 +164,7 @@ export function Modal() {
           {modal.type === "track" && (
             <>
               <div className="modal-track">
-                <img src={modal.track.thumbnail || coverFor(modal.track)} alt="" />
+                <Cover track={modal.track} className="modal-cover" />
                 <div>
                   <b>{modal.track.title}</b>
                   <span>{modal.track.uploader || "unknown artist"}</span>
