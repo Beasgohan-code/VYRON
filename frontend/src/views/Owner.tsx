@@ -453,7 +453,7 @@ function SystemPanel() {
     { label: "uptime", value: fmtDuration(system?.uptime ?? 0) },
     { label: "version", value: system?.version ?? "—" },
     { label: "storage", value: system?.storage ?? "—" },
-    { label: "streaming", value: system?.streaming ? "ready" : "file mode" },
+    { label: "streaming", value: system?.streaming ? "ready" : "offline" },
     { label: "handlers", value: String(system?.handlers ?? 0) },
     { label: "active chats", value: String(system?.chats ?? 0) },
     { label: "playing now", value: String(system?.playing ?? 0) },

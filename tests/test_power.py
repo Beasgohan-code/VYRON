@@ -138,9 +138,9 @@ def test_help_has_every_section_rendered():
     assert "play" in fallback
 
 
-# ── file-only mode ─────────────────────────────────────────────────────────
-def test_play_falls_back_to_sending_the_file_without_a_session(tmp_path, monkeypatch):
-    """No STRING_SESSION → /play must still hand the user an audio file."""
+# ── streaming only: no silent file fallback ───────────────────────────────
+def test_play_refuses_without_a_voice_engine(tmp_path, monkeypatch):
+    """No STRING_SESSION → /play explains itself and sends nothing."""
     from vyron import runtime as runtime_module
     from vyron.core.queue import Track
     from vyron.modules import play as play_module
@@ -148,28 +148,27 @@ def test_play_falls_back_to_sending_the_file_without_a_session(tmp_path, monkeyp
     audio = tmp_path / "song.m4a"
     audio.write_bytes(b"\x00" * 64)
 
+    sent: dict = {}
+    edits: list = []
+
     class FakeDownloader:
-        async def audio(self, track):
+        async def audio(self, track):  # pragma: no cover - must not be called
+            sent["download"] = True
             return audio
 
-        async def video(self, track):  # pragma: no cover - not exercised
+        async def video(self, track):  # pragma: no cover
             return audio
-
-    sent = {}
 
     class FakeClient:
-        async def send_audio(self, chat_id, path, **kwargs):
-            sent["audio"] = (chat_id, path, kwargs)
-            return SimpleNamespace(id=1)
+        async def send_audio(self, *args, **kwargs):  # pragma: no cover
+            sent["audio"] = True
 
-        async def send_video(self, chat_id, path, **kwargs):  # pragma: no cover
-            sent["video"] = (chat_id, path, kwargs)
+        async def send_video(self, *args, **kwargs):  # pragma: no cover
+            sent["video"] = True
 
-        async def delete_messages(self, *args, **kwargs):
-            return True
-
-        async def edit_message_text(self, *args, **kwargs):  # pragma: no cover
-            return None
+        async def edit_message_text(self, chat_id, message_id, text, **kwargs):
+            edits.append(text)
+            return SimpleNamespace(id=message_id)
 
     runtime = runtime_module.runtime
     monkeypatch.setattr(runtime, "calls", None)
@@ -185,14 +184,52 @@ def test_play_falls_back_to_sending_the_file_without_a_session(tmp_path, monkeyp
         source="youtube",
     )
 
-    outcome = asyncio.run(play_module.begin(FakeClient(), -100, track, reply_to=5))
+    outcome = asyncio.run(
+        play_module.begin(FakeClient(), -100, track, status_id=7, reply_to=5)
+    )
 
-    assert outcome == "file"
-    assert "audio" in sent
-    chat_id, path, kwargs = sent["audio"]
-    assert chat_id == -100 and path == str(audio)
-    assert kwargs["reply_to_message_id"] == 5
-    assert kwargs["title"].startswith("Test Song")
+    assert outcome == "error"
+    assert "audio" not in sent and "video" not in sent and "download" not in sent
+    assert edits and "STRING_SESSION" in edits[-1]
+
+
+def test_song_command_still_sends_a_file(tmp_path, monkeypatch):
+    """Files are an explicit command now, not a fallback."""
+    from vyron.core.queue import Track
+    from vyron.modules import play as play_module
+
+    audio = tmp_path / "song.m4a"
+    audio.write_bytes(b"\x00" * 64)
+    sent: dict = {}
+
+    class FakeDownloader:
+        async def audio(self, track):
+            return audio
+
+        async def video(self, track):  # pragma: no cover
+            return audio
+
+    class FakeClient:
+        async def send_audio(self, chat_id, path, **kwargs):
+            sent["audio"] = (chat_id, path, kwargs)
+            return SimpleNamespace(id=1)
+
+        async def send_video(self, *args, **kwargs):  # pragma: no cover
+            return None
+
+        async def delete_messages(self, *args, **kwargs):
+            return True
+
+    from vyron import runtime as runtime_module
+
+    monkeypatch.setattr(runtime_module.runtime, "downloader", FakeDownloader())
+    monkeypatch.setattr(runtime_module.runtime, "storage", None)
+
+    track = Track(id="abc", title="Test Song", duration=90, uploader="VYRON")
+    asyncio.run(play_module.deliver(FakeClient(), -100, track, False, reply_to=5))
+
+    assert sent["audio"][0] == -100
+    assert sent["audio"][2]["reply_to_message_id"] == 5
 
 
 def test_play_streams_when_the_engine_exists(monkeypatch):

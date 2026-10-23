@@ -91,7 +91,7 @@ export default function App() {
             >
               <Compass size={18} />
             </button>
-            <span className={`status-dot ${state?.streaming ? "on" : ""}`} title={state?.streaming ? "voice chat ready" : "file mode"} />
+            <span className={`status-dot ${state?.streaming ? "on" : ""}`} title={state?.streaming ? "voice chat ready" : "voice engine offline"} />
           </div>
         </header>
 
@@ -133,7 +133,7 @@ export default function App() {
         <footer className="foot">
           <span>VYRON v{state?.version ?? "1.2.0"}</span>
           <span className="foot-dot" />
-          <span>{state?.streaming ? "voice chat" : "file mode"}</span>
+          <span>{state?.streaming ? "voice chat" : "engine off"}</span>
           <span className="foot-dot" />
           <button type="button" onClick={() => setView("search")}>
             <Download size={12} /> get music

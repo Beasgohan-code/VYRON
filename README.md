@@ -72,22 +72,23 @@ collapsible sections, not walls of bold text:
 | `API_ID` / `API_HASH` | [my.telegram.org](https://my.telegram.org) → API development tools |
 | `OWNER_ID` | [@userinfobot](https://t.me/userinfobot) |
 
-### 2 · Create the assistant session *(optional)*
+### 2 · Create the assistant session *(required)*
 
 The **assistant** is a normal Telegram account (not a bot) — it is the one that
-joins voice chats. Run this once when you want voice streaming:
+joins voice chats and actually streams. VYRON is a streaming bot, so this is a
+required step. Run this once:
 
 ```bash
 python -m vyron.tools.session
 ```
 
-It prints a `STRING_SESSION=…` line. Keep it secret — it is full account access.
+It walks you through phone → code → 2FA and prints a `STRING_SESSION=…` line.
+Paste it into `.env`. Keep it secret — it is full account access.
 
-**You can skip it to try the bot first.** Without a session VYRON still boots:
-`/play`, the search picker and quick actions fall back to **sending the audio
-file** into the chat, and everything non-voice (search, cards, lyrics, settings,
-playlists, moderation, the Mini App) works normally. Add the session later and
-restart to switch streaming on — nothing else changes.
+VYRON checks the session before it starts polling: an empty string, a truncated
+paste or an all-zero key stops the boot with an exact reason instead of failing
+later inside a voice chat. `/song` and `/video` still send files whenever you
+want one — that is a command, not a fallback.
 
 ### 3 · Configure
 
@@ -95,7 +96,7 @@ restart to switch streaming on — nothing else changes.
 git clone https://github.com/Beasgohan-code/VYRON.git
 cd VYRON
 cp .env.example .env
-# edit .env → BOT_TOKEN, API_ID, API_HASH (STRING_SESSION + OWNER_ID optional)
+# edit .env → BOT_TOKEN, API_ID, API_HASH, STRING_SESSION (OWNER_ID optional)
 ```
 
 ### 4 · Run
@@ -186,11 +187,12 @@ Telegram `file_id` after the first send, so later starts cost nothing.
 ### Tools
 
 `/lyrics` · `/fav` · `/favs` · `/history` · `/settings` · `/247` · `/stats` · `/ping` · `/id`
-`/song` · `/vsong` · `/repo` · `/playforce` · `/language` · `/logger`
+`/song` · `/vsong` · `/repo` · `/playforce` · `/language` · `/logger` · `/voice`
 
 `/playforce` clears the queue and cuts in immediately (admins, or the owner),
 `/language` switches this chat between English, हिन्दी, മലയാളം and ਪੰਜਾਬੀ, and
-`/logger` mirrors warnings and errors into `LOGGER_ID`.
+`/logger` mirrors warnings and errors into `LOGGER_ID`, and `/voice` shows the
+live state of the streaming engine (assistant account, active calls, quality).
 
 Videl/Fallen aliases are accepted everywhere they make sense: `/music` (`/start`),
 `/listpl`, `/loadpl`, `/rmplaylist`, `/deleteplaylist`, `/delpl`,
@@ -546,8 +548,8 @@ user and ships a healthcheck. No local Node install is required for deploys.
 ### Render
 
 1. **New → Blueprint**, pick this repo (it reads `render.yaml`).
-2. Fill the secrets (`BOT_TOKEN`, `API_ID`, `API_HASH`; `STRING_SESSION` and
-   `OWNER_ID` can stay empty for a file-only test deploy).
+2. Fill the secrets: `BOT_TOKEN`, `API_ID`, `API_HASH`, `STRING_SESSION`
+   (`OWNER_ID` is optional but recommended).
 3. Deploy — the service is a **web service** so Render keeps it alive and
    `/health` is polled automatically.
 
@@ -622,13 +624,19 @@ VYRON/
 
 ## ⚙️ Configuration
 
-Only three values block startup (`BOT_TOKEN`, `API_ID`, `API_HASH`). These two
-are optional and only switch a feature off:
+Four values block startup — the bot is useless without any of them:
+
+| Variable | Needed for |
+|---|---|
+| `BOT_TOKEN` | the bot account itself |
+| `API_ID` / `API_HASH` | Telegram app credentials (pyrogram) |
+| `STRING_SESSION` | the assistant that joins the voice chat — **`/play` streams through it** |
+
+`OWNER_ID` is optional and only switches a feature off:
 
 | Variable | Without it |
 |---|---|
-| `STRING_SESSION` | **file-only mode** — `/play` sends the audio file instead of streaming into the voice chat |
-| `OWNER_ID` | no owner — owner commands (`/eval`, `/vars`, `/sudoers`) stay locked; group admins keep control of their own chats |
+| `OWNER_ID` | no owner — owner commands (`/eval`, `/vars`, `/sudoers`, `/apitoken`) stay locked; group admins keep control of their own chats |
 
 The interesting optional ones:
 
@@ -720,7 +728,7 @@ owner-only `/daemons` card.
 | Symptom | Fix |
 |---|---|
 | `Start a voice chat in this group first` | The group has no active VC — start one (or `/vplay` after starting). |
-| Bot sends files instead of streaming | Expected without `STRING_SESSION` (file-only mode) — add a session and restart to stream. |
+| `/play` says **voice engine is off** | `STRING_SESSION` is missing or failed to start — check the boot log, regenerate with `python -m vyron.tools.session`, restart. `/voice` shows the live engine state. |
 | Assistant joins but is silent | The **assistant** needs *manage voice chats*; give the bot admin too. |
 | `Could not resolve that track` | YouTube changed something → `pip install -U yt-dlp`; for age-gated videos set `COOKIES_FILE`. |
 | Bot replies "already in use" | Two instances with the same `STRING_SESSION` — run only one. |

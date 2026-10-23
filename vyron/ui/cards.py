@@ -78,11 +78,11 @@ def start_card(
     """
     served = stats.get("chats", 0)
     tracks = stats.get("tracks", 0)
-    mode = "Streaming ready" if streaming else "File mode"
+    mode = "Streaming ready" if streaming else "Voice engine off"
     detail = (
         "voice chats and files"
         if streaming
-        else "no assistant session yet — <code>/play</code> sends the file"
+        else "the assistant is offline — <code>/song</code> still sends files"
     )
     features = B.bullets(
         [
@@ -213,6 +213,7 @@ _HELP: dict[str, tuple[str, list[tuple[str, str]]]] = {
             ("/history", "your recently played"),
             ("/settings", "per-chat defaults"),
             ("/language", "English · हिन्दी · മലയാളം · ਪੰਜਾਬੀ"),
+            ("/voice", "voice engine: on/off, calls, quality"),
             ("/logger", "mirror warnings to a channel (owner)"),
             ("/247", "toggle 24/7 mode"),
             ("/app", "open the player web app"),

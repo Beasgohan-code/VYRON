@@ -97,10 +97,9 @@ def register(client: Client) -> None:
                         client,
                         chat_id,
                         cards.error_card(
-                            "<b>File mode</b>\n"
-                            "<blockquote>There's no assistant session, so I can't join a "
-                            "voice chat. Add <code>STRING_SESSION</code> to stream files, or "
-                            "send <code>/song &lt;query&gt;</code> to get an MP3.</blockquote>"
+                            "<b>Voice engine is off</b>\n"
+                            "<blockquote>Add <code>STRING_SESSION</code> to stream into a "
+                            "voice chat, or send <code>/song &lt;query&gt;</code> for an MP3.</blockquote>"
                         ),
                         reply_to=message.id,
                     )
@@ -147,12 +146,14 @@ def register(client: Client) -> None:
                     status_id=status.id if status else None,
                     reply_to=message.id,
                 )
-                if outcome != "file":
+                if outcome != "error":
                     await _edit(
                         client,
                         chat_id,
                         status.id if status else None,
-                        cards.started_card(track) if outcome == "streamed" else cards.queued_card(track, 0),
+                        cards.started_card(track)
+                        if outcome == "streamed"
+                        else cards.queued_card(track, 0),
                     )
             except MediaError as exc:
                 await _edit(
@@ -418,40 +419,43 @@ async def begin(
     status_id: int | None = None,
     reply_to: int | None = None,
 ) -> str:
-    """Play *track* — streaming into the voice chat when the assistant exists.
+    """Play *track* into the voice chat.
 
-    With no ``STRING_SESSION`` (or a voice chat Telegram refuses to open) the
-    track is delivered as a normal Telegram file instead, so the bot stays
-    useful in file-only mode.  Returns ``"streamed"``, ``"queued"`` or ``"file"``.
+    Streaming is the product: a missing voice engine or a dead link is reported
+    as such instead of quietly turning /play into a file upload. ``/song`` and
+    ``/video`` remain the explicit ways to get a file.
+
+    Returns ``"streamed"``, ``"queued"`` or ``"error"`` (the error card is
+    already on screen when this returns).
     """
     if runtime.calls is None:
-        await deliver(
+        await _edit(
             client,
             chat_id,
-            track,
-            video,
-            status_id=status_id,
-            reply_to=reply_to,
-            hint=(
-                f"{E('info')} <b>File mode</b> — no assistant session, so this plays "
-                "as a Telegram file instead of a voice chat."
+            status_id,
+            cards.error_card(
+                "<b>Voice engine is off</b>\n"
+                "<blockquote>Playback needs the assistant account. Add "
+                "<code>STRING_SESSION</code> (generate one with "
+                "<code>python -m vyron.tools.session</code>) and restart. "
+                "Use <code>/song</code> or <code>/video</code> if you want a file.</blockquote>"
             ),
         )
-        return "file"
+        return "error"
     try:
         position = await _player().enqueue(chat_id, track, video=video, play_now=True)
     except StreamError as exc:
-        logger.info("stream unavailable (%s) — sending the file instead", exc)
-        await deliver(
+        logger.info("stream unavailable: %s", exc)
+        await _edit(
             client,
             chat_id,
-            track,
-            video,
-            status_id=status_id,
-            reply_to=reply_to,
-            hint=f"{E('warn')} {rich.esc(truncate(str(exc), 120))}",
+            status_id,
+            cards.error_card(
+                f"<b>Could not stream that</b>\n<blockquote>{truncate(str(exc), 170)}</blockquote>"
+                "\n<footer>the same track as a file: <code>/song</code> · <code>/video</code></footer>"
+            ),
         )
-        return "file"
+        return "error"
     return "streamed" if position == 1 else "queued"
 
 

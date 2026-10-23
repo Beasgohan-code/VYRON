@@ -18,7 +18,7 @@ services:
         sync: false
       - key: API_HASH
         sync: false
-      # optional: without it the bot runs in file-only mode (no voice chat)
+      # required: the assistant account that streams into voice chats
       - key: STRING_SESSION
         sync: false
       - key: OWNER_ID

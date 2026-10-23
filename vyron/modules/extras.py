@@ -184,7 +184,7 @@ def register(client: Client) -> None:
                 (f"{E('stats')} Memory", f"<b>{ram_text}</b>"),
                 (f"{E('download')} Disk free", f"<b>{disk_free}</b>"),
                 (f"{E('chat')} Active VC", f"<b>{len(runtime.player.active_chats()) if runtime.player else 0}</b>"),
-                (f"{E('spark')} Streaming", f"<b>{'yes' if runtime.streaming_ready else 'file mode'}</b>"),
+                (f"{E('spark')} Streaming", f"<b>{'on' if runtime.streaming_ready else 'off'}</b>"),
             ]
         )
         await rich.send(client, message.chat.id, B.heading(f"{E('stats')} system", 3) + body)

@@ -28,12 +28,13 @@ def test_complete_config_has_no_errors_and_no_warnings():
     assert cfg.warnings() == []
 
 
-def test_missing_session_is_only_a_warning():
+def test_session_is_required():
+    """Streaming is the product: no assistant, no boot."""
     cfg = _settings()
-    assert cfg.validate() == []                       # boots in file-only mode
-    notes = " ".join(cfg.warnings())
-    assert "STRING_SESSION" in notes
-    assert "file" in notes
+    problems = " ".join(cfg.validate())
+    assert "STRING_SESSION is required" in problems
+    assert "python -m vyron.tools.session" in problems
+    assert "STRING_SESSION" not in " ".join(cfg.warnings())
 
 
 def test_missing_owner_is_only_a_warning():

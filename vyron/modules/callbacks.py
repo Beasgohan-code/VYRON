@@ -318,8 +318,8 @@ def register(client: Client) -> None:
                     {
                         "streamed": f"Playing · {truncate(track.title, 26)}",
                         "queued": f"Queued · {truncate(track.title, 26)}",
-                        "file": "Sending the file…",
-                    }[outcome]
+                        "error": "Could not start the voice chat",
+                    }.get(outcome, "Done")
                 )
             except Exception as exc:
                 await cq.answer(f"Could not play that: {truncate(str(exc), 60)}", show_alert=True)
@@ -586,15 +586,19 @@ def register(client: Client) -> None:
                 video=entry.video,
                 status_id=cq.message.id,
             )
-            if outcome != "file":
+            if outcome != "error":
                 await _show(
                     client,
                     cq,
-                    cards.started_card(track) if outcome == "streamed" else cards.queued_card(track, 0),
+                    cards.started_card(track)
+                    if outcome == "streamed"
+                    else cards.queued_card(track, 0),
                     keyboards.now_playing(state),
                 )
             await cq.answer(
-                {"streamed": "Starting", "queued": "Queued", "file": "Sending the file…"}[outcome]
+                {"streamed": "Starting", "queued": "Queued", "error": "Could not stream that"}.get(
+                    outcome, "Done"
+                )
             )
             return
 

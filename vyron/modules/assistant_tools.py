@@ -56,7 +56,50 @@ def _card(me) -> str:
     )
 
 
+def engine_card() -> str:
+    """``/voice`` — why is (or isn't) playback working?"""
+    ready = runtime.streaming_ready
+    player = runtime.player
+    active = player.active_chats() if player else []
+    settings_ = runtime.settings
+    assistant_me = getattr(runtime.assistant, "me", None) if runtime.assistant else None
+    who = "—"
+    if assistant_me is not None:
+        who = rich.esc(assistant_me.username or assistant_me.first_name or "assistant")
+    pairs = [
+        (f"{E('live')} engine", f"<b>{'on' if ready else 'off'}</b>"),
+        (f"{E('microphone')} assistant", f"<code>{who}</code>" if ready else "<i>not connected</i>"),
+        (f"{E('chat')} active calls", f"<b>{len(active)}</b>"),
+        (f"{E('volume')} audio", f"<b>{rich.esc(str(settings_.audio_quality))}</b>"),
+        (f"{E('video')} video", f"<b>{rich.esc(str(settings_.video_quality))}</b>"),
+        (f"{E('cloud')} mode", "<i>voice only — /song and /video send files</i>"),
+    ]
+    hint = (
+        f"{E('check')} Everything is up: /play streams into the voice chat."
+        if ready
+        else (
+            f"{E('warn')} Streaming is off. Add a valid <code>STRING_SESSION</code> "
+            "(<code>python -m vyron.tools.session</code>) and restart. "
+            "/song and /video still send files."
+        )
+    )
+    body = (
+        B.heading(f"{E('wave')} voice engine", 2)
+        + B.kv(pairs)
+        + B.note(hint)
+    )
+    if active:
+        body += B.note(
+            f"{E('note')} in calls: <code>{', '.join(str(chat) for chat in active[:8])}</code>"
+        )
+    return body
+
+
 def register(client: Client) -> None:
+    @client.on_message(filters.command(["voice", "engine"]))
+    async def _voice(_: Client, message: Message) -> None:
+        await rich.send(client, message.chat.id, engine_card(), reply_to=message.id)
+
     async def _guard(message: Message) -> bool:
         if await _assistant() is None:
             await rich.send(

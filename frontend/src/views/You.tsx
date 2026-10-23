@@ -50,7 +50,7 @@ export function You() {
           <p>{user?.username ? `@${user.username}` : state?.chat?.title || "listening on Telegram"}</p>
           <div className="profile-tags">
             {state?.chat?.is_group && <span className="tag">{state.chat.title}</span>}
-            <span className="tag">{state?.streaming ? "voice chat ready" : "file mode"}</span>
+            <span className="tag">{state?.streaming ? "voice chat ready" : "voice engine offline"}</span>
             <span className="tag">v{state?.version ?? "1.2.0"}</span>
           </div>
         </div>
@@ -190,7 +190,7 @@ export function You() {
       </section>
 
       <p className="fine center">
-        VYRON v{state?.version ?? "1.2.0"} · voice-chat streaming with a file fallback · built on Telegram Bot API
+        VYRON v{state?.version ?? "1.2.0"} · voice-chat streaming · in-app player · built on Telegram Bot API
       </p>
     </div>
   );

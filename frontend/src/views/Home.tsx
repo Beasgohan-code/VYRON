@@ -116,7 +116,7 @@ export function Home() {
           )}
           {stack.length === 0 && (
             <span className="hero-stack-note">
-              <Radio size={13} /> {state?.streaming ? "voice chat ready" : "file mode"}
+              <Radio size={13} /> {state?.streaming ? "voice chat ready" : "voice engine offline"}
             </span>
           )}
         </div>

@@ -141,7 +141,7 @@ describe("VYRON Mini App", () => {
     expect(within(dialog).getByLabelText(/Link or search/i)).toBeInTheDocument();
   });
 
-  it("badges file mode when there is no assistant session", async () => {
+  it("badges the engine as off when the assistant is missing", async () => {
     stubApi({ streaming: false });
     mount();
 

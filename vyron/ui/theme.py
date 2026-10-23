@@ -50,6 +50,7 @@ def small_caps(text: str) -> str:
 GLYPHS: dict[str, str] = {
     "image": "🖼️",
     "brand": "🎧",
+    "headphones": "🎧",
     "play": "▶️",
     "pause": "⏸️",
     "resume": "▶️",

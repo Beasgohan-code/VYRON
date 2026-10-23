@@ -12,7 +12,7 @@ import time
 from pyrogram.types import BotCommand
 
 from vyron import __version__, banner_text, setup_logging
-from vyron.clients import build_assistant, build_bot
+from vyron.clients import build_assistant, build_bot, session_problem
 from vyron.config import settings
 from vyron.modules import register_all
 from vyron.core import keepalive, maintenance, watchdog
@@ -53,6 +53,7 @@ COMMANDS = [
     ("logs", "owner journal: starts, stops, errors"),
     ("logger", "mirror warnings to a channel"),
     ("effects", "audio effects panel"),
+    ("voice", "voice engine status"),
     ("locks", "content locks & anti-flood"),
     ("warn", "warn a member"),
     ("warns", "member warnings"),
@@ -164,6 +165,18 @@ async def _async_main() -> int:
         logger.warning("config: %s", note)
         journal.warn("config", note)
 
+    # validate the session *before* dialling Telegram: a truncated paste is the
+    # most common deploy mistake and should fail here, with the reason.
+    problem = session_problem(settings.session_string)
+    if problem:
+        logger.error("config: %s", problem)
+        journal.error("config", problem)
+        logger.error(
+            "generate a fresh session with `python -m vyron.tools.session` "
+            "(README → Create the assistant session)"
+        )
+        return 1
+
     # open the HTTP port first: Render/Koyeb polls it while the bot dials Telegram
     runner = await health.start(settings.port)
     runtime.settings = settings
@@ -185,13 +198,30 @@ async def _async_main() -> int:
         from pytgcalls import PyTgCalls
 
         logger.info("starting assistant (voice engine)…")
-        await assistant.start()
-        calls = PyTgCalls(assistant)
-        runtime.calls = calls
-        await calls.start()
-        logger.info("voice engine ready")
-    else:
-        logger.warning("no STRING_SESSION — running in file-only mode (no voice chat)")
+        try:
+            await assistant.start()
+            calls = PyTgCalls(assistant)
+            runtime.calls = calls
+            await calls.start()
+        except Exception as exc:
+            logger.error(
+                "the assistant session could not start (%s: %s). Streaming is off — "
+                "regenerate STRING_SESSION with `python -m vyron.tools.session`.",
+                type(exc).__name__,
+                exc,
+            )
+            journal.error("boot", "assistant session failed to start", exc)
+            calls = None
+            runtime.calls = None
+            runtime.assistant = None
+        else:
+            logger.info("voice engine ready")
+            journal.ok("voice", "voice engine ready")
+
+    if calls is None:
+        logger.warning(
+            "no voice engine — /play will refuse until STRING_SESSION is set and valid"
+        )
 
     await runtime.build_services()
     from vyron.core import logsink
