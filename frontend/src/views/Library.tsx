@@ -148,7 +148,19 @@ export function Library() {
                     <button
                       type="button"
                       className="btn btn-ghost sm"
-                      onClick={() => void act("playlist_play", selectedPlaylist.id)}
+                      onClick={async () => {
+                        const payload = await act<{ started?: boolean; queued?: number }>(
+                          "playlist_play",
+                          selectedPlaylist.id
+                        );
+                        if (!payload || payload.preview) return;
+                        toast(
+                          payload.started
+                            ? `Playing in the call · ${payload.queued ?? 0} more queued`
+                            : `${payload.queued ?? 0} songs added to the call`,
+                          "success"
+                        );
+                      }}
                     >
                       <Radio size={13} /> Cast
                     </button>

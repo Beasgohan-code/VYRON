@@ -430,6 +430,8 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
   width: 100%;
 }
 .empty.inline { padding: 26px 18px; }
+.empty .row.gap { justify-content: center; margin-top: 4px; }
+.suggest-block { display: grid; gap: 10px; margin-top: 18px; }
 .empty b { color: var(--text); font-size: 15px; }
 .empty p { max-width: 46ch; font-size: 13px; }
 .empty-icon {

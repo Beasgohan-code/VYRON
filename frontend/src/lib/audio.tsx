@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, telegram } from "./api";
+import { artworkHiRes } from "./format";
 import { enqueue as enqueueTrack, keyOf, move as moveInQueue, nextIndex } from "./queueops";
 import type { Repeat } from "./queueops";
 import { buildSession, clearSession, readSession, writeSession, type SavedSession } from "./session";
@@ -507,7 +508,9 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
         title: track.title,
         artist: track.uploader || "VYRON",
         album: "VYRON",
-        artwork: track.thumbnail ? [{ src: track.thumbnail, sizes: "512x512", type: "image/jpeg" }] : [],
+        artwork: artworkHiRes(track.thumbnail)
+          ? [{ src: artworkHiRes(track.thumbnail) as string, sizes: "1280x720", type: "image/jpeg" }]
+          : [],
       });
       media.setActionHandler("play", () => {
         void el().play().catch(() => undefined);

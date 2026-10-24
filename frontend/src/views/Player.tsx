@@ -40,6 +40,17 @@ interface LyricLine {
 const SLEEP_STEPS = [0, 15, 30, 60];
 const SPEEDS = [0.75, 1, 1.25, 1.5];
 
+/** "jiosaavn" → "JioSaavn": the engine that is actually serving the audio. */
+function sourceLabel(source?: string): string {
+  const clean = (source || "").toLowerCase();
+  if (!clean || clean === "youtube" || clean.startsWith("youtube·")) return "";
+  if (clean === "jiosaavn") return "JioSaavn";
+  if (clean === "soundcloud") return "SoundCloud";
+  if (clean === "audius") return "Audius";
+  if (clean === "bandcamp") return "Bandcamp";
+  return clean;
+}
+
 export function Player() {
   const { audio, state, cast, act, openModal, toast } = useApp();
   const [lyrics, setLyrics] = useState<{ lines: LyricLine[]; text: string } | null>(null);
@@ -57,8 +68,10 @@ export function Player() {
   });
   const lyricsBox = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
+  const swipe = useRef<{ y: number; at: number; active: boolean } | null>(null);
   const art = useTilt<HTMLDivElement>(7);
   const track = audio.track;
+  const servedBy = sourceLabel(track?.source);
 
   useEffect(() => {
     const root = body.current;
@@ -159,7 +172,34 @@ export function Player() {
   };
 
   return (
-    <div className="player" role="dialog" aria-label="Player" aria-modal="true" style={tint}>
+    <div
+      className="player"
+      role="dialog"
+      aria-label="Player"
+      aria-modal="true"
+      style={tint}
+      /* Swipe down to close: the gesture every phone music player has, and the
+         thumb reaches it without hunting for the chevron. */
+      onTouchStart={(event) => {
+        const touch = event.touches[0];
+        swipe.current = touch && event.target instanceof Element && !event.target.closest(".lyrics, .rows")
+          ? { y: touch.clientY, at: Date.now(), active: true }
+          : null;
+      }}
+      onTouchMove={(event) => {
+        const start = swipe.current;
+        const touch = event.touches[0];
+        if (!start?.active || !touch) return;
+        const distance = touch.clientY - start.y;
+        if (distance > 90) {
+          swipe.current = null;
+          audio.setExpanded(false);
+        }
+      }}
+      onTouchEnd={() => {
+        swipe.current = null;
+      }}
+    >
       <div className="pv-glow" aria-hidden="true" />
       <div className="pv-backdrop" aria-hidden="true">
         <Cover track={track} />
@@ -172,7 +212,8 @@ export function Player() {
           <ChevronDown size={20} />
         </button>
         <span className="pv-context">
-          playing in the app<i>{audio.queue.length} in queue</i>
+          {servedBy ? `via ${servedBy}` : "playing in the app"}
+          <i>{audio.queue.length} in queue</i>
         </span>
         <div className="pv-head-actions">
           <button

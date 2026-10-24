@@ -63,6 +63,7 @@ interface Store {
   access: "ok" | "locked" | "offline";
   loadMix: (key: string) => Promise<void>;
   refreshState: () => Promise<void>;
+  refreshHome: () => Promise<void>;
   refreshRooms: () => Promise<void>;
   /** Point the app at a voice chat the user administers. */
   attachRoom: (chatId: number) => Promise<boolean>;
@@ -176,6 +177,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     }
   }, [toast]);
+
+  const refreshHome = useCallback(async () => {
+    try {
+      setHome(await api.home());
+    } catch {
+      setHome(null);
+    }
+  }, []);
 
   const refreshRooms = useCallback(async () => {
     try {
@@ -468,6 +477,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       runSearch,
       loadMix,
       refreshState,
+      refreshHome,
       refreshRooms,
       attachRoom,
       refreshPlaylists,
@@ -485,7 +495,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       state, home, rooms, playlists, results, view, setView, query, searchFilter, libraryFilter,
       selectedPlaylist, openPlaylist, theme, setTheme, accent, setAccent, normalise, setNormalise,
       toastMessage, toast, toastTone, modal, openModal, closeModal, act, play, runSearch, loadMix,
-      refreshState, refreshRooms, attachRoom, refreshPlaylists, recent, rememberSearch, searching, access,
+      refreshState, refreshHome, refreshRooms, attachRoom, refreshPlaylists, recent, rememberSearch,
+      searching, access,
       dragging, isLiked, toggleLike,
       audio, cast,
     ]

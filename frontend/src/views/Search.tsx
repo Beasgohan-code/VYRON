@@ -6,6 +6,19 @@ import { Cover } from "../components/Cover";
 import { TrackRow } from "../components/TrackRow";
 import { useViewReveal } from "../lib/anim";
 
+/** Seeds for the idle screen — a search box with nothing in it is a dead end,
+    and these are one tap away from actual audio. */
+const SUGGESTIONS = [
+  "Lo-fi beats",
+  "Malayalam hits",
+  "Arijit Singh",
+  "90s Bollywood",
+  "Workout mix",
+  "K-pop",
+  "Tamil melody",
+  "Rainy night piano",
+];
+
 const FILTERS = [
   { key: "all", label: "All" },
   { key: "songs", label: "Songs" },
@@ -149,6 +162,24 @@ export function Search() {
               <p>Type a name, paste a YouTube link, or reply to a file in the bot — it all lands here.</p>
             </div>
           )}
+          <div className="suggest-block">
+            <span className="fine">Try one of these</span>
+            <div className="chips">
+              {SUGGESTIONS.map((term) => (
+                <button
+                  key={term}
+                  type="button"
+                  className="chip ghost"
+                  onClick={() => {
+                    setValue(term);
+                    void runSearch(term);
+                  }}
+                >
+                  {term}
+                </button>
+              ))}
+            </div>
+          </div>
         </section>
       )}
 
@@ -237,6 +268,21 @@ export function Search() {
         <div className="empty">
           <b>Nothing for “{query}”</b>
           <p>Try a different spelling, the artist name, or paste a direct link.</p>
+          <div className="row gap">
+            <button type="button" className="btn btn-primary sm" onClick={() => void runSearch(query)}>
+              Search again
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost sm"
+              onClick={() => {
+                setValue("");
+                input.current?.focus();
+              }}
+            >
+              Clear
+            </button>
+          </div>
         </div>
       )}
     </div>

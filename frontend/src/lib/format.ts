@@ -85,3 +85,26 @@ export function activeLyricLine(
   }
   return active;
 }
+
+/* ── artwork ──────────────────────────────────────────────────────────────── */
+
+const YTIMG = /^https?:\/\/i\d?\.ytimg\.com\/vi(?:_webp)?\/([A-Za-z0-9_-]{6,})\/([a-z]+)\.(jpg|webp)$/i;
+
+/**
+ * Ask YouTube for the biggest version of the same image.
+ *
+ * Search results come back with a 120×90 `default.jpg`, which is a blurry mess
+ * behind a 320 px player and a genuinely bad lock-screen cover. The video id is
+ * in the URL, so the high-resolution file is the same URL with a different
+ * filename — no extra request, no extra API.
+ *
+ * Non-YouTube URLs (and already-large ones) are returned untouched.
+ */
+export function artworkHiRes(url?: string | null): string | null {
+  if (!url) return null;
+  const match = YTIMG.exec(url);
+  if (!match) return url;
+  const [, id, size] = match;
+  if (["maxresdefault", "sddefault", "hqdefault"].includes(size.toLowerCase())) return url;
+  return `https://i.ytimg.com/vi/${id}/maxresdefault.jpg`;
+}

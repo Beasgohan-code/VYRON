@@ -23,6 +23,7 @@ export function Home() {
     act,
     toast,
     runSearch,
+    refreshHome,
   } = useApp();
   const stage = useViewReveal<HTMLDivElement>("home", ".stage-block");
 
@@ -152,6 +153,30 @@ export function Home() {
             >
               Dismiss
             </button>
+          </div>
+        </section>
+      )}
+
+      {!loading && trending.length === 0 && shelves.length === 0 && (
+        <section className="stage-block empty-home">
+          <div className="empty">
+            <span className="empty-icon">
+              <Headphones size={20} />
+            </span>
+            <b>No charts yet</b>
+            <p>
+              This deployment could not reach the catalogue — a cold start, or the
+              resolver is still waking up. Search still works, and so does anything
+              already in your library.
+            </p>
+            <div className="row gap">
+              <button type="button" className="btn btn-primary sm" onClick={() => void refreshHome()}>
+                Try again
+              </button>
+              <button type="button" className="btn btn-ghost sm" onClick={() => setView("library")}>
+                Open library
+              </button>
+            </div>
           </div>
         </section>
       )}
