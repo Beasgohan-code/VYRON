@@ -290,6 +290,55 @@ class Player:
         await asyncio.sleep(1.5)
         return True
 
+    # ── assistant membership ───────────────────────────────────────────────
+    async def _assistant_joined(self, chat_id: int) -> bool:
+        """Is the streaming account a member of this chat?"""
+        from vyron.runtime import runtime as _runtime
+
+        assistant = getattr(_runtime, "assistant", None)
+        if assistant is None:
+            return False
+        try:
+            await assistant.get_chat_member(chat_id, "me")
+            return True
+        except Exception:
+            return False
+
+    async def ensure_assistant(self, chat_id: int) -> bool:
+        """Invite the assistant into *chat_id* if it is not there yet.
+
+        Ported from ShizuMusic: without this, the first `/play` in an old group
+        fails with "the assistant could not join the voice chat" and the person
+        has to add the account by hand. A public chat is joined by id; a private
+        one needs an invite link, which the *bot* exports (it has the rights
+        the assistant does not).
+        """
+        if await self._assistant_joined(chat_id):
+            return True
+        from vyron.runtime import runtime as _runtime
+
+        assistant = getattr(_runtime, "assistant", None)
+        if assistant is None:
+            return False
+        try:
+            await assistant.join_chat(chat_id)
+            logger.info("assistant joined %s", chat_id)
+            return True
+        except Exception as exc:
+            logger.debug("assistant join by id failed in %s: %s", chat_id, exc)
+        bot = getattr(_runtime, "bot", None)
+        if bot is None:
+            return False
+        try:
+            link = await bot.export_chat_invite_link(chat_id)
+            await assistant.join_chat(link)
+            logger.info("assistant joined %s via invite link", chat_id)
+            return True
+        except Exception as exc:
+            logger.info("assistant could not join %s: %s", chat_id, exc)
+            journal.warn("voice", f"assistant could not join {chat_id}", error=str(exc))
+            return False
+
     # ── streaming primitives ───────────────────────────────────────────────
     async def _start_stream(
         self,
@@ -358,11 +407,39 @@ class Player:
                     stream,
                     config=GroupCallConfig(auto_start=True),
                 )
+        except NotInCallError as exc:
+            # The assistant is not in the chat: invite it, then try once more.
+            if await self.ensure_assistant(chat_id):
+                try:
+                    await self.calls.play(
+                        chat_id,
+                        stream,
+                        config=GroupCallConfig(auto_start=True),
+                    )
+                    self._in_call.add(int(chat_id))
+                    return
+                except Exception as retry_exc:
+                    logger.info("retry after joining failed in %s: %s", chat_id, retry_exc)
+                    raise StreamError(
+                        f"Playback failed: {retry_exc}"
+                    ) from None
+            raise StreamError("The assistant could not join the voice chat.") from exc
         except NoActiveGroupCall as exc:
             raise StreamError("Start a voice chat in this group first, then try again.") from exc
-        except NotInCallError as exc:
-            raise StreamError("The assistant could not join the voice chat.") from exc
         except Exception as exc:
+            # A missing assistant usually surfaces as a channel/peer error, so
+            # try the invite path once before giving up.
+            if await self.ensure_assistant(chat_id):
+                try:
+                    await self.calls.play(
+                        chat_id,
+                        stream,
+                        config=GroupCallConfig(auto_start=True),
+                    )
+                    self._in_call.add(int(chat_id))
+                    return
+                except Exception:
+                    pass
             logger.warning("stream start failed in %s: %s", chat_id, exc)
             journal.error("player", f"stream start failed in {chat_id}", exc, track=track.id)
             raise StreamError(f"Playback failed: {exc}") from exc

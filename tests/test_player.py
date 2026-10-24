@@ -504,3 +504,61 @@ def test_disk_playback_can_be_switched_off(tmp_path):
 
     assert downloader.calls == []
     assert youtube.stream_url_calls == ["abc12345678"]
+
+
+# ── assistant membership (ported from ShizuMusic) ───────────────────────────
+def test_assistant_join_falls_back_to_an_invite_link(monkeypatch):
+    from vyron import runtime as runtime_module
+
+    calls = {"join": [], "export": 0, "member": 0}
+
+    class Assistant:
+        async def get_chat_member(self, chat_id, who):
+            calls["member"] += 1
+            raise RuntimeError("USER_NOT_PARTICIPANT")
+
+        async def join_chat(self, target):
+            calls["join"].append(target)
+            if isinstance(target, int):
+                raise RuntimeError("CHANNEL_PRIVATE")
+            return True
+
+    class Bot:
+        async def export_chat_invite_link(self, chat_id):
+            calls["export"] += 1
+            return "https://t.me/+invite"
+
+    monkeypatch.setattr(runtime_module.runtime, "assistant", Assistant())
+    monkeypatch.setattr(runtime_module.runtime, "bot", Bot())
+
+    player, _, _, _ = make_player()
+    assert run(player.ensure_assistant(-100)) is True
+    assert calls["join"] == [-100, "https://t.me/+invite"]
+    assert calls["export"] == 1
+
+
+def test_assistant_already_joined_is_a_no_op(monkeypatch):
+    from vyron import runtime as runtime_module
+
+    joined = {"n": 0}
+
+    class Assistant:
+        async def get_chat_member(self, chat_id, who):
+            return SimpleNamespace(status="member")
+
+        async def join_chat(self, target):  # pragma: no cover - must not run
+            joined["n"] += 1
+
+    monkeypatch.setattr(runtime_module.runtime, "assistant", Assistant())
+    player, _, _, _ = make_player()
+    assert run(player.ensure_assistant(-100)) is True
+    assert joined["n"] == 0
+
+
+def test_without_an_assistant_everything_still_reports_cleanly(monkeypatch):
+    from vyron import runtime as runtime_module
+
+    monkeypatch.setattr(runtime_module.runtime, "assistant", None)
+    player, _, _, _ = make_player()
+    assert run(player._assistant_joined(-100)) is False
+    assert run(player.ensure_assistant(-100)) is False
