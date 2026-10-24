@@ -804,3 +804,26 @@ def test_registry_exposes_soundcloud_and_bandcamp_as_streams():
     assert rows["bandcamp"]["kind"] == "stream"
     assert "soundcloud" not in sources.CATALOGUE_SOURCES
     assert sources.EXTRACT_SOURCES == {"soundcloud", "bandcamp"}
+
+
+def test_music_sources_names_the_catalogues_and_off_is_the_kill_switch():
+    import dataclasses
+
+    from vyron.config import settings
+    from vyron.core import sources
+
+    only_spotify = sources.registry(
+        dataclasses.replace(settings, music_sources="spotify")
+    )
+    enabled = {row.name for row in only_spotify if row.kind == "catalogue" and row.is_enabled()}
+    assert enabled == {"spotify"}
+    # …and the fallback chain does not care: it is still there
+    assert {"audius", "jiosaavn", "soundcloud", "bandcamp"} <= {
+        row.name for row in only_spotify if row.kind == "stream" and row.is_enabled()
+    }
+
+    off = sources.registry(dataclasses.replace(settings, music_sources="off"))
+    assert [row for row in off if row.is_enabled() and row.name not in {"ytmusic", "ytdlp"}] == []
+    assert sources.describe(dataclasses.replace(settings, music_sources="off")).startswith(
+        "ytmusic · ytdlp"
+    )
