@@ -90,6 +90,8 @@ class Settings:
     ytdlp_autoupdate: bool = field(default_factory=lambda: _flag("YTDLP_AUTOUPDATE", True))
     # Extra catalogue sources: a Spotify/Deezer/Apple/SoundCloud link is read
     # for its metadata and matched on YouTube. `off` disables the whole tier.
+    # Direct-stream fallbacks (Audius, JioSaavn) are not governed by this: they
+    # serve their own audio and back YouTube up automatically.
     music_sources: str = field(
         default_factory=lambda: (_env("MUSIC_SOURCES", "spotify,deezer,apple,soundcloud") or "").lower()
     )

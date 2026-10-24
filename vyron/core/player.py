@@ -22,6 +22,7 @@ from pytgcalls.types import AudioQuality, GroupCallConfig, MediaStream, VideoQua
 from vyron.config import Settings
 from vyron.core import effects as audio_fx
 from vyron.core.queue import ChatState, LoopMode, QueueManager, Track
+from vyron.core.sources import DIRECT_SOURCES as _DIRECT_SOURCES
 from vyron.core.search import MediaError, YouTube
 from vyron.database import Storage
 from vyron.core.journal import journal
@@ -358,8 +359,10 @@ class Player:
         if track.source == "telegram" and Path(track.url).is_file():
             # already downloaded locally — stream the file, not a URL
             url = track.url
-        elif track.source == "audius" and track.url and not getattr(
-            self.settings, "play_from_disk", False
+        elif (
+            track.source in _DIRECT_SOURCES
+            and track.url
+            and not getattr(self.settings, "play_from_disk", False)
         ):
             # A direct stream: yt-dlp has nothing to extract here.
             url = track.url

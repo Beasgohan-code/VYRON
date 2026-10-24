@@ -410,7 +410,9 @@ class Downloader:
             cached = self.cached(track, video=video)
             if cached:
                 return cached
-            if track.source == "audius" and track.url:
+            from vyron.core.sources import DIRECT_SOURCES
+
+            if track.source in DIRECT_SOURCES and track.url:
                 # A direct stream: no extraction, no ladder — just the
                 # accelerator writing bytes into the cache.
                 return await self._download_stream(track, on_progress=on_progress)

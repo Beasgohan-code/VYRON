@@ -566,3 +566,129 @@ def test_resolver_prefers_audius_for_an_audius_link(monkeypatch):
     engine = _engine()
     track = asyncio.run(engine.resolve("https://audius.co/nova/one"))
     assert track.source == "audius" and track.url == "https://node/stream"
+
+
+# ── JioSaavn: second direct-stream catalogue ────────────────────────────────
+def test_jiosaavn_links_and_song_mapping():
+    from vyron.core import jiosaavn
+
+    assert jiosaavn.is_jiosaavn("https://www.jiosaavn.com/song/kesariya/ABC123")
+    assert not jiosaavn.is_jiosaavn("https://open.spotify.com/track/x")
+
+    track = jiosaavn.parse_song(
+        {
+            "id": "ABC123",
+            "name": "Kesariya&nbsp;(From &quot;Brahmastra&quot;)",
+            "duration": "268",
+            "artists": {"primary": [{"name": "Arijit Singh"}]},
+            "image": [
+                {"quality": "50x50", "url": "https://c/50.jpg"},
+                {"quality": "500x500", "url": "https://c/500.jpg"},
+            ],
+            "downloadUrl": [
+                {"quality": "96kbps", "url": "https://a/96.mp4"},
+                {"quality": "320kbps", "url": "https://a/320.mp4"},
+            ],
+        }
+    )
+    assert track is not None
+    assert track.id == "ABC123" and track.source == "jiosaavn"
+    assert track.title == 'Kesariya (From "Brahmastra")'
+    assert track.uploader == "Arijit Singh" and track.duration == 268
+    assert track.thumbnail == "https://c/500.jpg"
+    assert track.url == "https://a/320.mp4"     # best quality wins
+    assert jiosaavn.parse_song({"id": "x", "name": "no url"}) is None
+
+
+def test_jiosaavn_search_and_resolve(monkeypatch):
+    from vyron.core import jiosaavn
+
+    async def fake_json(url):
+        assert "search/songs" in url or "/songs/" in url
+        return {
+            "data": {
+                "results": [
+                    {
+                        "id": "SONG1",
+                        "name": "Kesariya",
+                        "duration": 268,
+                        "artists": {"primary": [{"name": "Arijit Singh"}]},
+                        "downloadUrl": [{"quality": "320kbps", "url": "https://a/320.mp4"}],
+                    }
+                ]
+            }
+        }
+
+    monkeypatch.setattr(jiosaavn, "_json", fake_json)
+    tracks = asyncio.run(jiosaavn.search("kesariya"))
+    assert len(tracks) == 1 and tracks[0].url == "https://a/320.mp4"
+
+    resolved = asyncio.run(jiosaavn.resolve("https://www.jiosaavn.com/song/kesariya/ABC"))
+    assert resolved is not None and resolved.id == "SONG1"
+
+
+# ── the registry: order, fallbacks, health ──────────────────────────────────
+def test_registry_lists_primary_streams_and_catalogues():
+    from vyron.core import sources
+
+    names = sources.names()
+    assert names[:2] == ["ytmusic", "ytdlp"]
+    assert "audius" in names and "jiosaavn" in names
+    assert {"spotify", "deezer", "apple", "soundcloud"} <= set(names)
+    assert sources.DIRECT_SOURCES == {"audius", "jiosaavn"}
+    order = sources.describe()
+    assert order.startswith("ytmusic · ytdlp")
+
+
+def test_registry_falls_through_to_the_next_stream_source(monkeypatch):
+    from vyron.core import sources
+    from vyron.core.queue import Track
+
+    class _Breaking:
+        async def search(self, query, limit):
+            raise RuntimeError("down")
+
+    class _Working:
+        def __init__(self):
+            self.calls = 0
+
+        async def search(self, query, limit):
+            self.calls += 1
+            return [Track(id="j1", title=query, duration=100, source="jiosaavn")]
+
+    working = _Working()
+    patched = [
+        sources.Source("audius", "Audius", "stream", search=_Breaking().search),
+        sources.Source("jiosaavn", "JioSaavn", "stream", search=working.search),
+    ]
+    monkeypatch.setattr(sources, "search_sources", lambda settings=None: patched)
+
+    found = asyncio.run(sources.fallback_search("kesariya", 3))
+    assert [track.id for track in found] == ["j1"]
+    assert working.calls == 1
+    assert patched[0].status()["failures"] == 1
+
+
+def test_a_source_in_cooldown_is_skipped(monkeypatch):
+    from vyron.core import sources
+
+    calls = {"n": 0}
+
+    async def boom(query, limit):
+        calls["n"] += 1
+        raise RuntimeError("still down")
+
+    source = sources.Source("audius", "Audius", "stream", search=boom)
+    monkeypatch.setattr(sources, "search_sources", lambda settings=None: [source])
+    assert asyncio.run(sources.fallback_search("x", 2)) == []
+    assert asyncio.run(sources.fallback_search("x", 2)) == []
+    assert calls["n"] == 2                 # two attempts, then the cooldown bites
+    assert source.available() is False
+
+
+def test_content_status_is_json_safe():
+    from vyron.core import sources
+
+    rows = sources.status()
+    for row in rows:
+        assert set(row) >= {"name", "kind", "enabled", "available", "last_ok"}

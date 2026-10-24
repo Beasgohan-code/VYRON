@@ -21,7 +21,7 @@ from typing import Any
 import yt_dlp
 
 from vyron.config import Settings
-from vyron.core import audius, metasources, ytmusic
+from vyron.core import metasources, sources, ytmusic
 from vyron.core.resolvers import HEALTH
 from vyron.core.queue import Track
 from vyron.ui.progress import parse_duration, truncate
@@ -475,10 +475,11 @@ class YouTube:
                 track = self._track_from_entry(entry, requester=requester)
                 if track:
                     tracks.append(track)
-        if not tracks and self._catalogue_enabled():
-            # Last resort, and a genuinely different catalogue: independent
-            # music on Audius, streamable without YouTube.
-            for track in await audius.search(query, limit=count):
+        if not tracks:
+            # YouTube said no. Ask the other *streaming* catalogues in the
+            # registry's order (Audius → JioSaavn) before giving up: those hand
+            # out real audio, so the request can still succeed.
+            for track in await sources.fallback_search(query, count, settings=self.settings):
                 track.requested_by, track.requested_name = requester
                 tracks.append(track)
         if not tracks:
@@ -562,14 +563,13 @@ class YouTube:
         if not query:
             raise MediaError("Give me a song name, a link or reply to an audio file.")
 
-        # Audius is the one catalogue that can serve the audio itself: its API
-        # hands out a direct stream, so a link becomes a playable track without
-        # touching YouTube at all.
-        if self._catalogue_enabled() and audius.is_audius(query):
-            track = await audius.resolve(query)
-            if track is not None:
-                track.requested_by, track.requested_name = requester
-                return track
+        # Direct-stream catalogues first (Audius, JioSaavn): their API hands out
+        # the audio itself, so these links play without YouTube being involved.
+        if self._catalogue_enabled() and looks_like_url(query):
+            direct = await sources.resolve_direct(query, settings=self.settings)
+            if direct is not None:
+                direct.requested_by, direct.requested_name = requester
+                return direct
 
         # A Spotify / Deezer / Apple Music / SoundCloud link is metadata, not
         # audio: read the catalogue entry, then let the normal ladder find the
@@ -607,8 +607,15 @@ class YouTube:
         try:
             results = await self.search(meta.query, limit=2, requester=requester)
         except MediaError:
-            return None
+            results = []
         if not results:
+            # A catalogue entry we could not match on YouTube: try to stream the
+            # same song from a direct source instead of failing the link.
+            for track in await sources.fallback_search(
+                meta.query, 1, settings=self.settings
+            ):
+                track.requested_by, track.requested_name = requester
+                return track
             return None
         chosen = results[0]
         # Keep the catalogue's identity where it is better than YouTube's.

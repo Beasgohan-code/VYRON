@@ -245,19 +245,39 @@ def register(client: Client) -> None:
         from vyron.utils import commands
 
         rows.append(_row(f"{E('spark')} prefixes", True, commands.describe()))
-        from vyron.core import audius, metasources, ytmusic
+        from vyron.core import sources as source_registry
 
+        # One row per source, straight from the registry the resolver uses — so
+        # /doctor can never disagree with what actually answers a request.
         rows.append(
             _row(
                 f"{E('globe')} sources",
-                True,
-                "spotify · deezer · apple · soundcloud · audius"
-                if metasources.SERVICES
-                else "youtube only",
+                all(row["available"] for row in source_registry.status() if row["kind"] == "stream")
+                or None,
+                source_registry.describe(),
             )
         )
-        rows.append(_row(f"{E('search')} yt music", ytmusic.available() or None, ytmusic.describe()))
-        rows.append(_row(f"{E('live')} audius", True, audius.describe()))
+        for row in source_registry.status():
+            if row["kind"] == "catalogue":
+                continue
+            mark = True if row["available"] else (None if row["enabled"] else False)
+            rows.append(
+                _row(
+                    f"{E('spark')} {row['name']}",
+                    mark,
+                    row["detail"] if row["enabled"] else "disabled by MUSIC_SOURCES",
+                )
+            )
+        catalogue = [
+            row["name"] for row in source_registry.status() if row["kind"] == "catalogue"
+        ]
+        rows.append(
+            _row(
+                f"{E('link')} links",
+                True if catalogue else None,
+                " · ".join(catalogue) if catalogue else "YouTube links only",
+            )
+        )
         resolver_row = _resolver_row()
         if resolver_row:
             rows.append(resolver_row)
