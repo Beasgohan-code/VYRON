@@ -45,6 +45,12 @@ CLIENT_LADDER: tuple[str | None, ...] = (None, "android_vr", "ios", "tv")
 
 ProgressHook = Callable[[float, str], None]
 
+#: MP3 bitrate for anything this module has to transcode. 320 is the ceiling
+#: listeners can hear on a phone, and the catalogues already serve that.
+MP3_KBPS = "320"
+#: AAC bitrate inside the generated MP4 — the video's sound, not its picture.
+VIDEO_AUDIO_KBPS = "256"
+
 
 class DownloadError(RuntimeError):
     pass
@@ -258,7 +264,7 @@ class Downloader:
                                 {
                                     "key": "FFmpegExtractAudio",
                                     "preferredcodec": "mp3",
-                                    "preferredquality": "192",
+                                    "preferredquality": MP3_KBPS,
                                 },
                                 {"key": "FFmpegMetadata", "add_metadata": True},
                             ]
@@ -341,7 +347,7 @@ class Downloader:
                 on_progress(0.85, "converting with ffmpeg")
             args = (
                 [binary, "-y", "-loglevel", "error", "-i", str(raw), "-vn", "-c:a", "libmp3lame",
-                 "-b:a", "192k", str(final)]
+                 "-b:a", f"{MP3_KBPS}k", str(final)]
                 if not video
                 else [binary, "-y", "-loglevel", "error", "-i", str(raw), "-c", "copy",
                       "-movflags", "+faststart", str(final)]
@@ -419,7 +425,7 @@ class Downloader:
             "scale=1280:720:force_original_aspect_ratio=decrease,"
             "pad=1280:720:(ow-iw)/2:(oh-ih)/2,format=yuv420p",
             "-c:v", "libx264", "-preset", "veryfast", "-tune", "stillimage",
-            "-r", "2", "-c:a", "aac", "-b:a", "192k",
+            "-r", "2", "-c:a", "aac", "-b:a", f"{VIDEO_AUDIO_KBPS}k",
             "-shortest", "-movflags", "+faststart", str(final),
         ]
         try:

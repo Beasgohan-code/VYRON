@@ -32,6 +32,18 @@ Two version numbers move independently:
   not an async iterator, so the loop body never ran.
 * **Fixed: `/pview` read an undefined variable** when a track was removed, and
   its empty state rendered a headerless table.
+* **The progress bar reads like music, not a download.** `1:03 ━━━━♡────────
+  2:44`: played is a heavy rule, what is left is light, and the heart is the
+  playhead. The caption is now three short lines (position, state + volume,
+  queue/requester) with "up next" last.
+* **A walled server still plays — and still makes the video.** A video request
+  used to skip the substitution tier entirely, so a blocked YouTube meant
+  silence; the resolver now asks the catalogues for audio even when video was
+  requested, and the player drops the video flag when the bytes are audio
+  (rather than failing the whole play) and says so in the card. `/song` and the
+  app's video download gained a third engine: the same song from a catalogue,
+  the poster as the picture, muxed to a 720p MP4.
+* **MP3 downloads are 320 kbps** (the AAC inside a generated video is 256).
 
 ### 1.9.1 — 2026-10-24
 
