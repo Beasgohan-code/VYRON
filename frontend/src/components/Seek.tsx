@@ -7,6 +7,8 @@ interface Props {
   duration: number;
   onSeek: (seconds: number) => void;
   playing?: boolean;
+  /** Seconds the browser has ready ahead of the playhead. */
+  buffered?: number;
 }
 
 const BARS = 84;
@@ -26,7 +28,7 @@ function peaksFor(seed: string): number[] {
  * Scrub bar drawn as a waveform. Drag, click or use the arrow keys; the played
  * portion is painted and the rest stays dim, so the position reads at a glance.
  */
-export function Seek({ seed, position, duration, onSeek, playing = false }: Props) {
+export function Seek({ seed, position, duration, onSeek, playing = false, buffered = 0 }: Props) {
   const track = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
   const [preview, setPreview] = useState<number | null>(null);
@@ -73,6 +75,7 @@ export function Seek({ seed, position, duration, onSeek, playing = false }: Prop
   }, [dragging, onSeek, secondsAt]);
 
   const playedIndex = Math.round((percent / 100) * BARS);
+  const bufferPercent = duration > 0 ? Math.min(100, Math.max(0, (buffered / duration) * 100)) : 0;
 
   return (
     <div className="seek">
@@ -109,6 +112,7 @@ export function Seek({ seed, position, duration, onSeek, playing = false }: Prop
             style={{ height: `${Math.round(peak * 100)}%`, animationDelay: `${(index % 12) * 90}ms` }}
           />
         ))}
+        <span className="seek-buffer" style={{ width: `${bufferPercent}%` }} aria-hidden="true" />
         <span className="seek-head" style={{ left: `${percent}%` }} />
       </div>
       <div className="seek-times">

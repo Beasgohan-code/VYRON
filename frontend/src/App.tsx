@@ -2,9 +2,12 @@ import { ArrowUpRight, Compass, Download, Lock, WifiOff } from "lucide-react";
 import { useEffect, useState } from "react";
 import { BootScreen } from "./components/BootScreen";
 import { Dock } from "./components/Dock";
+import { ErrorBoundary } from "./components/ErrorBoundary";
+import { Shortcuts } from "./components/Shortcuts";
 import { Rail, Tabs } from "./components/Nav";
 import { Sheet } from "./components/Sheet";
 import { setOwnerToken } from "./lib/api";
+import { SEEK_STEP, VOLUME_STEP, shortcutFor } from "./lib/keys";
 import { useConnection, useUpdateReady } from "./lib/pwa";
 import { useApp } from "./lib/store";
 import { Home } from "./views/Home";
@@ -32,27 +35,77 @@ export default function App() {
   const { online } = useConnection();
   const update = useUpdateReady();
 
-  /* keyboard: "/" jumps to search, space toggles playback */
+  const [shortcuts, setShortcuts] = useState(false);
+  const { toggleLike } = useApp();
+
+  /* Keyboard: one table (lib/keys) decides, this only routes. */
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      const typing =
-        target &&
-        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
-
-      if (event.key === "/" && !typing) {
-        event.preventDefault();
-        setView("search");
-        window.setTimeout(() => window.dispatchEvent(new Event("vyron:focus-search")), 60);
+      const action = shortcutFor(event, event.target);
+      if (!action) return;
+      if (action === "escape") {
+        setShortcuts(false);
+        if (audio.expanded) audio.setExpanded(false);
+        return;
       }
-      if (event.code === "Space" && !typing && audio.track) {
-        event.preventDefault();
-        audio.toggle();
+      if (shortcuts) return; // the overlay owns the keyboard while it is open
+      switch (action) {
+        case "toggle":
+          if (!audio.track) return;
+          event.preventDefault();
+          audio.toggle();
+          break;
+        case "next":
+          event.preventDefault();
+          if (audio.track) audio.next();
+          break;
+        case "prev":
+          event.preventDefault();
+          if (audio.track) audio.prev();
+          break;
+        case "seekForward":
+          if (!audio.track) return;
+          event.preventDefault();
+          audio.seekBy(SEEK_STEP);
+          break;
+        case "seekBack":
+          if (!audio.track) return;
+          event.preventDefault();
+          audio.seekBy(-SEEK_STEP);
+          break;
+        case "volumeUp":
+          event.preventDefault();
+          audio.setVolume(Math.min(1, audio.volume + VOLUME_STEP));
+          break;
+        case "volumeDown":
+          event.preventDefault();
+          audio.setVolume(Math.max(0, audio.volume - VOLUME_STEP));
+          break;
+        case "mute":
+          audio.toggleMute();
+          break;
+        case "like":
+          if (audio.track) void toggleLike(audio.track);
+          break;
+        case "search":
+          event.preventDefault();
+          setView("search");
+          window.setTimeout(() => window.dispatchEvent(new Event("vyron:focus-search")), 60);
+          break;
+        case "queue":
+          audio.setExpanded(true);
+          break;
+        case "help":
+          event.preventDefault();
+          setShortcuts((open) => !open);
+          break;
+        default:
+          break;
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [audio, setView]);
+  }, [audio, setView, shortcuts, toggleLike]);
 
   const page = (() => {
     switch (view) {
@@ -147,9 +200,9 @@ export default function App() {
             }}
           />
         ) : (
-          <div className="view" key={view}>
-            {page}
-          </div>
+          <ErrorBoundary where={TITLES[view] ?? "view"} key={view}>
+            <div className="view">{page}</div>
+          </ErrorBoundary>
         )}
 
         <footer className="foot">
@@ -160,12 +213,17 @@ export default function App() {
           <button type="button" onClick={() => setView("search")}>
             <Download size={12} /> get music
           </button>
+          <span className="foot-dot" />
+          <button type="button" onClick={() => setShortcuts(true)} aria-label="Keyboard shortcuts">
+            <kbd>?</kbd> shortcuts
+          </button>
         </footer>
       </main>
 
       <Dock />
       <Tabs />
       <Sheet />
+      <Shortcuts open={shortcuts} onClose={() => setShortcuts(false)} />
       {audio.expanded && <Player />}
 
       {toastMessage && (

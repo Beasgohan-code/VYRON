@@ -141,6 +141,46 @@ describe("VYRON Mini App", () => {
     expect(within(dialog).getByLabelText(/Link or search/i)).toBeInTheDocument();
   });
 
+  it("opens the keyboard cheat sheet with ?", async () => {
+    const user = userEvent.setup();
+    mount();
+
+    await user.keyboard("?");
+    const dialog = await screen.findByRole("dialog", { name: /keyboard shortcuts/i });
+    expect(within(dialog).getByText(/Play \/ pause/i)).toBeInTheDocument();
+    expect(within(dialog).getByText("Space")).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: /keyboard shortcuts/i })).toBeNull()
+    );
+  });
+
+  it("offers to continue a session this device left behind", async () => {
+    const saved = {
+      version: 2,
+      queue: [
+        { id: "s1", title: "Left Behind", duration: 240, uploader: "Someone" },
+        { id: "s2", title: "Next Up", duration: 180, uploader: "Someone" },
+      ],
+      index: 0,
+      position: 96,
+      rate: 1,
+      volume: 0.8,
+      muted: false,
+      repeat: "all",
+      shuffle: false,
+      savedAt: Date.now(),
+    };
+    localStorage.setItem("vyron:session", JSON.stringify(saved));
+    mount();
+
+    expect(await screen.findByText("Left Behind")).toBeInTheDocument();
+    expect(screen.getByText(/1 of 2 · 1:36 in/i)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: /Resume/i })).toBeInTheDocument());
+    localStorage.removeItem("vyron:session");
+  });
+
   it("badges the engine as off when the assistant is missing", async () => {
     stubApi({ streaming: false });
     mount();

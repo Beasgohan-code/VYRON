@@ -1,4 +1,4 @@
-import { ArrowRight, Download, Headphones, Play, Radio, Search, Sparkles, Users } from "lucide-react";
+import { ArrowRight, Download, Headphones, History, Play, Radio, Search, Sparkles, Users } from "lucide-react";
 import { useApp } from "../lib/store";
 import { greeting } from "../lib/format";
 import { Cover } from "../components/Cover";
@@ -7,6 +7,7 @@ import { Aurora } from "../components/Aurora";
 import { Count } from "../components/Count";
 import { Equalizer } from "../components/Equalizer";
 import { useViewReveal } from "../lib/anim";
+import { describeSession, upNext } from "../lib/session";
 
 export function Home() {
   const {
@@ -121,6 +122,39 @@ export function Home() {
           )}
         </div>
       </section>
+
+      {/* A session left behind on this device: the queue survives the tab. */}
+      {!audio.track && audio.saved && (
+        <section className="stage-block resume-card">
+          <span className="resume-art">
+            <Cover track={audio.saved.queue[audio.saved.index]} />
+            <span className="resume-glyph">
+              <History size={14} />
+            </span>
+          </span>
+          <div className="resume-copy">
+            <span className="eyebrow">pick up where you left off</span>
+            <b>{audio.saved.queue[audio.saved.index]?.title ?? "Last session"}</b>
+            <span className="resume-meta">
+              {describeSession(audio.saved)}
+              {upNext(audio.saved) ? ` · next ${upNext(audio.saved)?.title}` : ""}
+            </span>
+          </div>
+          <div className="resume-actions">
+            <button type="button" className="btn btn-primary sm" onClick={audio.resumeSession}>
+              <Play size={14} fill="currentColor" /> Resume
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost sm"
+              onClick={audio.dismissSession}
+              aria-label="Dismiss the last session"
+            >
+              Dismiss
+            </button>
+          </div>
+        </section>
+      )}
 
       {history.length > 0 && (
         <section className="stage-block">

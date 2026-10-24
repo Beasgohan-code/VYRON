@@ -6,18 +6,22 @@ import { Equalizer } from "./Equalizer";
 
 /** The always-there mini player: artwork, title, transport, a hairline progress. */
 export function Dock() {
-  const { audio, state, act, cast, toast } = useApp();
+  const { audio, isLiked, toggleLike, cast, toast } = useApp();
   const track = audio.track;
   if (!track) return null;
 
   const total = audio.duration || track.duration || 0;
   const percent = total ? Math.min(100, (audio.position / total) * 100) : 0;
-  const liked = (state?.favorites ?? []).some((item) => item.id === track.id);
+  // The buffer sits behind the playhead: on a slow connection that is the
+  // difference between "it is thinking" and "it is stuck".
+  const buffered = total ? Math.min(100, Math.max(percent, (audio.buffered / total) * 100)) : 0;
+  const liked = isLiked(track);
 
   return (
     <div className={`dock ${audio.playing ? "playing" : ""}`}>
       <div className="dock-progress" aria-hidden="true">
-        <span style={{ width: `${percent}%` }} />
+        <span className="dock-buffer" style={{ width: `${buffered}%` }} />
+        <span className="dock-played" style={{ width: `${percent}%` }} />
       </div>
 
       <button
@@ -52,7 +56,7 @@ export function Dock() {
           type="button"
           className="btn-icon dock-hide"
           aria-label={liked ? "Remove from liked" : "Like this track"}
-          onClick={() => void act(liked ? "unfavorite" : "favorite_track", track)}
+          onClick={() => void toggleLike(track)}
         >
           <Heart size={17} fill={liked ? "currentColor" : "none"} />
         </button>
@@ -61,7 +65,7 @@ export function Dock() {
             type="button"
             className="btn-icon"
             aria-label="Retry playback"
-            onClick={() => void audio.play(track)}
+            onClick={audio.retry}
           >
             <Play size={17} fill="currentColor" />
           </button>

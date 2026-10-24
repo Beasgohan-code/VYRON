@@ -1,4 +1,4 @@
-import { MoreHorizontal, Pause, Play, Plus, Radio } from "lucide-react";
+import { ChevronDown, ChevronUp, Heart, MoreHorizontal, Pause, Play, Plus, Radio } from "lucide-react";
 import { compact, fmtDuration } from "../lib/format";
 import { useApp } from "../lib/store";
 import type { Track } from "../lib/types";
@@ -10,11 +10,15 @@ interface Props {
   /** Show the "add to queue" and "play in the call" buttons on hover. */
   full?: boolean;
   onRemove?: () => void;
+  /** Queue reordering — omitted everywhere except the "up next" list. */
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
 }
 
-export function TrackRow({ track, index, full = true, onRemove }: Props) {
-  const { play, cast, openModal, audio } = useApp();
+export function TrackRow({ track, index, full = true, onRemove, onMoveUp, onMoveDown }: Props) {
+  const { play, cast, openModal, audio, isLiked, toggleLike } = useApp();
   const current = audio.isCurrent(track);
+  const liked = isLiked(track);
   const meta = [
     track.uploader || track.source || "unknown",
     track.duration ? fmtDuration(track.duration) : "",
@@ -55,6 +59,18 @@ export function TrackRow({ track, index, full = true, onRemove }: Props) {
       <span className="tr-dur">{fmtDuration(track.duration)}</span>
 
       <span className="tr-actions">
+        <button
+          type="button"
+          className={`btn-icon like ${liked ? "on" : ""}`}
+          aria-label={liked ? `Remove ${track.title} from liked songs` : `Like ${track.title}`}
+          aria-pressed={liked}
+          onClick={(event) => {
+            event.stopPropagation();
+            void toggleLike(track);
+          }}
+        >
+          <Heart size={15} fill={liked ? "currentColor" : "none"} />
+        </button>
         {full && (
           <>
             <button
@@ -92,6 +108,32 @@ export function TrackRow({ track, index, full = true, onRemove }: Props) {
         >
           <MoreHorizontal size={16} />
         </button>
+        {onMoveUp && (
+          <button
+            type="button"
+            className="btn-icon reorder"
+            aria-label={`Move ${track.title} up`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onMoveUp();
+            }}
+          >
+            <ChevronUp size={15} />
+          </button>
+        )}
+        {onMoveDown && (
+          <button
+            type="button"
+            className="btn-icon reorder"
+            aria-label={`Move ${track.title} down`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onMoveDown();
+            }}
+          >
+            <ChevronDown size={15} />
+          </button>
+        )}
         {onRemove && (
           <button
             type="button"

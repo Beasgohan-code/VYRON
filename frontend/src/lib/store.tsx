@@ -75,6 +75,10 @@ interface Store {
   /* playback helpers */
   dragging: boolean;
   setDragging: (value: boolean) => void;
+  /* likes — optimistic, so the heart responds to the tap, not the network */
+  isLiked: (track?: Track | null) => boolean;
+  toggleLike: (track: Track) => Promise<void>;
+  likeCount: number;
 }
 
 const AppContext = createContext<Store | null>(null);
@@ -310,6 +314,49 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [act, toast]
   );
 
+  /* ── likes ───────────────────────────────────────────────────────────── */
+  const likedKeys = useMemo(
+    () => new Set((state?.favorites ?? []).map((item) => String(item.id ?? item.title))),
+    [state]
+  );
+
+  const isLiked = useCallback(
+    (track?: Track | null) => (track ? likedKeys.has(String(track.id ?? track.title)) : false),
+    [likedKeys]
+  );
+
+  const toggleLike = useCallback(
+    async (track: Track) => {
+      if (!track) return;
+      const key = String(track.id ?? track.title);
+      const wasLiked = likedKeys.has(key);
+      haptic("light");
+      // Flip the heart now; the server call below is the confirmation, not the
+      // source of truth for the animation.
+      setState((previous) => {
+        if (!previous) return previous;
+        const favorites = previous.favorites ?? [];
+        return {
+          ...previous,
+          favorites: wasLiked
+            ? favorites.filter((item) => String(item.id ?? item.title) !== key)
+            : [{ ...track, saved_at: Math.floor(Date.now() / 1000) }, ...favorites],
+        };
+      });
+      const payload = await act(
+        wasLiked ? "unfavorite" : "favorite_track",
+        wasLiked ? key : track
+      );
+      if (!payload) {
+        await refreshState(); // the call failed: put the heart back
+        return;
+      }
+      notify(wasLiked ? "success" : "success");
+      toast(wasLiked ? "Removed from liked songs" : "Added to liked songs", "success");
+    },
+    [act, likedKeys, refreshState, toast]
+  );
+
   const rememberSearch = useCallback((term: string) => {
     setRecent((previous) => {
       const next = [term, ...previous.filter((item) => item !== term)].slice(0, 8);
@@ -422,13 +469,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       cast,
       dragging,
       setDragging,
+      isLiked,
+      toggleLike,
+      likeCount: state?.favorites?.length ?? 0,
     }),
     [
       state, home, rooms, playlists, results, view, setView, query, searchFilter, libraryFilter,
       selectedPlaylist, openPlaylist, theme, setTheme, accent, setAccent, normalise, setNormalise,
       toastMessage, toast, toastTone, modal, openModal, closeModal, act, play, runSearch, loadMix,
       refreshState, refreshRooms, attachRoom, refreshPlaylists, recent, rememberSearch, searching, access,
-      dragging,
+      dragging, isLiked, toggleLike,
       audio, cast,
     ]
   );

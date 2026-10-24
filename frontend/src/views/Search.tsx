@@ -31,6 +31,17 @@ export function Search() {
 
   useEffect(() => setValue(query), [query]);
 
+  /* Search as you type — debounced, so a five-letter word is one request and
+     the answer to "belie" never overwrites the answer to "believer". */
+  useEffect(() => {
+    const clean = value.trim();
+    if (clean.length < 2 || clean === query) return undefined;
+    const timer = window.setTimeout(() => {
+      void runSearch(clean, false);
+    }, 420);
+    return () => window.clearTimeout(timer);
+  }, [value, query, runSearch]);
+
   useEffect(() => {
     const focus = () => input.current?.focus();
     window.addEventListener("vyron:focus-search", focus);

@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, telegram } from "./api";
+import { enqueue as enqueueTrack, keyOf, move as moveInQueue, nextIndex } from "./queueops";
+import type { Repeat } from "./queueops";
+import { buildSession, clearSession, readSession, writeSession, type SavedSession } from "./session";
 import type { Track } from "./types";
 
-export type Repeat = "off" | "one" | "all";
+export type { Repeat } from "./queueops";
 
 export interface AudioEngine {
   /* state */
@@ -20,6 +23,10 @@ export interface AudioEngine {
   expanded: boolean;
   /** Playback speed, 0.5×–2×. Persisted per device. */
   rate: number;
+  /** Seconds of the current track the browser has buffered. */
+  buffered: number;
+  /** The queue this device last left behind, if any. */
+  saved: SavedSession | null;
   /* actions */
   play: (track: Track, list?: Track[]) => void;
   toggle: () => void;
@@ -34,8 +41,14 @@ export interface AudioEngine {
   toggleShuffle: () => void;
   enqueue: (track: Track, playNext?: boolean) => void;
   removeAt: (index: number) => void;
+  move: (from: number, to: number) => void;
   jumpTo: (index: number) => void;
   clear: () => void;
+  /** Pick up where this device left off — paused, at the saved position. */
+  resumeSession: () => void;
+  dismissSession: () => void;
+  /** Try the current track again (a resolver hiccup, an expired URL). */
+  retry: () => void;
   setExpanded: (value: boolean) => void;
   isCurrent: (track?: Track | null) => boolean;
   /** Web Audio analyser for the shared <audio> element (null if unsupported). */
@@ -58,7 +71,7 @@ const write = (key: string, value: string): void => {
   }
 };
 
-const keyOf = (track?: Track | null): string => String(track?.id ?? track?.title ?? "");
+
 
 function authParams(): URLSearchParams {
   const params = new URLSearchParams();
@@ -107,6 +120,10 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
   const [repeat, setRepeat] = useState<Repeat>(() => read("vyron:repeat", "off") as Repeat);
   const [shuffle, setShuffle] = useState(() => read("vyron:shuffle", "0") === "1");
   const [expanded, setExpanded] = useState(false);
+  const [buffered, setBuffered] = useState(0);
+  const initialSession = readSession();
+  const [saved, setSaved] = useState<SavedSession | null>(initialSession);
+  const savedRef = useRef<SavedSession | null>(initialSession);
 
   /* one silent retry per track when the upstream URL expires mid-stream */
   const retry = useRef<{ key: string; attempts: number }>({ key: "", attempts: 0 });
@@ -114,8 +131,8 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
   const loadSeq = useRef(0);
 
   /* keep the latest values available to the <audio> event handlers */
-  const latest = useRef({ queue, track, repeat, shuffle, volume, muted, rate });
-  latest.current = { queue, track, repeat, shuffle, volume, muted, rate };
+  const latest = useRef({ queue, track, repeat, shuffle, volume, muted, rate, position, duration });
+  latest.current = { queue, track, repeat, shuffle, volume, muted, rate, position, duration };
 
   const el = useCallback((): HTMLAudioElement => {
     if (!element.current) {
@@ -174,35 +191,31 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
         setPlaying(false);
         return;
       }
-      const index = list.findIndex((item) => keyOf(item) === keyOf(current));
-      if (auto && mode === "one" && current) {
+      // A finished track repeats only when the *track* ended by itself; a tap
+      // on "next" should always move on, even with repeat-one set.
+      const decision = nextIndex(list, current, {
+        repeat: auto ? mode : mode === "one" ? "off" : mode,
+        shuffle: on,
+      });
+      if (decision === "repeat") {
         const audio = el();
         audio.currentTime = 0;
         void audio.play().catch(() => undefined);
         return;
       }
-      let nextIndex = index + 1;
-      if (on) {
-        const pool = list.map((_, position) => position).filter((position) => position !== index);
-        nextIndex = pool.length ? pool[Math.floor(Math.random() * pool.length)] : 0;
-      } else if (nextIndex >= list.length) {
-        if (mode === "all") nextIndex = 0;
-        else {
-          setPlaying(false);
-          return;
-        }
+      if (decision === null) {
+        setPlaying(false);
+        return;
       }
-      const upcoming = list[nextIndex];
-      if (upcoming) {
-        void load(upcoming, list);
-      }
+      const upcoming = list[decision];
+      if (upcoming) void load(upcoming, list);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [el]
   );
 
   const load = useCallback(
-    async (next: Track, list?: Track[]) => {
+    async (next: Track, list?: Track[], options: { autoplay?: boolean; at?: number } = {}) => {
       const audio = el();
       const seq = (loadSeq.current += 1);
       const stale = () => seq !== loadSeq.current;
@@ -218,6 +231,37 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
       setPosition(0);
       setDuration(next.duration ?? 0);
       retry.current = { key: keyOf(next), attempts: 0 };
+
+      const at = Math.max(0, Number(options.at) || 0);
+      if (at) {
+        // Seek once the browser knows the length; seeking earlier is ignored
+        // by every mobile webview worth supporting.
+        const jump = () => {
+          try {
+            audio.currentTime = at;
+          } catch {
+            /* the track may already be gone */
+          }
+        };
+        if (audio.readyState >= 1) jump();
+        else audio.addEventListener("loadedmetadata", jump, { once: true });
+        setPosition(at);
+      }
+
+      if (options.autoplay === false) {
+        // A restored session loads paused: starting audio without a tap is
+        // blocked by mobile browsers, and being blocked looks like a failure.
+        try {
+          audio.src = streamUrl(next);
+        } catch {
+          /* noop */
+        }
+        if (!stale()) {
+          setLoading(false);
+          setPlaying(false);
+        }
+        return;
+      }
 
       try {
         audio.src = streamUrl(next);
@@ -273,7 +317,23 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
   /* ── element wiring ──────────────────────────────────────────────────── */
   useEffect(() => {
     const audio = el();
-    const onTime = () => setPosition(audio.currentTime || 0);
+    const onTime = () => {
+      setPosition(audio.currentTime || 0);
+      try {
+        const ranges = audio.buffered;
+        setBuffered(ranges.length ? ranges.end(ranges.length - 1) : 0);
+      } catch {
+        setBuffered(0);
+      }
+    };
+    const onProgress = () => {
+      try {
+        const ranges = audio.buffered;
+        if (ranges.length) setBuffered(ranges.end(ranges.length - 1));
+      } catch {
+        /* ignore */
+      }
+    };
     const onMeta = () => setDuration(audio.duration || latest.current.track?.duration || 0);
     const onEnded = () => advance(true);
     const onPlay = () => setPlaying(true);
@@ -321,6 +381,7 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
       }, 1200);
     };
     audio.addEventListener("timeupdate", onTime);
+    audio.addEventListener("progress", onProgress);
     audio.addEventListener("loadedmetadata", onMeta);
     audio.addEventListener("durationchange", onMeta);
     audio.addEventListener("ended", onEnded);
@@ -331,6 +392,7 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
     audio.addEventListener("error", onError);
     return () => {
       audio.removeEventListener("timeupdate", onTime);
+      audio.removeEventListener("progress", onProgress);
       audio.removeEventListener("loadedmetadata", onMeta);
       audio.removeEventListener("durationchange", onMeta);
       audio.removeEventListener("ended", onEnded);
@@ -354,6 +416,61 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
     write("vyron:repeat", repeat);
     write("vyron:shuffle", shuffle ? "1" : "0");
   }, [repeat, shuffle]);
+
+  /* ── session: remember where this device was, every few seconds ──────── */
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const { track: current, queue: list, repeat, shuffle, volume, muted, rate, position } = latest.current;
+      if (!current || !list.length) return;
+      const session = buildSession({
+        queue: list,
+        track: current,
+        position,
+        rate,
+        volume,
+        muted,
+        repeat,
+        shuffle,
+      });
+      if (!session) return;
+      writeSession(session);
+      // Re-rendering every five seconds for an unchanged queue is waste; the
+      // card only needs to know when the *track* or the index moved.
+      const previous = savedRef.current;
+      const changed =
+        !previous ||
+        previous.index !== session.index ||
+        keyOf(previous.queue[previous.index]) !== keyOf(session.queue[session.index]);
+      if (changed) {
+        savedRef.current = session;
+        setSaved(session);
+      }
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  /* ── next-track prefetch: the resolve is the slow part of a start ─────── */
+  const prefetched = useRef("");
+  useEffect(() => {
+    if (!track || !playing) return;
+    const total = duration || track.duration || 0;
+    if (!total) return;
+    const remaining = total - position;
+    // Warm it 25 s before the end: early enough to cover a cold resolve,
+    // late enough that skipping around does not hammer the server.
+    if (remaining > 25 || remaining < 1) return;
+    const decision = nextIndex(queue, track, { repeat, shuffle });
+    if (decision === null || decision === "repeat") return;
+    const upcoming = queue[decision];
+    const key = keyOf(upcoming);
+    if (!key || prefetched.current === key) return;
+    prefetched.current = key;
+    void fetch(streamUrl(upcoming), {
+      headers: { Range: "bytes=0-1" },
+      cache: "no-store",
+      credentials: "same-origin",
+    }).catch(() => undefined);
+  }, [track, playing, position, duration, queue, repeat, shuffle]);
 
   /* ── OS / lock-screen controls ───────────────────────────────────────── */
   useEffect(() => {
@@ -382,10 +499,33 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
       media.setActionHandler("seekto", (details) => {
         if (typeof details.seekTime === "number") el().currentTime = details.seekTime;
       });
+      media.setActionHandler("seekbackward", (details) => {
+        const audio = el();
+        audio.currentTime = Math.max(0, audio.currentTime - (details.seekOffset ?? 10));
+      });
+      media.setActionHandler("seekforward", (details) => {
+        const audio = el();
+        const limit = Number.isFinite(audio.duration) ? audio.duration : audio.currentTime + 10;
+        audio.currentTime = Math.min(limit, audio.currentTime + (details.seekOffset ?? 10));
+      });
+      media.setActionHandler("stop", () => {
+        el().pause();
+        el().currentTime = 0;
+      });
     } catch {
       /* older Telegram webviews */
     }
   }, [advance, el, track]);
+
+  useEffect(() => {
+    const media = navigator.mediaSession;
+    if (!media) return;
+    try {
+      media.playbackState = playing ? "playing" : "paused";
+    } catch {
+      /* older webviews */
+    }
+  }, [playing]);
 
   /* Lock-screen scrubber: without this the OS shows a play button and no bar. */
   useEffect(() => {
@@ -471,22 +611,45 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
     [el, seek]
   );
 
-  const enqueue = useCallback((next: Track, playNext = false) => {
-    setQueue((list) => {
-      if (list.some((item) => keyOf(item) === keyOf(next))) return list;
-      if (!playNext) return [...list, next];
-      const current = latest.current.track;
-      const index = list.findIndex((item) => keyOf(item) === keyOf(current));
-      const copy = [...list];
-      copy.splice(Math.max(0, index + 1), 0, next);
-      return copy;
-    });
-    toast?.(playNext ? "Playing next" : "Added to queue", "success");
-  }, [toast]);
+  const enqueue = useCallback(
+    (next: Track, playNext = false) => {
+      setQueue((list) =>
+        enqueueTrack(list, next, { next: playNext, current: latest.current.track })
+      );
+      toast?.(playNext ? "Playing next" : "Added to queue", "success");
+    },
+    [toast]
+  );
 
   const removeAt = useCallback((index: number) => {
-    setQueue((list) => list.filter((_, position) => position !== index));
+    setQueue((list) => (index >= 0 && index < list.length ? list.filter((_, position) => position !== index) : list));
   }, []);
+
+  const move = useCallback((from: number, to: number) => {
+    setQueue((list) => moveInQueue(list, from, to));
+  }, []);
+
+  const resumeSession = useCallback(() => {
+    const session = latest.current.queue.length ? null : saved;
+    if (!session) return;
+    const next = session.queue[session.index];
+    if (!next) return;
+    setRepeat(session.repeat);
+    setShuffle(session.shuffle);
+    void load(next, session.queue, { autoplay: false, at: session.position });
+    toast?.("Back where you left off", "success");
+  }, [load, saved, toast]);
+
+  const dismissSession = useCallback(() => {
+    savedRef.current = null;
+    setSaved(null);
+    clearSession();
+  }, []);
+
+  const retryTrack = useCallback(() => {
+    const current = latest.current.track;
+    if (current) void load(current, latest.current.queue);
+  }, [load]);
 
   const jumpTo = useCallback(
     (index: number) => {
@@ -531,6 +694,8 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
       volume,
       muted,
       rate,
+      buffered,
+      saved,
       repeat,
       shuffle,
       expanded,
@@ -547,16 +712,21 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
       toggleShuffle: () => setShuffle((value) => !value),
       enqueue,
       removeAt,
+      move,
       jumpTo,
       clear,
+      resumeSession,
+      dismissSession,
+      retry: retryTrack,
       setExpanded,
       isCurrent: (candidate) => Boolean(candidate) && keyOf(candidate) === keyOf(track),
       analyser,
     }),
     [
-      track, queue, playing, loading, error, position, duration, volume, muted, rate, repeat,
-      shuffle, expanded, play, toggle, advance, prev, seek, seekBy, setVolume, setRate, cycleRepeat,
-      enqueue, removeAt, jumpTo, clear, analyser,
+      track, queue, playing, loading, error, position, duration, volume, muted, rate, buffered,
+      repeat, shuffle, expanded, saved, play, toggle, advance, prev, seek, seekBy, setVolume,
+      setRate, cycleRepeat, enqueue, removeAt, move, jumpTo, clear, resumeSession, dismissSession,
+      retryTrack, analyser,
     ]
   );
 }

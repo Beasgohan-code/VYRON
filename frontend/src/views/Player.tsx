@@ -247,6 +247,7 @@ export function Player() {
               position={audio.position}
               duration={total}
               playing={audio.playing}
+              buffered={audio.buffered}
               onSeek={(seconds) => audio.seek(seconds)}
             />
           </div>
@@ -397,6 +398,11 @@ export function Player() {
                 <header className="section-head">
                   <h2>Up next</h2>
                   <span className="fine">{audio.queue.length} tracks</span>
+                  {audio.queue.length > 1 && (
+                    <button type="button" className="section-link" onClick={audio.clear}>
+                      Clear
+                    </button>
+                  )}
                 </header>
                 <ul className="rows">
                   {audio.queue.map((item, index) => (
@@ -406,6 +412,12 @@ export function Player() {
                       index={index + 1}
                       full={false}
                       onRemove={() => audio.removeAt(index)}
+                      onMoveUp={index > 0 ? () => audio.move(index, index - 1) : undefined}
+                      onMoveDown={
+                        index < audio.queue.length - 1
+                          ? () => audio.move(index, index + 1)
+                          : undefined
+                      }
                     />
                   ))}
                   {audio.queue.length === 0 && <li className="fine">Queue is empty — add something from Search.</li>}

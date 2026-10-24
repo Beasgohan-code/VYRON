@@ -302,7 +302,8 @@ body::after {
 }
 .btn-icon:hover { background: var(--panel-2); color: var(--text); transform: scale(1.05); }
 .btn-icon.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
-.btn-icon.liked { color: var(--accent-2); }
+.btn-icon.liked, .btn-icon.like.on { color: var(--accent-2); }
+.btn-icon.like.on svg { filter: drop-shadow(0 0 6px color-mix(in srgb, var(--accent-2) 60%, transparent)); }
 
 button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important; box-shadow: none; }
 
@@ -1173,7 +1174,16 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
   background: var(--line);
   overflow: hidden;
 }
-.dock-progress span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width 0.3s linear; }
+.dock-progress span { display: block; height: 100%; transition: width 0.3s linear; }
+/* Two layers: what the browser has ready, then what has been played. */
+.dock-buffer {
+  position: absolute; inset: 0 auto 0 0;
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+}
+.dock-played {
+  position: absolute; inset: 0 auto 0 0;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+}
 
 .dock-art {
   position: relative;
@@ -1528,6 +1538,15 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
 @keyframes bar-breathe { to { transform: scaleY(1.08); } }
 .seek-track:hover .seek-bar { background: var(--line-strong); }
 .seek-track:hover .seek-bar.on { background: linear-gradient(180deg, var(--accent), var(--accent-2)); }
+.seek-buffer {
+  position: absolute;
+  left: 0; bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--text) 22%, transparent);
+  transition: width 0.4s linear;
+  pointer-events: none;
+}
 .seek-head {
   position: absolute;
   top: -3px; bottom: -3px;
@@ -2259,3 +2278,82 @@ body::after {
   font-size: 13px;
 }
 .dock-sub.err { color: var(--error); font-weight: 600; }
+
+
+/* ── resume card: the session this device left behind ──────────────────── */
+.resume-card {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 14px;
+  align-items: center;
+  padding: 14px;
+  border-radius: 20px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
+  background:
+    radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 60%),
+    var(--surface-2, rgba(255, 255, 255, 0.03));
+}
+.resume-art { position: relative; width: 54px; height: 54px; border-radius: 14px; overflow: hidden; flex: none; }
+.resume-glyph {
+  position: absolute; right: 4px; bottom: 4px;
+  display: grid; place-items: center;
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  background: rgba(6, 9, 12, 0.82);
+  color: var(--accent-2);
+}
+.resume-copy { display: grid; gap: 2px; min-width: 0; }
+.resume-copy b { font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.resume-meta { font-size: 11.5px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.resume-actions { display: flex; gap: 6px; align-items: center; }
+@media (max-width: 460px) {
+  .resume-card { grid-template-columns: auto 1fr; }
+  .resume-actions { grid-column: 1 / -1; justify-content: flex-end; }
+}
+
+/* ── keyboard shortcuts ────────────────────────────────────────────────── */
+.sheet.shortcuts { max-width: 420px; }
+.shortcut-list { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.shortcut-list li {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 9px 4px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13.5px;
+}
+.shortcut-list li:last-child { border-bottom: 0; }
+.keys { display: flex; gap: 4px; }
+kbd {
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--line-strong);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+}
+.shortcut-note { margin: 10px 4px 0; font-size: 11.5px; color: var(--dim); }
+.foot kbd { font-size: 10px; padding: 1px 5px; }
+
+/* ── crash pane ────────────────────────────────────────────────────────── */
+.crash {
+  display: grid; gap: 10px; justify-items: start;
+  margin: 24px auto;
+  max-width: 460px;
+  padding: 22px;
+  border-radius: 20px;
+  border: 1px solid color-mix(in srgb, #ff6b6b 30%, var(--line));
+  background: color-mix(in srgb, #ff6b6b 8%, transparent);
+}
+.crash-icon { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; background: rgba(255, 107, 107, 0.16); color: #ff9a9a; }
+.crash h2 { margin: 0; font-size: 17px; }
+.crash p { margin: 0; color: var(--dim); font-size: 13px; line-height: 1.55; }
+.crash code {
+  display: block; width: 100%;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.35);
+  font-size: 11.5px;
+  color: #ffb4b4;
+  overflow-x: auto;
+}
+.crash-actions { display: flex; gap: 8px; }
