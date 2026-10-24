@@ -1,0 +1,130 @@
+"""Offline smoke tests: clients build, handlers register, keyboards render."""
+from __future__ import annotations
+
+import asyncio
+
+import pytest
+
+pytest.importorskip("pyrogram")
+
+from vyron.clients import build_assistant, build_bot
+from vyron.config import settings
+from vyron.core.queue import ChatState, LoopMode, Track
+from vyron.modules import MODULES, register_all
+from vyron.runtime import runtime
+from vyron.ui import keyboards
+
+
+def test_clients_build_offline():
+    bot = build_bot(settings)
+    assert bot.name == settings.session_name
+    assert bot.parse_mode.name == "HTML"
+    # no STRING_SESSION in tests → assistant must be None
+    assert build_assistant(settings) is None
+
+
+def test_handlers_register_offline():
+    async def scenario():
+        bot = build_bot(settings)
+        runtime.bot = bot
+        loaded = register_all(bot)
+        await asyncio.sleep(0.1)  # pyrogram attaches handlers via loop tasks
+        return bot, loaded
+
+    bot, loaded = asyncio.run(scenario())
+    assert len(loaded) == len(MODULES)
+    for required in (
+        "start", "play", "controls", "callbacks", "moderation", "locks", "effects_cmd",
+        "inline", "power", "savedplaylists", "smartqueue", "diagnostics",
+    ):
+        assert required in loaded
+    assert len(bot.dispatcher.groups) >= 1
+    total = sum(len(group) for group in bot.dispatcher.groups.values())
+    assert total > 20
+
+
+def test_streaming_not_ready_without_assistant():
+    runtime.assistant = None
+    runtime.calls = None
+    assert runtime.streaming_ready is False
+
+
+def test_keyboards_render_buttons():
+    state = ChatState(
+        chat_id=1,
+        current=Track(id="a", title="T", duration=100),
+        playing=True,
+        loop=LoopMode.ALL,
+        volume=80,
+    )
+    markup = keyboards.now_playing(state)
+    callbacks = [
+        button.callback_data
+        for row in markup.inline_keyboard
+        for button in row
+        if button.callback_data
+    ]
+    assert "v:pause" in callbacks
+    assert "v:skip" in callbacks
+    assert "v:stop" in callbacks
+    assert all(cb.startswith("v:") for cb in callbacks)
+
+    paused = keyboards.now_playing(ChatState(chat_id=1, playing=True, paused=True))
+    texts = [b.text for row in paused.inline_keyboard for b in row]
+    assert any("Resume" in text for text in texts)
+
+
+def test_settings_panel_reflects_state():
+    markup = keyboards.settings_panel({"loop": "all", "autoplay": True, "always_on": False})
+    flat = [b.text for row in markup.inline_keyboard for b in row]
+    assert any("All" in text for text in flat)
+    assert any("On" in text for text in flat)
+
+
+def test_a_rate_limited_login_waits_instead_of_killing_the_process(monkeypatch):
+    """Render restarts a crashed container — which logs in again and makes the
+    FloodWait longer. The boot path has to wait Telegram out instead."""
+    import asyncio
+
+    from pyrogram.errors import FloodWait
+
+    from vyron.__main__ import _start_client
+
+    sleeps: list[float] = []
+    calls: list[int] = []
+
+    class Client:
+        async def start(self):
+            calls.append(1)
+            if len(calls) < 3:
+                raise FloodWait(1)  # one second + the safety margin
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+
+    asyncio.run(_start_client(Client(), "bot"))
+
+    assert len(calls) == 3
+    assert sleeps == [6, 6]  # value + 5s margin, twice
+
+
+def test_a_login_that_never_succeeds_still_gives_up(monkeypatch):
+    import asyncio
+
+    import pytest
+    from pyrogram.errors import FloodWait
+
+    from vyron.__main__ import _start_client
+
+    class Client:
+        async def start(self):
+            raise FloodWait(900)
+
+    async def fake_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+    with pytest.raises(FloodWait):
+        asyncio.run(_start_client(Client(), "bot", attempts=2))

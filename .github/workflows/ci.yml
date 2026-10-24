@@ -1,0 +1,102 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck
+        working-directory: frontend
+        run: npm run typecheck
+
+      - name: Test Mini App
+        working-directory: frontend
+        run: npm test
+
+      - name: Build Mini App
+        working-directory: frontend
+        run: npm run build
+
+      - name: Verify bundle
+        run: test -f webapp/dist/index.html && test -d webapp/dist/assets
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      # The suite is fully offline — ffmpeg is only needed at runtime (the
+      # Docker image installs it), so CI skips the slow apt step.
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: Lint
+        run: |
+          pip install ruff
+          ruff check vyron tests main.py --select F,E9
+
+      - name: Byte-compile
+        run: python -m compileall -q vyron main.py
+
+      - name: Tests
+        run: python -m pytest tests -q
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: vyron:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke the image
+        run: |
+          docker run --rm --entrypoint sh vyron:ci -c 'set -e
+            test -f /app/webapp/dist/index.html
+            ls /app/webapp/dist/assets | grep -q "\.js$"
+            python -c "import vyron, pyrogram, pytgcalls, aiohttp; print(\"imports ok\")"
+            python -m compileall -q /app/vyron
+            printf "health module: "; python -c "from vyron.utils.health import build_app; print(len(build_app(with_webapp=False).router.routes()), \"routes\")"
+          '

@@ -1,0 +1,43 @@
+# ─── Telegram clients ───────────────────────────────────────────────────────
+# Kurigram is the actively maintained Pyrogram fork that ships the new Bot API
+# features VYRON uses (rich messages, ephemeral cards, premium emoji parsing).
+kurigram==2.2.26
+
+# ─── Voice chat ─────────────────────────────────────────────────────────────
+py-tgcalls==2.2.11
+ntgcalls>=2.2.5,<3.0.0
+# TgCrypto makes Telegram's MTProto layer ~5× faster. 1.2.5 only publishes
+# wheels up to cp311, so on 3.12 pip would try to compile it and abort without
+# a C toolchain. Kurigram transparently falls back to pure-python `pyaes`, and
+# the Docker image compiles the wheel itself (see Dockerfile) — so skip it here
+# for anything newer than 3.11 and install it explicitly where a compiler exists.
+tgcrypto==1.2.5; python_version < "3.12"
+
+# ─── Rich UI (Bot API 10.3 cards) ───────────────────────────────────────────
+# richgram by BadmundaXd — tables, coloured buttons, details, text fallbacks
+richgram>=0.2.0
+
+# ─── Media ──────────────────────────────────────────────────────────────────
+yt-dlp>=2025.1.1
+psutil>=5.9
+# YouTube Music search for the resolver ladder (optional at runtime: the code
+# falls back to yt-dlp search when the package is absent).
+ytmusicapi>=1.8
+# Browser impersonation for yt-dlp (TLS/JA3 fingerprint, header order, HTTP/2
+# settings). This is the best *no-cookie* fix for a datacenter IP: YouTube
+# refuses the request fingerprint, not the account. Optional at runtime — if the
+# wheel is missing VYRON simply skips it — so it is pinned loosely.
+curl_cffi>=0.7.4
+
+# ─── Artwork (optional) ─────────────────────────────────────────────────────
+# Renders the /np "now playing" image (1280×720).  Without it VYRON simply
+# falls back to the rich text card, so it is a soft dependency.
+Pillow>=10.4
+
+# ─── Runtime ────────────────────────────────────────────────────────────────
+aiohttp>=3.9.3
+python-dotenv>=1.0.1
+pymongo>=4.6
+
+# ─── Optional (uncomment for speed on Linux) ────────────────────────────────
+# uvloop>=0.19.0
