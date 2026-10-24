@@ -819,3 +819,87 @@ def test_manifest_declares_a_real_app():
     for icon in data["icons"]:
         path = WEB_DIR / icon["src"].removeprefix("/app/static/")
         assert path.is_file(), f"manifest points at a missing icon: {icon['src']}"
+
+
+# ── /api/stream is not an open proxy (#1) ───────────────────────────────────
+def test_stream_does_not_resolve_ids_nobody_was_shown(monkeypatch):
+    """A bare YouTube id used to resolve for anyone with a token.
+
+    That made /api/stream a CDN for the whole internet, billed to the host.
+    """
+    import dataclasses
+
+    from vyron.config import settings as base
+    from vyron.web import stream as audio
+
+    # frozen dataclass: swap the whole settings object the module sees
+    monkeypatch.setattr(audio, "settings", dataclasses.replace(base, webapp_direct_ids=False))
+    audio._REGISTRY.clear()
+
+    class FakeYouTube:
+        called = False
+
+        async def resolve(self, url):
+            FakeYouTube.called = True
+            raise AssertionError("must not resolve an unseen id")
+
+    monkeypatch.setattr(audio.runtime, "youtube", FakeYouTube())
+    found = asyncio.run(audio.lookup_playable("dQw4w9WgXcQ", user_id=0))
+    assert found is None
+    assert FakeYouTube.called is False
+
+    # …and it stays reachable for an id the deployment did show someone
+    from vyron.core.queue import Track
+
+    audio.remember(Track(id="dQw4w9WgXcQ", title="Never Gonna Give You Up"))
+    assert asyncio.run(audio.lookup_playable("dQw4w9WgXcQ", user_id=0)).title
+
+
+def test_stream_budget_counts_starts_and_slots():
+    from vyron.web.budget import Budget, BudgetExceeded
+
+    budget = Budget(per_minute=3, per_hour=5, per_user=2, total=3)
+    for _ in range(3):
+        budget.check("u1")
+        budget.start("u1")
+    with pytest.raises(BudgetExceeded) as caught:
+        budget.check("u1")
+    assert caught.value.retry_after >= 1
+    # the minute window is per identity: somebody else is unaffected
+    budget.check("u2")
+
+    budget.take_slot("u1")
+    budget.take_slot("u1")
+    with pytest.raises(BudgetExceeded, match="at once"):
+        budget.take_slot("u1")
+    budget.drop_slot("u1")
+    budget.take_slot("u1")          # the slot came back
+
+    budget.take_slot("u2")
+    with pytest.raises(BudgetExceeded, match="capacity"):
+        budget.take_slot("u3")
+    assert budget.snapshot()["active"] == 3
+
+
+def test_stream_answers_429_with_retry_after(monkeypatch):
+    from vyron.web import stream as audio
+    from vyron.web.budget import BudgetExceeded
+
+    audio.BUDGET.reset()
+
+    def refuse(key):
+        raise BudgetExceeded("hourly streaming limit reached", 42)
+
+    monkeypatch.setattr(audio.BUDGET, "check", refuse)
+
+    async def scenario(client):
+        token = auth.make_token(-100777, 424242, TOKEN)
+        response = await client.get(
+            "/api/stream/dQw4w9WgXcQ", headers={"X-Vyron-Token": token}
+        )
+        assert response.status == 429
+        assert response.headers["Retry-After"] == "42"
+        payload = await response.json()
+        assert payload["error"] == "rate_limited" and payload["retry_after"] == 42
+
+    asyncio.run(_with_client(scenario))

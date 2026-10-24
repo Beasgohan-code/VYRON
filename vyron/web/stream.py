@@ -35,7 +35,8 @@ from vyron.config import settings
 from vyron.core.queue import Track
 from vyron.core.search import MediaError, StreamInfo
 from vyron.runtime import runtime
-from vyron.web.auth import WebUser, resolve_user
+from vyron.web.auth import WebUser
+from vyron.web.budget import BUDGET, BudgetExceeded, identity_key
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +95,11 @@ async def lookup_async(media_id: str, *, user_id: int = 0) -> Track | None:
     if storage is None or not user_id:
         return None
     try:
+        # History too: after a redeploy the registry is empty, and "play it
+        # again" is the most common thing anyone does in the Mini App.
+        for item in await storage.history(user_id, limit=200):
+            if str(item.get("id")) == str(media_id):
+                return Track.from_dict(item)
         for item in await storage.favorites(user_id, limit=50):
             if str(item.get("id")) == str(media_id):
                 return Track.from_dict(item)
@@ -110,18 +116,24 @@ _DIRECT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 
 
 async def lookup_playable(media_id: str, *, user_id: int = 0) -> Track | None:
-    """Find a track the app ask to play, even after a restart.
+    """Find a track the app asked to play, even after a restart.
 
     The registry is per-process: a redeploy (or Render putting the instance to
     sleep) empties it, and every track the UI still shows suddenly became
-    "unknown track". A YouTube id is self-describing, so resolve it directly
-    instead of failing the listener.
+    "unknown track". A YouTube id is self-describing, so it can be resolved
+    directly — but only ids this deployment has actually shown somebody
+    (registry, live queue, history, favourites, playlists).
+
+    That allowlist is the whole point: resolving *any* id turned this endpoint
+    into an open proxy for the entire internet's audio, billed to the host.
     """
     found = await lookup_async(media_id, user_id=user_id)
     if found is not None:
         return found
     youtube = runtime.youtube
     if youtube is None or not _DIRECT_ID_RE.match(media_id):
+        return None
+    if not settings.webapp_direct_ids:
         return None
     try:
         track = await youtube.resolve(f"https://youtu.be/{media_id}")
@@ -137,14 +149,11 @@ def registry_size() -> int:
 
 
 # ── helpers ────────────────────────────────────────────────────────────────
-def _identity(request: web.Request) -> WebUser:
-    return resolve_user(
-        init_data=request.query.get("init_data", ""),
-        token=request.query.get("t", ""),
-        bot_token=settings.bot_token,
-        allow_anon=settings.webapp_allow_anon,
-        owner_ids=settings.owners,
-    )
+async def _identity(request: web.Request) -> WebUser:
+    """The same resolver as the rest of `/api` — headers, body, then query."""
+    from vyron.web.auth import identify
+
+    return await identify(request, read_body=False)
 
 
 _MIME_BY_SUFFIX = {
@@ -240,14 +249,35 @@ def _upstream_error(reason: str, hint: str = "tap play again in a moment") -> we
 
 
 # ── routes ─────────────────────────────────────────────────────────────────
+def _busy(exc: BudgetExceeded) -> web.Response:
+    """429 with the retry hint the Mini App already understands."""
+    return web.json_response(
+        {
+            "ok": False,
+            "error": "rate_limited",
+            "reason": exc.reason,
+            "retry_after": exc.retry_after,
+        },
+        status=429,
+        headers={"Retry-After": str(exc.retry_after)},
+    )
+
+
 async def stream(request: web.Request) -> web.StreamResponse:
-    user = _identity(request)
+    user = await _identity(request)
     if not user.authenticated and not settings.webapp_allow_anon:
         return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
 
     media_id = (request.match_info.get("media_id") or "").strip()
     if not media_id or "/" in media_id or ".." in media_id:
         return web.json_response({"ok": False, "error": "bad id"}, status=400)
+
+    key = identity_key(user.user_id, request.remote)
+    try:
+        BUDGET.check(key)
+    except BudgetExceeded as exc:
+        logger.info("stream budget: %s (%s)", key, exc.reason)
+        return _busy(exc)
 
     track = await lookup_playable(media_id, user_id=user.user_id)
     if track is None:
@@ -291,6 +321,21 @@ async def stream(request: web.Request) -> web.StreamResponse:
             },
         )
 
+    try:
+        BUDGET.take_slot(key)
+    except BudgetExceeded as exc:
+        return _busy(exc)
+    BUDGET.start(key)
+    try:
+        return await _stream_body(request, info, media_id, track)
+    finally:
+        BUDGET.drop_slot(key)
+
+
+async def _stream_body(
+    request: web.Request, info: StreamInfo, media_id: str, track: Track
+) -> web.StreamResponse:
+    """Proxy the bytes, re-resolving once when the signed URL has expired."""
     # Signed URLs expire; one silent re-resolve fixes the common 403.
     for attempt in range(2):
         try:
@@ -326,7 +371,7 @@ async def stream(request: web.Request) -> web.StreamResponse:
 
 
 async def audio_info(request: web.Request) -> web.Response:
-    user = _identity(request)
+    user = await _identity(request)
     media_id = (request.match_info.get("media_id") or "").strip()
     track = await lookup_playable(media_id, user_id=user.user_id)
     if track is None:

@@ -200,6 +200,12 @@ class Settings:
     webapp_allow_anon: bool = field(default_factory=lambda: _flag("WEBAPP_ALLOW_ANON", False))
     webapp_title: str = field(default_factory=lambda: _env("WEBAPP_TITLE", "VYRON Player"))
     webapp_dir: Path = field(default_factory=lambda: Path(_env("WEBAPP_DIR", str(ROOT / "webapp"))))
+    #: Resolve a bare YouTube id for /api/stream even when this deployment never
+    #: showed it to anyone. Off by default — on is what makes the endpoint an
+    #: open audio proxy, so it is only for a private instance.
+    webapp_direct_ids: bool = field(
+        default_factory=lambda: _flag("WEBAPP_DIRECT_IDS", False)
+    )
 
     # ── Music API (served on the same URL, one deploy) ────────────────────
     music_api: bool = field(default_factory=lambda: _flag("MUSIC_API", True))

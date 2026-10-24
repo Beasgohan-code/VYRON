@@ -29,7 +29,7 @@ from vyron.core.musicapi import (
     mask_key,
 )
 from vyron.web import stream as audio
-from vyron.web.auth import WebUser, make_token, resolve_user, verify_owner_token
+from vyron.web.auth import WebUser, make_token
 
 logger = logging.getLogger(__name__)
 
@@ -79,49 +79,10 @@ async def _read_json(request: web.Request) -> dict:
 
 
 async def _identify(request: web.Request) -> WebUser:
-    body = await _read_json(request) if request.method == "POST" else {}
-    init_data = (
-        request.headers.get("X-Init-Data")
-        or body.get("init_data")
-        or request.query.get("init_data", "")
-    )
-    token = request.headers.get("X-Vyron-Token") or body.get("token") or request.query.get("t", "")
+    """Delegates to the one resolver in `vyron.web.auth` (headers → body → query)."""
+    from vyron.web.auth import identify
 
-    # Owner access: `X-Owner-Token`, `?ot=` (or a `vown_` link token) works
-    # from any browser — no Telegram initData required.
-    owner_raw = (
-        request.headers.get("X-Owner-Token")
-        or body.get("owner_token")
-        or request.query.get("ot", "")
-        or (token if token.startswith("vown_") else "")
-    ).strip()
-    if owner_raw:
-        provisional = verify_owner_token(owner_raw, settings.bot_token)
-        if provisional is not None and provisional.user_id in settings.owners:
-            from vyron.core import tokens
-
-            if await tokens.accepts(provisional.user_id, provisional.epoch):
-                return provisional
-
-    # A `vown_` token can also arrive as `?t=` / `X-Vyron-Token` (older links).
-    # It follows the same generation rule as the header, so a revoked token
-    # cannot sneak back in through the other door.
-    owner_epoch = None
-    if token.startswith("vown_"):
-        from vyron.core import tokens
-
-        provisional = verify_owner_token(token, settings.bot_token)
-        if provisional is not None:
-            owner_epoch = await tokens.epoch(provisional.user_id)
-
-    return resolve_user(
-        init_data=init_data or "",
-        token=token or "",
-        bot_token=settings.bot_token,
-        allow_anon=settings.webapp_allow_anon,
-        owner_ids=settings.owners,
-        owner_epoch=owner_epoch,
-    )
+    return await identify(request)
 
 
 _EMPTY_HOME = {

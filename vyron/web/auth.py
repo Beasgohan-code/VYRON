@@ -233,3 +233,77 @@ __all__ = [
     "verify_owner_token",
     "verify_token",
 ]
+
+
+async def identify(request, *, read_body: bool = True):
+    """Resolve the caller from headers, body or query — in that order.
+
+    Every `/api/*` route used to do this slightly differently: the player routes
+    accepted `X-Vyron-Token`, the audio routes only looked at the query string,
+    and only some of them re-checked the owner token's generation. A revoked
+    token therefore still worked on the endpoints that skipped the check. This
+    is the single implementation; nobody else parses credentials.
+    """
+    from vyron.config import settings
+
+    body: dict = {}
+    if read_body and request.method == "POST":
+        try:
+            payload = await request.json()
+            body = payload if isinstance(payload, dict) else {}
+        except Exception:
+            body = {}
+
+    init_data = (
+        request.headers.get("X-Init-Data")
+        or body.get("init_data")
+        or request.query.get("init_data", "")
+    )
+    token = (
+        request.headers.get("X-Vyron-Token")
+        or body.get("token")
+        or request.query.get("t", "")
+    )
+
+    # Owner access: `X-Owner-Token`, `?ot=` (or a `vown_` link token) works from
+    # any browser — no Telegram initData required — but the generation is
+    # always checked, so revoking really revokes.
+    owner_raw = (
+        request.headers.get("X-Owner-Token")
+        or body.get("owner_token")
+        or request.query.get("ot", "")
+        or (token if token.startswith(OWNER_TOKEN_PREFIX) else "")
+    ).strip()
+    from vyron.core import tokens
+
+    if owner_raw:
+        provisional = verify_owner_token(owner_raw, settings.bot_token)
+        if provisional is not None and provisional.user_id in settings.owners:
+            if await tokens.accepts(provisional.user_id, provisional.epoch):
+                return provisional
+
+    owner_epoch = None
+    if token.startswith(OWNER_TOKEN_PREFIX):
+        provisional = verify_owner_token(token, settings.bot_token)
+        if provisional is not None:
+            owner_epoch = await tokens.epoch(provisional.user_id)
+
+    return resolve_user(
+        init_data=init_data or "",
+        token=token or "",
+        bot_token=settings.bot_token,
+        allow_anon=settings.webapp_allow_anon,
+        owner_ids=settings.owners,
+        owner_epoch=owner_epoch,
+    )
+
+
+__all__ = [
+    "OWNER_TOKEN_PREFIX",
+    "OWNER_TOKEN_TTL",
+    "TOKEN_TTL",
+    "WebUser",
+    "identify",
+    "make_token",
+    "resolve_user",
+]
