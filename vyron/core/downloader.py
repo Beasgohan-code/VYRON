@@ -356,6 +356,105 @@ class Downloader:
         finally:
             shutil.rmtree(work, ignore_errors=True)
 
+    # ── video from a substitute (the walled-IP answer) ─────────────────────
+    async def _artwork(self, track: Track) -> bytes | None:
+        """The cover bytes for *track*, or ``None`` when there is no picture."""
+        url = str(getattr(track, "thumbnail", "") or "").strip()
+        if not url.startswith("http"):
+            return None
+        try:
+            import aiohttp
+
+            timeout = aiohttp.ClientTimeout(total=20)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(url) as response:
+                    if response.status != 200:
+                        return None
+                    return await response.read()
+        except Exception as exc:  # pragma: no cover - network
+            logger.info("artwork fetch failed for %s: %s", track.id, exc)
+            return None
+
+    async def _video_from_substitute(
+        self, track: Track, *, on_progress: ProgressHook | None = None
+    ) -> Path:
+        """An MP4 of the same song when YouTube will not hand over its video.
+
+        A walled IP has no video to give. Rather than fail the request, take the
+        song from a catalogue that serves audio and build a real 720p MP4 around
+        it: the poster as the picture, the audio as the sound. It is the file
+        people actually wanted — something that plays, everywhere.
+        """
+        from vyron.core import alternate
+
+        binary = ffmpeg_path()
+        if not binary:
+            raise DownloadError("ffmpeg is not installed, so a video cannot be built")
+
+        if on_progress:
+            on_progress(0.05, "finding the same song")
+        found = await alternate.find(track, settings=self.settings)
+        if found is None or not found.url:
+            raise DownloadError("no catalogue carries this song")
+
+        audio = await self._download_stream(found)
+        frame = await self._video_frame(track)
+        if frame is None:
+            raise DownloadError("no artwork to build the picture from")
+
+        if on_progress:
+            on_progress(0.55, "building the video")
+        final = self.video_path(track).with_suffix(".mp4")
+        work = self.settings.downloads_dir / f".video-{track.id}"
+        work.mkdir(parents=True, exist_ok=True)
+        frame_path = work / "frame.jpg"
+        frame_path.write_bytes(frame)
+        args = [
+            binary, "-y", "-loglevel", "error",
+            # A still picture held for the length of the song: one frame in,
+            # 2 fps out, which keeps the encode fast without a judder.
+            "-loop", "1", "-framerate", "2", "-i", str(frame_path),
+            "-i", str(audio),
+            "-vf",
+            "scale=1280:720:force_original_aspect_ratio=decrease,"
+            "pad=1280:720:(ow-iw)/2:(oh-ih)/2,format=yuv420p",
+            "-c:v", "libx264", "-preset", "veryfast", "-tune", "stillimage",
+            "-r", "2", "-c:a", "aac", "-b:a", "192k",
+            "-shortest", "-movflags", "+faststart", str(final),
+        ]
+        try:
+            result = await asyncio.to_thread(
+                subprocess.run, args, capture_output=True, timeout=1800
+            )
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+        if result.returncode != 0 or not final.is_file() or final.stat().st_size == 0:
+            raise DownloadError(
+                f"ffmpeg could not build the video ({(result.stderr or b'')[:160]})"
+            )
+        logger.info(
+            "built a %s video for %r from %s", self.settings.video_quality, track.title, found.source
+        )
+        return final
+
+    async def _video_frame(self, track: Track) -> bytes | None:
+        """A 1280×720 still: the rendered poster, or the raw cover art."""
+        art = await self._artwork(track)
+        from vyron.utils import thumbnails
+
+        if thumbnails.PIL_AVAILABLE:
+            try:
+                from vyron.core.queue import ChatState
+
+                frame = await asyncio.to_thread(
+                    thumbnails.render, ChatState(chat_id=0, current=track), track, art
+                )
+                if frame:
+                    return frame
+            except Exception as exc:  # pragma: no cover - render paths
+                logger.info("poster render failed for %s: %s", track.id, exc)
+        return art
+
     async def _fetch_to(
         self,
         url: str,
@@ -447,6 +546,14 @@ class Downloader:
                 except Exception as exc:
                     errors.append(f"substitute: {exc}")
                     logger.warning("substitution download failed for %s: %s", track.id, exc)
+            else:
+                # A video request has a third engine the audio path does not
+                # need: the same song, wrapped in its own artwork.
+                try:
+                    return await self._video_from_substitute(track, on_progress=on_progress)
+                except Exception as exc:
+                    errors.append(f"video: {exc}")
+                    logger.warning("video fallback failed for %s: %s", track.id, exc)
             raise DownloadError(" · ".join(errors))
 
     async def _download_stream(

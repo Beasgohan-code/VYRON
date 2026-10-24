@@ -38,6 +38,24 @@ _QUEUE_META = "queues"
 _SAVE_DELAY = 1.5
 
 
+#: Extensions a browser (and ntgcalls) will treat as pictures, not sound.
+_VIDEO_EXTS = {"mp4", "webm", "mkv", "mov", "m4v"}
+
+
+def _is_video_stream(info) -> bool:
+    """True when *info* actually carries a picture, not just audio.
+
+    Substitutions (JioSaavn, Audius, SoundCloud) are audio-only no matter what
+    was asked for, and their ``mime`` says so.
+    """
+    mime = str(getattr(info, "mime", "") or "").lower()
+    if mime.startswith("video/"):
+        return True
+    if mime.startswith("audio/"):
+        return False
+    return str(getattr(info, "ext", "") or "").lower() in _VIDEO_EXTS
+
+
 def _is_local_file(url: str) -> bool:
     """Is this a path we already downloaded? A stat, so stay synchronous."""
     try:
@@ -423,9 +441,25 @@ class Player:
                 logger.warning("extraction failed for %s (%s)", track.id, exc)
         if not url:
             try:
-                url = await self.youtube.stream_url(track, video=video)
+                info = await self.youtube.stream_info(track, video=video)
             except MediaError as exc:
                 raise StreamError(f"Could not resolve that track: {exc}") from exc
+            url = info.url
+            # The answer can be audio even when video was asked for: a walled
+            # YouTube falls back to the same song from a catalogue, and those
+            # only carry audio. Asking ntgcalls for a video track that is not
+            # in the stream fails the whole play, so the flag follows the
+            # bytes and the chat is told the truth instead.
+            if video and not _is_video_stream(info):
+                video = False
+                state.is_video = False
+                logger.info("playing %s as audio (no video available)", track.id)
+                journal.warn(
+                    "player",
+                    "no video for this one — streaming the same song as audio",
+                    track=track.id,
+                    source=info.source or "youtube",
+                )
 
         stream = MediaStream(
             url,

@@ -368,3 +368,90 @@ def test_openapi_documents_the_download_routes():
     for path in ("/downloads", "/downloads/{job_id}", "/downloads/{job_id}/file"):
         assert path in spec["paths"]
     assert "DownloadJob" in spec["components"]["schemas"]
+
+
+# ── video when YouTube will not give up a picture ───────────────────────────
+def test_a_walled_video_request_becomes_the_same_song_in_a_real_mp4(tmp_path, monkeypatch):
+    """The file people asked for must still exist: audio + artwork → MP4."""
+    from vyron.core import downloader as module
+
+    dl = _downloader(tmp_path)
+    track = Track(
+        id="pY9QhZkvBCQ",
+        title="Believer",
+        duration=204,
+        uploader="Imagine Dragons",
+        thumbnail="https://img.example/cover.jpg",
+    )
+
+    async def fake_find(_track, *, settings=None, fresh=False):
+        return Track(
+            id="saavn:1",
+            title="Believer",
+            duration=204,
+            uploader="Imagine Dragons",
+            url="https://cdn.example/believer.mp3",
+            source="jiosaavn",
+        )
+
+    async def fake_stream(_track, *, on_progress=None):
+        path = dl.settings.downloads_dir / "saavn-1.mp3"
+        path.write_bytes(b"ID3" + b"0" * 64)
+        return path
+
+    async def fake_frame(_track):
+        return b"\xff\xd8\xff" + b"0" * 32
+
+    built: list[list[str]] = []
+
+    class Result:
+        returncode = 0
+        stderr = b""
+
+    def fake_run(args, **kwargs):
+        built.append(list(args))
+        from pathlib import Path
+
+        Path(args[-1]).write_bytes(b"\x00" * 128)  # a non-empty "mp4"
+        return Result()
+
+    monkeypatch.setattr("vyron.core.alternate.find", fake_find)
+    monkeypatch.setattr(dl, "_download_stream", fake_stream)
+    monkeypatch.setattr(dl, "_video_frame", fake_frame)
+    monkeypatch.setattr(module, "ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    path = asyncio.run(dl._video_from_substitute(track))
+
+    assert path.suffix == ".mp4" and path.stat().st_size > 0
+    assert "-loop" in built[0] and "libx264" in built[0]
+    assert "1280:720" in " ".join(built[0])
+    # the frame working directory never survives
+    assert not list(dl.settings.downloads_dir.glob(".video-*"))
+
+
+def test_a_video_request_falls_back_before_it_gives_up(tmp_path, monkeypatch):
+    """yt-dlp refused, no mirror had a URL — the substitute engine still runs."""
+    from vyron.core import downloader as module
+
+    dl = _downloader(tmp_path)
+    track = Track(id="abcdefghijk", title="Believer", duration=204, uploader="x")
+
+    def dead_ydl(_track, *, video=False, on_progress=None):
+        raise module.DownloadError("failed to extract any player response")
+
+    async def dead_direct(_track, *, video=False, on_progress=None):
+        raise module.DownloadError("no mirror had a downloadable URL")
+
+    async def built(_track, *, on_progress=None):
+        path = dl.settings.downloads_dir / "youtube-abcdefghijk.mp4"
+        path.write_bytes(b"\x00" * 64)
+        return path
+
+    monkeypatch.setattr(dl, "_download_ytdlp", dead_ydl)
+    monkeypatch.setattr(dl, "_download_direct", dead_direct)
+    monkeypatch.setattr(dl, "_video_from_substitute", built)
+
+    path = asyncio.run(dl.video(track))
+
+    assert path.suffix == ".mp4" and path.stat().st_size > 0

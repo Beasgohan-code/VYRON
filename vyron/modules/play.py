@@ -106,6 +106,23 @@ async def _edit(client: Client, chat_id: int, message_id: int | None, markup: st
         await rich.edit(client, chat_id, message_id, markup, markup_keyboard=keyboard)
 
 
+def _honest_kind(requested_video: bool, chat_id: int) -> str:
+    """Say it out loud when a video request ends up playing as audio.
+
+    A walled YouTube has no video to give, and the player falls back to the
+    same song from a catalogue. Silence there looks like a bug, so the card
+    says what happened instead.
+    """
+    if not requested_video or runtime.player is None:
+        return ""
+    state = runtime.player.queues.get(chat_id)
+    if state is not None and not state.is_video:
+        return (
+            "No video from this server right now — playing the same song as audio."
+        )
+    return ""
+
+
 def register(client: Client) -> None:
     # ── /play ──────────────────────────────────────────────────────────────
     # One command, three inputs (text, link, replied file) and no format
@@ -226,7 +243,9 @@ def register(client: Client) -> None:
                         client,
                         chat_id,
                         status.id if status else None,
-                        cards.started_card(track)
+                        cards.started_card(
+                            track, note=_honest_kind(bool(track.is_video), chat_id)
+                        )
                         if outcome == "streamed"
                         else cards.queued_card(track, 0),
                     )

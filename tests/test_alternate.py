@@ -199,3 +199,34 @@ def test_a_walled_server_resolves_streams_by_substitution(monkeypatch):
     assert info.url == "https://cdn/copy.mp3"
     assert info.source == "jiosaavn"
     assert called == ["yt1"]
+
+
+def test_a_walled_video_request_is_served_as_the_same_song(monkeypatch):
+    """No video exists on this host — the listener still gets the song."""
+    engine = YouTube.__new__(YouTube)
+    engine.settings = FakeSettings()
+    engine._wall_until = 0.0
+    engine._wall_logged = False
+    engine._stream_cache = {}
+    engine._failures = {}
+    engine._failure_reasons = {}
+    engine._inflight = {}
+    engine._client_hint = None
+    engine._note_wall("Failed to extract any player response")
+
+    asked: list[bool] = []
+
+    async def fake_substitute(track, *, video=False, fresh=False):
+        asked.append(video)
+        from vyron.core.search import StreamInfo
+
+        return StreamInfo(url="https://cdn/copy.mp3", ext="mp3", mime="audio/mpeg", source="jiosaavn")
+
+    monkeypatch.setattr(engine, "_substitute", fake_substitute)
+    track = Track(id="yt1", title="Believer", duration=204, uploader="Imagine Dragons")
+
+    info = asyncio.run(engine.stream_info(track, video=True))
+
+    assert info.url == "https://cdn/copy.mp3"
+    # the substitution tier is asked for *audio*, never for video it cannot have
+    assert asked and asked[0] is False

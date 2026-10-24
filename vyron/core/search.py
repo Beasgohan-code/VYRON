@@ -971,7 +971,7 @@ class YouTube:
         # Walled: skip the ladder entirely (it cannot succeed) and go straight
         # to the copy of the song that will actually play.
         if self.walled():
-            substituted = await self._substitute(track, video=video, fresh=refresh)
+            substituted = await self._substitute(track, video=False, fresh=refresh)
             if substituted is not None:
                 self._stream_cache[key] = substituted
                 return substituted
@@ -1019,8 +1019,19 @@ class YouTube:
         # Last tier, and the one that fixes a walled IP: the same song from a
         # catalogue that serves its own audio. The listener asked for a song,
         # not for YouTube specifically.
-        substituted = await self._substitute(track, video=video)
+        #
+        # A *video* request lands here too, and deliberately gets audio: the
+        # catalogues have no video, and an honest song beats a silent black
+        # stream. `Player._start_stream` notices the bytes are audio and drops
+        # the video flag again, so ntgcalls is never asked for a video track
+        # that does not exist.
+        substituted = await self._substitute(track, video=False)
         if substituted is not None:
+            if video:
+                logger.info(
+                    "video for %s is unavailable on this host — streaming the same song as audio",
+                    track.id,
+                )
             self._stream_cache[key] = substituted
             return substituted
 

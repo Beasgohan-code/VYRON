@@ -738,3 +738,16 @@ def test_resume_always_on_seeks_to_the_restored_position():
     assert state.offset == 61.0 and state.playing is True
     # …and a second pass does nothing (the chat is already playing)
     assert run(player.resume_always_on()) == 0
+
+
+def test_a_substituted_stream_is_not_announced_as_video():
+    """A catalogue audio URL must not be handed to ntgcalls as a video track."""
+    from vyron.core.player import _is_video_stream
+
+    from vyron.core.search import StreamInfo
+
+    assert _is_video_stream(StreamInfo(url="u", ext="mp4", mime="video/mp4")) is True
+    assert _is_video_stream(StreamInfo(url="u", ext="mp3", mime="audio/mpeg")) is False
+    # a mime-less answer falls back to the extension
+    assert _is_video_stream(StreamInfo(url="u", ext="webm", mime="")) is True
+    assert _is_video_stream(StreamInfo(url="u", ext="m4a", mime="")) is False

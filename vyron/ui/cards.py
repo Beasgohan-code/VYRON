@@ -613,11 +613,12 @@ def queued_card(track: Track, position: int) -> str:
     )
 
 
-def started_card(track: Track) -> str:
-    """`/play` → it started right away."""
+def started_card(track: Track, *, note: str = "") -> str:
+    """`/play` → it started right away. ``note`` explains a downgrade."""
     return (
         B.banner("now streaming", glyph="play")
         + B.context("The assistant joined the voice chat and started this track.")
+        + (B.context(note) if note else "")
         + _track_fields(track)
         + B.actions(
             B.row(

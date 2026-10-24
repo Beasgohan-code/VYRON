@@ -706,23 +706,24 @@ def register(client: Client) -> None:
                 await cq.answer()
                 return
 
-            from vyron.modules.play import begin
+            from vyron.modules.play import _honest_kind, begin
 
             track = entry.tracks[index]
+            want_video = bool(entry.video or track.is_video)
             outcome = await begin(
                 client,
                 chat.id,
                 track,
                 # a video result stays video even when the picker was opened
                 # from /song (entry.video) — otherwise the track decides.
-                video=entry.video or track.is_video,
+                video=want_video,
                 status_id=cq.message.id,
             )
             if outcome != "error":
                 await _show(
                     client,
                     cq,
-                    cards.started_card(track)
+                    cards.started_card(track, note=_honest_kind(want_video, chat.id))
                     if outcome == "streamed"
                     else cards.queued_card(track, 0),
                     keyboards.now_playing(state),
