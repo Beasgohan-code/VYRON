@@ -23,6 +23,29 @@ import pytest  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
+def _keep_an_event_loop():
+    """Every test starts with an event loop installed.
+
+    `asyncio.run()` closes the loop it created, and pytgcalls calls
+    ``asyncio.get_event_loop()`` at import time — so a test that imported
+    ``vyron.runtime`` after another test used ``asyncio.run`` used to fail
+    depending on file order. Fixing it here means the suite no longer has an
+    ordering rule nobody can remember.
+    """
+    import asyncio
+
+    try:
+        previous = asyncio.get_event_loop_policy().get_event_loop()
+    except RuntimeError:
+        previous = None
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    yield
+    loop.close()
+    asyncio.set_event_loop(previous)
+
+
+@pytest.fixture(autouse=True)
 def _clean_prefixes():
     """Prefix overrides are process-wide; every test starts from the defaults."""
     from vyron.utils import commands

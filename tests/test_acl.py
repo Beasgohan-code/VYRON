@@ -199,27 +199,6 @@ def test_run_once_survives_a_broken_backend(monkeypatch):
     assert asyncio.run(maintenance.run_once()) == {"files": 0, "rows": 0}
 
 
-@pytest.fixture(autouse=True)
-def _keep_an_event_loop():
-    """pytgcalls calls asyncio.get_event_loop() at import time.
-
-    `asyncio.run()` in an earlier test clears the loop, so a bare import of
-    vyron.runtime later in this file used to explode depending on test order.
-    """
-    import asyncio
-
-    previous = None
-    try:
-        previous = asyncio.get_event_loop_policy().get_event_loop()
-    except RuntimeError:
-        pass
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    yield
-    loop.close()
-    asyncio.set_event_loop(previous)
-
-
 # ── MongoDB backend (fake driver, no network) ─────────────────────────────
 def test_mongo_connect_does_not_await_create_index(monkeypatch):
     """create_index() returns a str — awaiting it used to break every boot."""

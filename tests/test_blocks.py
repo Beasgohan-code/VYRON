@@ -61,7 +61,7 @@ def test_rich_detection_and_escaping():
 def test_static_cards_carry_rich_buttons():
     start = cards.start_card("Bob", {"chats": 1, "tracks": 2})
     assert "<tg-button" in start
-    assert "Add to group" in start
+    assert "Add to a group" in start
 
     about = cards.about_card()
     assert "<tg-button" in about

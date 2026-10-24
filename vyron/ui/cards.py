@@ -71,47 +71,74 @@ def start_card(
     *,
     streaming: bool = True,
     live: dict | None = None,
+    greeting: str | None = None,
 ) -> str:
     """The first card anyone sees: what this bot does, and how to start.
 
     ``live`` is filled when this chat already has something playing, so a
-    returning user gets the current track instead of a setup guide.
+    returning user gets the current track instead of a setup guide. ``greeting``
+    is computed by the caller from the server clock — the card never invents a
+    local time it cannot know.
     """
-    served = stats.get("chats", 0)
-    tracks = stats.get("tracks", 0)
-    mode = "Streaming ready" if streaming else "Voice engine off"
-    detail = (
-        "voice chats and files"
-        if streaming
-        else "the assistant is offline — <code>/song</code> still sends files"
+    chats = int(stats.get("chats", 0) or 0)
+    tracks = int(stats.get("tracks", 0) or 0)
+    who = esc(truncate(name, 40))
+
+    if streaming:
+        engine = f"{B.pill('voice chat ready', 'ok')} · the assistant joins calls by itself"
+    else:
+        engine = (
+            f"{B.pill('voice engine off', 'warn')} · no <code>STRING_SESSION</code> — "
+            "search, files and the API keep working"
+        )
+
+    intro = f"<b>{who}</b>"
+    if greeting:
+        intro = f"<b>{esc(greeting)}, {who}</b>"
+    intro += (
+        "\nSend a song name, a YouTube/Spotify link, or reply to a file with "
+        "<code>/play</code>."
     )
-    features = B.bullets(
+
+    # ── the four things this bot actually does, in the order people need them ─
+    features = B.table(
+        None,
         [
-            "<b>Play</b> — a link, a reply, or <code>/play believer</code>",
-            "<b>Search</b> — the best match first, pick it with one tap",
-            "<b>Download</b> — MP3 320 or MP4 720p with cover art",
-            "<b>API</b> — drop-in <code>/v1</code> for other bots",
-        ]
+            (f"{E('play')} <b>Play</b>", "streams into the group voice chat, one tap to skip"),
+            (f"{E('search')} <b>Find</b>", "search, then pick from the results — no typing ids"),
+            (f"{E('download')} <b>Save</b>", "MP3 320 or MP4 720p, cover art attached"),
+            (f"{E('interface')} <b>Mini App</b>", "the full player, inside Telegram"),
+        ],
+        border=0,
     )
+
     guide = B.details(
-        f"{E('rocket')} <b>Set up in three steps</b>",
+        f"{E('rocket')} <b>Set it up in three steps</b>",
         B.bullets(
             [
-                "Add the bot and the assistant account to a group",
-                "Give it <b>manage voice chats</b> and <b>delete messages</b>",
+                "Add the bot and its assistant account to the group",
+                "Give them <b>manage voice chats</b> and <b>delete messages</b>",
                 "Start a voice chat, then send <code>/play believer</code>",
             ],
             ordered=True,
+        )
+        + B.note(
+            "In a private chat nothing else is needed — <code>/song</code> sends "
+            "the file straight here."
         ),
         open=False,
     )
+
     buttons = (
         B.row(
-            B.btn(f"{E('play')} Player", data="v:app", style="primary"),
-            B.btn(f"{E('queue')} Commands", data="v:help:main"),
+            B.btn(f"{E('play')} Open the player", data="v:app", style="primary"),
+            B.btn(f"{E('queue')} All commands", data="v:help:main"),
         )
         + B.row(
-            B.btn(f"{E('rocket')} Add to group", url=f"https://t.me/{settings.bot_username}?startgroup=true"),
+            B.btn(
+                f"{E('rocket')} Add to a group",
+                url=f"https://t.me/{settings.bot_username}?startgroup=true",
+            ),
             B.btn(f"{E('info')} About", data="v:about"),
         )
         + B.row(
@@ -119,43 +146,85 @@ def start_card(
             B.btn(f"{E('star')} Updates", url=settings.updates_channel, style="link"),
         )
     )
+
     body = features + guide
     if live:
         title = esc(truncate(str(live.get("title") or "Unknown"), 48))
-        body = B.kv(
-            [
+        state_word = "paused" if live.get("paused") else "playing now"
+        rows = [
+            (f"{E('headphones')} <b>{state_word.capitalize()}</b>", f"<b>{title}</b>"),
+            (f"{E('user')} Artist", esc(truncate(str(live.get("artist") or "—"), 32))),
+            (f"{E('clock')} Length", f"<b>{fmt_duration(int(live.get('duration') or 0))}</b>"),
+        ]
+        position = int(live.get("position") or 0)
+        duration = int(live.get("duration") or 0)
+        if position and duration:
+            rows.append(
                 (
-                    f"{E('headphones')} Now playing",
-                    f"<b>{title}</b>",
-                ),
-                (
-                    f"{E('user')} Artist",
-                    esc(truncate(str(live.get("artist") or "—"), 32)),
-                ),
-                (
-                    f"{E('clock')} Length",
-                    f"<b>{fmt_duration(int(live.get('duration') or 0))}</b>",
-                ),
-                (
-                    f"{E('queue')} Up next",
-                    f"<b>{int(live.get('queue') or 0)}</b> in the queue"
-                    + (" · <b>paused</b>" if live.get("paused") else ""),
-                ),
-            ]
+                    f"{E('live')} Position",
+                    f"<code>{progress_bar(position, duration, length=12)}</code> "
+                    f"{fmt_duration(position)} / {fmt_duration(duration)}",
+                )
+            )
+        queued = int(live.get("queue") or 0)
+        rows.append(
+            (
+                f"{E('queue')} Up next",
+                f"<b>{queued}</b> " + ("track" if queued == 1 else "tracks") + " queued"
+                if queued
+                else "<i>nothing queued — it will pick something</i>",
+            )
+        )
+        # A returning listener asked for the music, not the manual. The setup
+        # steps are dropped entirely and replaced with the controls they will
+        # actually reach for — nothing to read, everything one tap away.
+        controls = B.actions(
+            B.row(
+                B.btn(f"{E('pause')} Pause", data="v:pause"),
+                B.btn(f"{E('skip')} Skip", data="v:skip", style="primary"),
+            ),
+            B.row(
+                B.btn(f"{E('queue')} Queue", data="v:queue"),
+                B.btn(f"{E('stop')} Stop", data="v:stop", style="danger"),
+            ),
+        )
+        return (
+            B.heading(f"{E('brand')} {esc(BRAND_DISPLAY)}", 2)
+            + B.context(intro)
+            + B.note(engine)
+            + B.head("In this chat", glyph="headphones")
+            + B.kv(rows, border=0)
+            + controls
+            + B.actions(
+                B.row(
+                    B.btn(f"{E('queue')} All commands", data="v:help:main"),
+                    B.btn(f"{E('interface')} Open the player", data="v:app"),
+                )
+            )
+            + B.footer(
+                f"{_compact(chats)} chats · {_compact(tracks)} tracks played · v{_version()}"
+                f" · {small_caps('rich ui')}"
+            )
         )
 
     return (
         B.heading(f"{E('brand')} {esc(BRAND_DISPLAY)}", 2)
-        + B.note(
-            f"<b>{esc(truncate(name, 40))}</b> · {mode}\n{detail}"
-        )
+        + B.context(intro)
+        + B.note(engine)
         + body
-        + B.divider()
-        + buttons
+        + B.actions(*[buttons])
         + B.footer(
-            f"{served} chats · {tracks} tracks played · v{_version()}"
+            f"{_compact(chats)} chats · {_compact(tracks)} tracks played · v{_version()}"
+            f" · {small_caps('rich ui')}"
         )
     )
+
+
+def _compact(value: int) -> str:
+    try:
+        return compact_number(value)
+    except Exception:  # pragma: no cover
+        return str(value)
 
 
 def _version() -> str:
@@ -293,9 +362,9 @@ def help_card(section: str = "main") -> str:
         B.bullets(
             [
                 f"Any of these prefixes works: <code>{esc(_prefix_line())}</code>",
-                "YouTube links, playlists, replies to audio files and plain text all work",
+                "A link, a playlist, a reply to a file or plain words all work",
                 "In groups only admins can control playback",
-                "Everything is cached — replays start instantly",
+                "Anything you played once replays instantly — it is cached",
             ]
         ),
     )
@@ -311,7 +380,11 @@ def help_card(section: str = "main") -> str:
         style = "primary" if key == section else None
         tabs += B.btn(("• " if key == section else "") + label, data=f"v:help:{key}", style=style)
     return (
-        B.heading(f"{E('tools')} {small_caps('commands')} {DASH} {title}", 2)
+        B.head(title, glyph="tools", meta=f"· {len(rows)} commands")
+        + B.context(
+            "Everything the bot can do, by area. Pick a tab — the buttons in this "
+            "message switch the list in place."
+        )
         + body
         + tips
         + B.divider()
@@ -1222,31 +1295,46 @@ def mask_ish(item: dict) -> str:
 
 
 def about_card() -> str:
+    """What VYRON is, in one screen — no marketing, no credits list."""
     body = B.kv(
         [
-            (f"{E('code')} Stack", "Kurigram + PyTgCalls"),
-            (f"{E('bolt')} UI", "Bot API 10.3 rich messages"),
-            (f"{E('cloud')} Deploy", "Docker · Render · Koyeb · VPS"),
-            (f"{E('spark')} Extras", "lyrics · downloads · web app"),
-            (f"{E('code')} Music API", "drop-in <code>/v1</code> + <code>/vyron</code>, same URL"),
-        ]
+            (f"{E('code')} <b>Stack</b>", "Kurigram + PyTgCalls + yt-dlp"),
+            (f"{E('bolt')} <b>Interface</b>", "rich cards, premium emoji, Mini App"),
+            (f"{E('cloud')} <b>Deploy</b>", "Docker · Render · Koyeb · any VPS"),
+            (
+                f"{E('download')} <b>Media</b>",
+                "voice chat streams · MP3 320 · MP4 720p · synced lyrics",
+            ),
+            (
+                f"{E('code')} <b>Music API</b>",
+                "drop-in <code>/v1</code> and <code>/vyron</code> on this same URL",
+            ),
+            (
+                f"{E('users')} <b>Sources</b>",
+                "YouTube · YouTube Music · Audius · JioSaavn · SoundCloud · Bandcamp",
+            ),
+        ],
+        border=0,
     )
     return (
-        B.heading(f"{E('brand')} {esc(BRAND_DISPLAY)} {DASH} about", 2)
-        + B.note(
-            f"{SPARK} A modern Telegram voice-chat music bot: rich cards, premium emoji, "
-            f"yt-dlp search, MP3/MP4 downloads, persistent queues and a companion web app."
+        B.head("About", glyph="brand")
+        + B.context(
+            f"<b>{esc(BRAND_DISPLAY)}</b> streams music into a Telegram voice chat, "
+            "finds what you mean even when you half-remember the title, and hands you "
+            "the file when you would rather keep it."
         )
         + body
-        + B.divider()
-        + B.row(
-            B.btn(f"{E('code')} Source", url=settings.git_repo, style="link"),
-            B.btn(f"{E('chat')} Support", url=settings.support_chat, style="link"),
+        + B.actions(
+            B.row(
+                B.btn(f"{E('code')} Source", url=settings.git_repo, style="link"),
+                B.btn(f"{E('chat')} Support", url=settings.support_chat, style="link"),
+            ),
+            B.row(
+                B.btn(f"{E('back')} Back to commands", data="v:help:main", style="primary"),
+                B.btn(f"{E('close')} Close", data="v:close", style="danger"),
+            ),
         )
-        + B.row(B.btn(f"{E('back')} Back", data="v:help:main", style="primary"))
-        + B.footer(
-            "Powered by Kurigram · PyTgCalls · yt-dlp · richgram"
-        )
+        + B.footer(f"v{_version()} · Kurigram · PyTgCalls · yt-dlp · richgram")
     )
 
 
@@ -1264,10 +1352,25 @@ def error_card(text: str) -> str:
 
 
 def ping_card(latency_ms: float, uptime: float) -> str:
+    """Latency with an honest verdict, not just a number."""
+    if latency_ms < 120:
+        verdict = "instant"
+    elif latency_ms < 400:
+        verdict = "healthy"
+    elif latency_ms < 900:
+        verdict = "a little slow"
+    else:
+        verdict = "slow — check the host region"
     return (
-        f"{E('bolt')} <b>Pong!</b>\n"
-        f"<blockquote>{E('clock')} latency <b>{latency_ms:.0f} ms</b>\n"
-        f"{E('rocket')} uptime <b>{human_time(uptime)}</b></blockquote>"
+        B.head("Ping", glyph="bolt")
+        + B.context("One round trip: your message in, this card out.")
+        + B.kv(
+            [
+                (f"{E('bolt')} <b>Latency</b>", f"<b>{latency_ms:.0f} ms</b> · {verdict}"),
+                (f"{E('rocket')} <b>Uptime</b>", f"<b>{human_time(uptime)}</b>"),
+            ],
+            border=0,
+        )
     )
 
 

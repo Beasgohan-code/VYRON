@@ -1,5 +1,17 @@
 # ---------------------------------------------------------------------------
 #  VYRON — start / help / about / ping
+#
+#  Everything a first-time visitor sees. Every reply here is a *rich* card built
+#  from `vyron.ui.blocks` (the richgram wrapper): headings, quoted intros, key/
+#  value tables, collapsible setup steps, hairline dividers and coloured
+#  in-message buttons — with the classic-HTML lane as an automatic fallback, so
+#  an old server build still gets a complete, readable answer.
+#
+#  Copy rules for this file (they are the whole point of it):
+#    · the first line always says what the person is looking at;
+#    · no URL ever appears in text — the Mini App is a button, not a link;
+#    · every claim is true right now (`streaming`, live queue, real counters);
+#    · a returning listener with music playing sees the track, not the manual.
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 
@@ -16,8 +28,8 @@ from vyron.config import settings
 from vyron.core.commandlist import command_names
 from vyron.core.commandlist import suggest as command_suggest
 from vyron.runtime import runtime
+from vyron.ui import blocks as B
 from vyron.ui import cards, keyboards, rich
-from vyron.ui.theme import E
 from vyron.utils.helpers import is_private_chat
 from vyron.utils.commands import cmd, prefixes
 
@@ -29,7 +41,11 @@ logger = logging.getLogger(__name__)
 START_PHOTO = Path(__file__).resolve().parents[2] / "assets" / "start.jpg"
 _PHOTO_META = "start_photo_file_id"
 _PHOTO_VERSION = "start_photo_version"
-_ART_VERSION = "5"  # classic banner, ribbons fade out (2026-10-23)
+# 6 — the 2026 artwork: glass sculpture, gradient wordmark, no ribbons.
+_ART_VERSION = "6"
+
+# Aliases that mean "open the player", from a t.me deep link or a typed command.
+_APP_WORDS = {"app", "player", "miniapp", "mini", "music", "open"}
 
 
 async def _photo_source() -> tuple[object, bool]:
@@ -62,6 +78,75 @@ async def _photo_source() -> tuple[object, bool]:
     return None, False
 
 
+def _live_state(chat_id: int) -> dict | None:
+    """What this chat is playing right now, if anything."""
+    if runtime.player is None:
+        return None
+    state = runtime.player.queues.get(chat_id)
+    if state is None or state.current is None:
+        return None
+    track = state.current
+    return {
+        "title": track.title,
+        "artist": getattr(track, "uploader", "") or "",
+        "duration": getattr(track, "duration", 0) or 0,
+        "queue": len(state.queue),
+        "paused": state.paused,
+        "position": getattr(state, "position", 0) or 0,
+    }
+
+
+def _greeting() -> str:
+    """One word that fits the hour on the server — never a fake local time."""
+    hour = time.gmtime().tm_hour
+    if hour < 5:
+        return "Still up"
+    if hour < 12:
+        return "Good morning"
+    if hour < 17:
+        return "Good afternoon"
+    if hour < 22:
+        return "Good evening"
+    return "Still up"
+
+
+def _engine_line() -> str:
+    """The honest voice-chat state, phrased for a human."""
+    if runtime.streaming_ready:
+        return f"{B.pill('voice chat ready', 'ok')} · the assistant can join calls"
+    if runtime.player is None:
+        return (
+            f"{B.pill('voice engine off', 'warn')} · no <code>STRING_SESSION</code> — "
+            "<code>/song</code> and the API still send files"
+        )
+    return f"{B.pill('starting up', 'warn')} · the voice engine is still coming online"
+
+
+async def _counters() -> dict:
+    if runtime.storage is None:
+        return {}
+    try:
+        return await runtime.storage.counters()
+    except Exception:  # pragma: no cover - a counter is never worth a failure
+        return {}
+
+
+async def home_card(chat, user=None) -> str:
+    """The home card, for `/start` and every "Home" button.
+
+    One builder means a tapped button and a typed command never drift apart.
+    """
+    counters = await _counters()
+    who = (getattr(user, "first_name", "") or "").strip() or "there"
+    return cards.start_card(
+        who,
+        {"chats": counters.get("chats", 0), "tracks": counters.get("tracks", 0)},
+        streaming=runtime.streaming_ready,
+        live=_live_state(chat.id),
+        greeting=_greeting(),
+    )
+
+
 def register(client: Client) -> None:
     async def _send_app(message: Message) -> None:
         """Open the Mini App *inside Telegram* — never as a browser link."""
@@ -69,11 +154,13 @@ def register(client: Client) -> None:
             await rich.send(
                 message._client,
                 message.chat.id,
-                cards.warn_card(
-                    "<b>Web app is not configured</b>\n"
-                    "<blockquote>Set <code>WEBAPP_URL</code> to the public URL of this "
-                    "deployment, then restart.</blockquote>"
-                ),
+                B.head("Player", glyph="warn")
+                + B.context(
+                    "<b>The Mini App is not configured on this deployment.</b>\n"
+                    "Set <code>WEBAPP_URL</code> to this server's public address and "
+                    "restart — the button appears on the next <code>/start</code>."
+                )
+                + B.actions(B.row(B.btn("Reload the home card", data="v:start"))),
                 reply_to=message.id,
             )
             return
@@ -95,38 +182,17 @@ def register(client: Client) -> None:
                 reply_to=message.id,
             )
 
+    # ── /start ─────────────────────────────────────────────────────────────
     @client.on_message(cmd(["start"]))
     async def _start(_: Client, message: Message) -> None:
         # t.me/<bot>?start=app deep-links straight into the player, so a shared
         # link lands people where the music actually is.
-        payload = (message.text or "").split(maxsplit=1)
-        if len(payload) > 1 and payload[1].strip().lower() in {"app", "player", "miniapp", "music"}:
+        parts = (message.text or "").split(maxsplit=1)
+        if len(parts) > 1 and parts[1].strip().lower() in _APP_WORDS:
             await _send_app(message)
             return
 
-        stats = await runtime.storage.counters() if runtime.storage else {}
-        name = (message.from_user.first_name if message.from_user else "there") or "there"
-
-        # A returning user in an active chat wants the track, not the manual.
-        live = None
-        if runtime.player:
-            state = runtime.player.queues.get(message.chat.id)
-            if state is not None and state.current is not None:
-                track = state.current
-                live = {
-                    "title": track.title,
-                    "artist": getattr(track, "uploader", "") or "",
-                    "duration": getattr(track, "duration", 0) or 0,
-                    "queue": len(state.queue),
-                    "paused": state.paused,
-                }
-
-        markup = cards.start_card(
-            name,
-            {"chats": stats.get("chats", 0), "tracks": stats.get("tracks", 0)},
-            streaming=runtime.streaming_ready,
-            live=live,
-        )
+        markup = await home_card(message.chat, message.from_user)
         # No credential and no URL in the card: the Mini App identifies the
         # owner from Telegram's own initData, and its button is DM-only.
         photo, cached = await _photo_source()
@@ -152,6 +218,7 @@ def register(client: Client) -> None:
             if message.chat.type.name in {"GROUP", "SUPERGROUP"}:
                 await runtime.storage.bump("chats")
 
+    # ── /help ──────────────────────────────────────────────────────────────
     @client.on_message(cmd("help"))
     async def _help(_: Client, message: Message) -> None:
         await rich.send(
@@ -162,6 +229,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
+    # ── /about ─────────────────────────────────────────────────────────────
     @client.on_message(cmd(["about", "repo"]))
     async def _about(_: Client, message: Message) -> None:
         await rich.send(
@@ -172,14 +240,21 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
+    # ── /app · /player ─────────────────────────────────────────────────────
     @client.on_message(cmd(["app", "player"]))
     async def _webapp(_: Client, message: Message) -> None:
         await _send_app(message)
 
+    # ── /ping ──────────────────────────────────────────────────────────────
     @client.on_message(cmd("ping"))
     async def _ping(_: Client, message: Message) -> None:
         started = time.perf_counter()
-        sent = await rich.send(message._client, message.chat.id, cards.ok_card("<b>Measuring…</b>"))
+        sent = await rich.send(
+            message._client,
+            message.chat.id,
+            B.head("Ping", glyph="bolt")
+            + B.context(f"{B.think()} measuring the round trip…"),
+        )
         latency = (time.perf_counter() - started) * 1000
         if sent:
             await rich.edit(
@@ -220,25 +295,53 @@ def register(client: Client) -> None:
         close = command_suggest(name)
         if not close and prefix != "/":
             return  # punctuation, not an attempt at a command
-        hint = f"<b>{prefix}{name}</b> isn't a command."
-        if close:
-            hint += f" Did you mean <code>{prefix}{close[0]}</code>?"
-        hint += "\n<blockquote>/help lists everything the bot can do.</blockquote>"
-        await rich.send(message._client, message.chat.id, hint, reply_to=message.id)
+        body = B.context(
+            f"<b>{prefix}{name}</b> is not a command — nothing was sent."
+            + (f"\nThe closest one is <code>{prefix}{close[0]}</code>." if close else "")
+        )
+        await rich.send(
+            message._client,
+            message.chat.id,
+            B.head("Not a command", glyph="info") + body
+            + B.actions(
+                B.row(
+                    B.btn("All commands", data="v:help:main", style="primary"),
+                    B.btn("Home", data="v:start"),
+                )
+            ),
+            reply_to=message.id,
+        )
 
+    # ── /id ────────────────────────────────────────────────────────────────
     @client.on_message(cmd(["id"]))
     async def _id(_: Client, message: Message) -> None:
         chat = message.chat
-        lines = [
-            f"{E('chat')} <b>Chat</b> <code>{chat.id}</code>",
-            f"{E('user')} <b>You</b> <code>{message.from_user.id if message.from_user else 0}</code>",
+        rows = [
+            ("chat", "This chat", f"<code>{chat.id}</code>"),
+            (
+                "user",
+                "You",
+                f"<code>{message.from_user.id if message.from_user else 0}</code>",
+            ),
         ]
-        if message.reply_to_message and message.reply_to_message.from_user:
-            lines.append(f"{E('users')} <b>Replied</b> <code>{message.reply_to_message.from_user.id}</code>")
-        if message.reply_to_message and message.reply_to_message.audio:
-            lines.append(f"{E('song')} <b>File</b> <code>{message.reply_to_message.audio.file_id[:42]}…</code>")
-        await rich.send(message._client, chat.id, "\n".join(lines), reply_to=message.id)
+        replied = message.reply_to_message
+        if replied and replied.from_user:
+            rows.append(("users", "Replied to", f"<code>{replied.from_user.id}</code>"))
+        if replied and replied.audio:
+            rows.append(("song", "Audio file", f"<code>{replied.audio.file_id[:42]}…</code>"))
+        if getattr(chat, "username", None):
+            rows.append(("link", "Username", f"@{chat.username}"))
+        await rich.send(
+            message._client,
+            chat.id,
+            B.head("Identifiers", glyph="id")
+            + B.context("Copyable ids — useful in a bug report or a whitelist.")
+            + B.stat_pairs(rows)
+            + B.actions(
+                B.row(B.btn("Home", data="v:start", style="primary")),
+            ),
+            reply_to=message.id,
+        )
 
 
-
-__all__ = ["register"]
+__all__ = ["home_card", "register"]

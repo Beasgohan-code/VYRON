@@ -355,6 +355,19 @@ def register(client: Client) -> None:
                 await cq.answer(f"Could not play that: {truncate(str(exc), 60)}", show_alert=True)
             return
 
+        if action == "start":
+            # The home card, rebuildable from any other card ("Home" buttons).
+            from vyron.modules.start import home_card
+
+            await _show(
+                client,
+                cq,
+                await home_card(chat, cq.from_user),
+                keyboards.start_panel(player=is_private_chat(chat)),
+            )
+            await cq.answer("Home")
+            return
+
         if action == "app":
             if not keyboards.app_url():
                 await cq.answer("Set WEBAPP_URL first.", show_alert=True)
