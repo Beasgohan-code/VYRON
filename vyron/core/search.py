@@ -32,6 +32,133 @@ _YT_ID_RE = re.compile(r"(?:v=|/shorts/|youtu\.be/|/embed/|/live/)([\w-]{11})")
 _LIST_RE = re.compile(r"[?&]list=([\w-]+)")
 
 
+class _Capture:
+    """A yt-dlp logger that remembers the last thing it complained about.
+
+    One instance per extraction: this runs inside a worker thread and several
+    resolves overlap, so the state must not be shared.
+    """
+
+    def __init__(self) -> None:
+        self.last_error = ""
+        self.verbose = False
+
+    def _remember(self, message: Any, *args: Any) -> None:
+        try:
+            text = str(message) % args if args else str(message)
+        except Exception:  # pragma: no cover - odd format strings
+            text = f"{message} {args}"
+        if text.startswith("[debug]"):
+            return
+        self.last_error = text.strip()[:400]
+
+    def debug(self, message: Any, *args: Any) -> None:
+        if self.verbose:
+            logger.debug("yt-dlp: %s", message)
+
+    def info(self, message: Any, *args: Any) -> None:
+        if self.verbose:
+            logger.debug("yt-dlp: %s", message)
+
+    def warning(self, message: Any, *args: Any) -> None:
+        self._remember(message, *args)
+
+    def error(self, message: Any, *args: Any) -> None:
+        self._remember(message, *args)
+
+
+# The reasons worth explaining, most specific first: what YouTube (or the host)
+# said → what it means → what actually fixes it. Anything unmatched keeps the
+# original sentence, because a wrong explanation is worse than a raw one.
+_WHY: tuple[tuple[tuple[str, ...], str, str], ...] = (
+    (
+        ("confirm you're not a bot", "confirm you’re not a bot", "not a bot", "sign in to confirm"),
+        "YouTube thinks this server is a bot",
+        "install curl_cffi (browser impersonation, on by default), set COOKIES_FILE, "
+        "or self-host Cobalt (COBALT_URLS)",
+    ),
+    (
+        ("age-restricted", "age restricted", "confirm your age", "inappropriate for some users"),
+        "this video is age-restricted",
+        "set COOKIES_FILE with a signed-in browser's cookies — no mirror can bypass this one",
+    ),
+    (
+        ("private video", "this video is private"),
+        "the video is private",
+        "ask the owner to make it public — no resolver can see it",
+    ),
+    (
+        ("members-only", "join this channel", "members only"),
+        "the video is members-only",
+        "it needs a channel membership — play something else",
+    ),
+    (
+        ("not available in your country", "geo", "blocked it in your country", "region"),
+        "the video is geo-blocked for this server",
+        "set PROXY to a server in an allowed country, or pick another upload",
+    ),
+    (
+        ("video unavailable", "this video is unavailable", "has been removed", "no longer available"),
+        "the video is gone",
+        "pick another result — the uploader deleted or privated it",
+    ),
+    (
+        ("requested format is not available",),
+        "the format we asked for does not exist for this video",
+        "that is a selector problem, not your IP — /sources shows which clients still offer audio",
+    ),
+    (
+        ("http error 429", "too many requests", "rate limit"),
+        "YouTube is rate-limiting this server",
+        "wait a minute, or self-host Cobalt (COBALT_URLS) so public mirrors are not in the path",
+    ),
+    (
+        ("http error 403", "403: forbidden"),
+        "YouTube refused the request (403)",
+        "browser impersonation is the usual fix; a self-hosted Cobalt is the reliable one",
+    ),
+    (
+        ("unable to download api page", "tls/ssl", "connection reset", "timed out", "getaddrinfo"),
+        "this server cannot reach YouTube",
+        "check egress/DNS or set PROXY — nothing else in the bot can help until it can",
+    ),
+    (
+        ("premieres in", "will begin", "live event"),
+        "this is a premiere or a live event",
+        "it cannot be streamed until it starts",
+    ),
+)
+
+
+def explain(reason: str) -> tuple[str, str]:
+    """(what it means, what to do) for a raw yt-dlp / mirror message."""
+    text = (reason or "").lower()
+    for needles, meaning, fix in _WHY:
+        if any(needle in text for needle in needles):
+            return meaning, fix
+    return "", ""
+
+
+def _explain(reason: str, *, target: str = "") -> str:
+    """A failure sentence a person can act on, built from yt-dlp's own words."""
+    raw = (reason or "").strip()
+    if raw.startswith("ERROR:"):
+        raw = raw[len("ERROR:"):].strip()
+    if raw.startswith("[youtube]"):
+        raw = raw[len("[youtube]"):].strip()
+    meaning, fix = explain(raw)
+    if not raw:
+        return (
+            "YouTube returned no information for this link. That is usually this "
+            "server's IP being refused — see /sources."
+        )
+    if meaning:
+        return f"{meaning}: {raw[:160]} → {fix}"
+    # Unrecognised wording still gets somewhere to go: /sources names the tier
+    # that refused and the reason, which is what a screenshot cannot do.
+    return f"{raw[:200]} → run /sources to see which resolver is refusing, and why"
+
+
 _SLOT: tuple[asyncio.AbstractEventLoop, asyncio.Semaphore] | None = None
 
 
@@ -135,6 +262,8 @@ class YouTube:
         # A track that just failed will fail again for a while. Remember it, so
         # the next tap answers instantly instead of grinding the ladder again.
         self._failures: dict[str, float] = {}
+        # …and what to say about it: the classified reason beats a generic hint
+        self._failure_reasons: dict[str, str] = {}
         # the player client that last produced a playable URL (None = yt-dlp default)
         self._client_hint: str | None = None
         self._warned_impersonate = False
@@ -237,10 +366,25 @@ class YouTube:
         return parsed
 
     def _extract(self, target: str, **extra: Any) -> dict[str, Any]:
-        with yt_dlp.YoutubeDL(self._opts(**extra)) as ydl:
-            info = ydl.extract_info(target, download=False)
+        """One yt-dlp extraction, with the *reason* kept when it fails.
+
+        `ignoreerrors` is on (a playlist with one dead video must still yield
+        the rest), which means a failure returns ``None`` instead of raising —
+        and the reason only exists as a log line. Handing yt-dlp our own logger
+        recovers it, so the user is told "Sign in to confirm you're not a bot"
+        instead of "nothing could be extracted".
+        """
+        capture = _Capture()
+        options = {"logger": capture}
+        options.update(self._opts(**extra))
+        capture.verbose = bool(options.get("verbose"))
+        with yt_dlp.YoutubeDL(options) as ydl:
+            try:
+                info = ydl.extract_info(target, download=False)
+            except Exception as exc:  # a real raise (network, parse) is better than None
+                raise MediaError(_explain(f"{type(exc).__name__}: {exc}", target=target)) from exc
         if not info:
-            raise MediaError("Nothing could be extracted from that link.")
+            raise MediaError(_explain(capture.last_error, target=target))
         return info
 
     async def _async_extract(self, target: str, **extra: Any) -> dict[str, Any]:
@@ -442,7 +586,7 @@ class YouTube:
         if not refresh:
             blocked_until = self._failures.get(key, 0.0)
             if blocked_until > time.time():
-                raise MediaError(FAILURE_HINT)
+                raise MediaError(self._failure_reasons.get(key) or FAILURE_HINT)
             running = self._inflight.get(key)
             if running is not None:
                 # Share the answer instead of running the ladder again.
@@ -453,9 +597,10 @@ class YouTube:
             self._inflight[key] = task
         try:
             return await asyncio.shield(task)
-        except MediaError:
+        except MediaError as exc:
             ttl = max(5, int(getattr(self.settings, "stream_failure_ttl", 60)))
             self._failures[key] = time.time() + ttl
+            self._failure_reasons[key] = str(exc)
             raise
         finally:
             if self._inflight.get(key) is task:
@@ -505,6 +650,7 @@ class YouTube:
             self._remember_client(client)
             self._stream_cache[key] = result
             self._failures.pop(key, None)
+            self._failure_reasons.pop(key, None)
             return result
 
         # Last tier: a public Invidious/Piped mirror. yt-dlp failing is a
@@ -517,15 +663,10 @@ class YouTube:
             return fallback
 
         self._stream_cache.pop(key, None)
-        reason = f"{type(last_error).__name__}: {last_error}" if last_error else ""
-        if reason and any(
-            word in reason.lower()
-            for word in ("bot", "403", "sign in", "extracted", "unavailable", "confirm")
-        ):
-            raise MediaError(f"no playable stream for this track ({reason}). {FAILURE_HINT}")
-        raise MediaError(
-            f"no playable stream for this track ({reason})" if reason else "no playable stream for this track"
-        )
+        raw = str(last_error) if last_error else ""
+        # `_explain` maps yt-dlp's own sentence onto what it means and what
+        # fixes it, so the toast in the app is actionable instead of cryptic.
+        raise MediaError(_explain(raw, target=track.id))
 
     async def _public_fallback(self, track: Track, *, video: bool = False) -> StreamInfo | None:
         """Direct URL from Invidious/Piped, or ``None`` when not configured."""

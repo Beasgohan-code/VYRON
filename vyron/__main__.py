@@ -12,7 +12,7 @@ import traceback
 
 from pyrogram.types import BotCommand
 
-from vyron import __version__, banner_text, setup_logging
+from vyron import __build__, __version__, banner_text, setup_logging
 from vyron.clients import build_assistant, build_bot, session_problem
 from vyron.config import settings
 from vyron.modules import register_all
@@ -215,6 +215,7 @@ async def _async_main() -> int:
 
     runtime.settings = settings
     runtime.version = __version__
+    runtime.build = __build__
     runtime.started_at = time.time()
 
     # open the HTTP port before anything can fail: Render/Koyeb polls it while

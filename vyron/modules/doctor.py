@@ -24,7 +24,7 @@ import time
 from pyrogram import Client, filters
 from pyrogram.types import Message
 
-from vyron import __version__
+from vyron import __build__, __version__
 from vyron.config import settings
 from vyron.runtime import runtime
 from vyron.ui import blocks as B
@@ -52,9 +52,16 @@ async def _probe_search() -> tuple[bool, str]:
             youtube.resolve(f"https://youtu.be/{PROBE_VIDEO}"), timeout=20
         )
     except asyncio.TimeoutError:
-        return False, "no answer in 20s (network or bot-check)"
+        return False, "no answer in 20s — this server cannot reach YouTube"
     except Exception as exc:
-        return False, f"{type(exc).__name__}: {str(exc)[:70]}"
+        from vyron.core.search import explain
+
+        message = str(exc)
+        meaning, _fix = explain(message)
+        if meaning:
+            # "YouTube thinks this server is a bot" beats a stack-trace excerpt
+            return False, f"<b>{rich.esc(meaning)}</b> · /sources for the tier that works"
+        return False, f"{type(exc).__name__}: {rich.esc(message[:80])}"
     took = (time.perf_counter() - started) * 1000
     return True, f"{int(took)} ms · {rich.esc(str(getattr(track, 'title', '') or '')[:40])}"
 
@@ -164,6 +171,11 @@ def register(client: Client) -> None:
 
         problems = settings.validate()
         rows: list[tuple[str, str]] = [
+            _row(
+                f"{E('rocket')} build",
+                True,
+                f"v{__version__} · {__build__}",
+            ),
             _row(
                 f"{E('key')} config",
                 not problems,

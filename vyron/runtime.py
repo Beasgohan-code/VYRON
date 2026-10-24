@@ -36,7 +36,8 @@ class Runtime:
     lyrics: LyricsClient | None = None
     player: Player | None = None
     started_at: float = field(default_factory=time.time)
-    version: str = "1.2.0"
+    version: str = "1.3.0"
+    build: str = ""
     handlers_loaded: list[str] = field(default_factory=list)
     # non-fatal problems found at boot; surfaced by /health and /doctor so a
     # degraded deployment explains itself instead of just misbehaving

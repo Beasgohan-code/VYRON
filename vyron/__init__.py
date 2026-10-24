@@ -7,7 +7,9 @@ from __future__ import annotations
 import logging
 import sys
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
+# Shown by /doctor and /health: the fastest way to answer "did my deploy land?"
+__build__ = "2026-10-24"
 __author__ = "Beasgohan-code"
 __repo__ = "https://github.com/Beasgohan-code/VYRON"
 

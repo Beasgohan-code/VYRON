@@ -234,6 +234,22 @@ If every row says `fail`, the answer is not a setting — it is the network:
 run behind a proxy (`PROXY=`), self-host Cobalt, or move the service to a region
 YouTube has not flagged.
 
+**The error message tells you which one it is.** yt-dlp's own sentence is kept
+and translated instead of being flattened into "nothing could be extracted":
+
+| You see | It means | Fix |
+|---|---|---|
+| *YouTube thinks this server is a bot* | the anti-bot wall, not the video | impersonation (`curl_cffi`), Cobalt, or cookies |
+| *the video is gone* | deleted or privated | pick another result |
+| *age-restricted* | needs a signed-in session | `COOKIES_FILE` |
+| *geo-blocked* | wrong country | `PROXY` in an allowed region |
+| *rate-limiting this server* | shared public mirrors are saturated | self-host Cobalt |
+| *cannot reach YouTube* | egress/DNS on the host | `PROXY` or a different region |
+
+`/doctor` prints the same sentence, and its first row is the **build**
+(`v1.3.0 · 2026-10-24`): if it still shows an older one, the deploy did not
+land — that is a different problem from a broken track.
+
 ### Two interfaces, and a fallback that always works
 
 VYRON ships both UIs. **Rich** uses the new Bot API rich cards (headings,
