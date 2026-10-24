@@ -73,6 +73,28 @@ def _lease_status() -> dict:
         return {}
 
 
+def _youtube_status() -> dict:
+    """Whether YouTube is refusing this server, and who is playing instead.
+
+    This is the one line an operator needs when the app "plays nothing": it
+    separates a walled IP (nothing to do with the code) from a broken resolver.
+    """
+    youtube = getattr(runtime, "youtube", None)
+    if youtube is None:
+        return {"ready": False}
+    try:
+        from vyron.core import alternate
+
+        return {
+            "ready": True,
+            "walled": bool(getattr(youtube, "walled", lambda: False)()),
+            "wall_seconds_left": int(getattr(youtube, "wall_seconds_left", lambda: 0)()),
+            "serving_from": alternate.describe(),
+        }
+    except Exception:  # pragma: no cover - never break a health probe
+        return {"ready": True}
+
+
 def _resolver_summary() -> dict:
     """Which tier produced a URL recently — no host names, no secrets."""
     try:
@@ -110,6 +132,7 @@ async def _health(_request: web.Request) -> web.Response:
             "streaming": runtime.streaming_ready,
             "playback": "disk" if settings.play_from_disk else "stream",
             "resolvers": _resolver_summary(),
+            "youtube": _youtube_status(),
             "downloads": {
                 "accelerator": accelerator.detect(),
                 "installed": [tool.name for tool in accelerator.available() if tool.present],

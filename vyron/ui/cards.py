@@ -1340,7 +1340,12 @@ def about_card() -> str:
             ("cloud", "deploy", "Docker · Render · Koyeb · any VPS"),
             ("download", "media", "voice chat · MP3 320 · MP4 720p · synced lyrics"),
             ("code", "music api", "<code>/v1</code> + <code>/vyron</code> on this same URL"),
-            ("users", "sources", "YouTube · YT Music · Audius · JioSaavn · SoundCloud · Bandcamp"),
+            (
+                "users",
+                "sources",
+                "YouTube · YT Music · JioSaavn · Audius · SoundCloud — if YouTube "
+                "blocks the server, the same song plays from a catalogue",
+            ),
         ]
     )
     return (
