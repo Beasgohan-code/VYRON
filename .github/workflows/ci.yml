@@ -87,16 +87,31 @@ jobs:
       - name: Byte-compile
         run: python -m compileall -q vyron main.py
 
+      # Failures as annotations: the log blob is not always reachable, but a
+      # check annotation is, and "which test" is the only thing anyone needs.
       - name: Tests
-        run: python -m pytest tests -q
+        run: |
+          set +e
+          python -m pytest tests -q --tb=line > /tmp/pytest.log 2>&1
+          status=$?
+          if [ $status -ne 0 ]; then
+            tail -40 /tmp/pytest.log
+            grep -E "^(FAILED|ERROR)" /tmp/pytest.log | head -10 | while IFS= read -r line; do
+              echo "::error title=pytest::${line}"
+            done
+            echo "::error title=pytest-summary::$(grep -E '^[0-9]+ (failed|passed)' /tmp/pytest.log | tail -1)"
+          else
+            tail -3 /tmp/pytest.log
+          fi
+          exit $status
 
       # Ordering bugs are invisible in a fixed order. Two shuffled runs per
       # job keep them honest without making CI slow or flaky-by-lottery.
       - name: Tests (shuffled)
         run: |
           pip install pytest-randomly
-          python -m pytest tests -q -p randomly --randomly-seed=12345
-          python -m pytest tests -q -p randomly --randomly-seed=98765
+          python -m pytest tests -q -p randomly --randomly-seed=12345 --tb=line
+          python -m pytest tests -q -p randomly --randomly-seed=98765 --tb=line
 
   docker:
     runs-on: ubuntu-latest
