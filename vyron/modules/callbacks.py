@@ -355,6 +355,56 @@ def register(client: Client) -> None:
                 await cq.answer(f"Could not play that: {truncate(str(exc), 60)}", show_alert=True)
             return
 
+        if action == "forget":
+            # Two taps, always: the confirm card carries `v:forget:yes`.
+            actor = cq.from_user.id if cq.from_user else 0
+            if not actor or runtime.storage is None:
+                await cq.answer("Nothing to delete", show_alert=True)
+                return
+            if arg != "yes":
+                await _show(
+                    client,
+                    cq,
+                    cards.confirm_card(
+                        "Delete your data?",
+                        "Your history, favourites and playlists are removed from "
+                        "this deployment. Group settings and the bot's counters stay.",
+                        confirm="v:forget:yes",
+                        danger=True,
+                        confirm_label="Yes, delete it",
+                    ),
+                )
+                await cq.answer()
+                return
+            try:
+                removed = await runtime.storage.forget_user(actor)
+            except Exception as exc:  # pragma: no cover - a broken backend
+                logger.warning("forget_user failed: %s", exc)
+                await cq.answer("Could not delete right now — try again.", show_alert=True)
+                return
+            total = sum(int(value) for value in removed.values())
+            from vyron.ui import blocks as B
+
+            await _show(
+                client,
+                cq,
+                B.head("Deleted", glyph="check")
+                + B.context(
+                    "Your history, favourites and playlists are gone from this "
+                    "deployment. Nothing else was touched."
+                )
+                + B.stat_pairs(
+                    [
+                        ("clock", "History", f"<b>{removed.get('history', 0)}</b>"),
+                        ("star", "Favourites", f"<b>{removed.get('favorites', 0)}</b>"),
+                        ("queue", "Playlists", f"<b>{removed.get('playlists', 0)}</b>"),
+                    ]
+                )
+                + B.actions(B.row(B.btn("Close", data="v:close", style="primary"))),
+            )
+            await cq.answer(f"Deleted {total} item(s)")
+            return
+
         if action == "start":
             # The home card, rebuildable from any other card ("Home" buttons).
             from vyron.modules.start import home_card

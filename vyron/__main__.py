@@ -81,6 +81,8 @@ COMMANDS = [
     ("fav", "save the current track"),
     ("savepl", "save the queue as a playlist"),
     ("similar", "tracks like this one"),
+    ("mydata", "download everything I have here"),
+    ("forgetme", "delete my history, favourites and playlists"),
     ("stats", "bot statistics"),
     ("help", "all commands"),
 ]

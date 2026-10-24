@@ -101,6 +101,15 @@ class Storage:
     async def delete_playlist(self, user_id: int, playlist_id: str) -> bool:
         return False
 
+    # privacy -----------------------------------------------------------
+    async def export_user(self, user_id: int) -> dict:
+        """Everything this person owns, as one JSON-ready document."""
+        return {}
+
+    async def forget_user(self, user_id: int) -> dict[str, int]:
+        """Delete this person's history, favourites and playlists."""
+        return {"history": 0, "favorites": 0, "playlists": 0}
+
 
 # ── in-memory / JSON backend ────────────────────────────────────────────────
 class JsonStorage(Storage):
@@ -262,6 +271,34 @@ class JsonStorage(Storage):
             if changed:
                 await self._flush()
             return changed
+
+    # privacy -----------------------------------------------------------
+    async def export_user(self, user_id: int) -> dict:
+        """Everything this person owns, as one JSON-ready document."""
+        key = str(int(user_id))
+        return {
+            "user_id": int(user_id),
+            "exported_at": int(time.time()),
+            "history": [dict(item) for item in self._data.get("history", {}).get(key, [])],
+            "favorites": [dict(item) for item in self._data.get("favorites", {}).get(key, [])],
+            "playlists": [dict(item) for item in self._data.get("playlists", {}).get(key, [])],
+            "chats": [],
+        }
+
+    async def forget_user(self, user_id: int) -> dict[str, int]:
+        """Delete this person's history, favourites and playlists."""
+        key = str(int(user_id))
+        async with self._lock:
+            counts = {
+                "history": len(self._data.get("history", {}).get(key, [])),
+                "favorites": len(self._data.get("favorites", {}).get(key, [])),
+                "playlists": len(self._data.get("playlists", {}).get(key, [])),
+            }
+            for bucket in ("history", "favorites", "playlists"):
+                self._data.setdefault(bucket, {}).pop(key, None)
+            if any(counts.values()):
+                await self._flush()
+        return counts
 
     async def api_keys(self, owner_id: int | None = None) -> list[dict]:
         keys = [dict(item) for item in self._data.get("api_keys", {}).values()]
@@ -743,6 +780,31 @@ class MongoStorage(Storage):
             return bool(result.modified_count or result.matched_count)
 
         return bool(await asyncio.to_thread(_update))
+
+    async def export_user(self, user_id: int) -> dict:
+        def _load() -> dict:
+            query = {"user_id": int(user_id)}
+            return {
+                "user_id": int(user_id),
+                "exported_at": int(time.time()),
+                "history": [{k: v for k, v in doc.items() if k != "_id"} for doc in self._db.history.find(query)],
+                "favorites": [{k: v for k, v in doc.items() if k != "_id"} for doc in self._db.favorites.find(query)],
+                "playlists": [{k: v for k, v in doc.items() if k != "_id"} for doc in self._db.playlists.find(query)],
+                "chats": [],
+            }
+
+        return await asyncio.to_thread(_load)
+
+    async def forget_user(self, user_id: int) -> dict[str, int]:
+        def _drop() -> dict[str, int]:
+            query = {"user_id": int(user_id)}
+            return {
+                "history": int(self._db.history.delete_many(query).deleted_count),
+                "favorites": int(self._db.favorites.delete_many(query).deleted_count),
+                "playlists": int(self._db.playlists.delete_many(query).deleted_count),
+            }
+
+        return await asyncio.to_thread(_drop)
 
     async def bump_api_key(self, key: str, *, uses: int = 1, size: int = 0, stamp: float | None = None) -> None:
         def _bump():

@@ -314,6 +314,8 @@ _HELP: dict[str, tuple[str, list[tuple[str, str]]]] = {
             ("/approve · /approved", "exempt trusted members"),
             ("/zombies [kick]", "clean up deleted accounts"),
             ("/report", "flag a message to the admins"),
+            ("/mydata", "download everything the bot knows about you"),
+            ("/forgetme", "delete your history, favourites and playlists"),
         ],
     ),
     "power": (

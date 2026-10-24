@@ -28,6 +28,7 @@ from vyron.modules import (
     musicapi_cmd,
     play,
     power,
+    privacy,
     queue_cmd,
     savedplaylists,
     settings_cmd,
@@ -69,6 +70,7 @@ MODULES = (
     assistant_tools,
     convenience,
     musicapi_cmd,
+    privacy,
 )
 
 
