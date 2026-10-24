@@ -1,0 +1,39 @@
+# Ruff configuration — the single source of truth for lint.
+#
+# CI runs `ruff check vyron tests main.py` with no flags, so whatever is here
+# is what a contributor sees locally. The selection is deliberately narrow:
+# correctness (F, E9), bug-prone patterns (B), a security pass (S) and the
+# asyncio traps that actually bite a streaming bot (ASYNC) — not style.
+target-version = "py311"
+line-length = 110
+
+[lint]
+select = ["F", "E9", "B", "S", "ASYNC"]
+
+ignore = [
+  # S110/S112: `except ...: pass`. Every one of these is a cleanup or an
+  # optional feature (closing a call, dropping a cache dir, a status card that
+  # may already be gone). A bot that crashes because its cleanup failed is a
+  # worse outcome than a silent best effort; the surrounding code logs what
+  # matters.
+  "S110",
+  "S112",
+  # S311: `random` is for shuffling queues and picking a mix, never a secret.
+  # Tokens and signatures use `secrets`/`hmac` — see `vyron/web/auth.py`.
+  "S311",
+  # ASYNC109: a `timeout` argument on a download/stream coroutine is a budget
+  # for the work, not a cancellation scope. `asyncio.timeout` at call sites
+  # buys nothing here.
+  "ASYNC109",
+  # S101: asserts are the point of a test suite.
+  "S101",
+]
+
+[lint.per-file-ignores]
+"tests/**" = [
+  "S105",   # fixture tokens are not secrets
+  "S106",   # ...and neither are fixture "passwords"
+  "S108",   # tmp_path is exactly what a test should use
+  "S603",   # tests spawn helper binaries on purpose
+  "S606",
+]

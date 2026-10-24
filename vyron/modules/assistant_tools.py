@@ -12,8 +12,10 @@
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
+from pathlib import Path
 
 from pyrogram import Client
 from pyrogram.types import Message
@@ -212,8 +214,7 @@ def register(client: Client) -> None:
         )
         try:
             path = await client.download_media(message.reply_to_message)
-            with open(path, "rb") as handle:
-                data = handle.read()
+            data = await asyncio.to_thread(Path(path).read_bytes)
             await runtime.assistant.set_profile_photo(photo=io.BytesIO(data))
         except Exception as exc:
             markup = B.note(f"{E('warn')} Upload failed: {rich.esc(truncate(str(exc), 140))}")

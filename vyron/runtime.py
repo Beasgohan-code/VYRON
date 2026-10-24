@@ -72,8 +72,11 @@ class Runtime:
         take a while, and a user who opened the Mini App during it deserves a
         slower answer rather than an error.
         """
+        # Polled, not an asyncio.Event: see the note on `_ready` above — an
+        # Event binds itself to the first loop that touches it, and this
+        # runtime outlives several of them (tests, restarts, tooling).
         deadline = time.monotonic() + max(0.0, timeout)
-        while not self._ready and time.monotonic() < deadline:
+        while not self._ready and time.monotonic() < deadline:  # noqa: ASYNC110
             await asyncio.sleep(min(0.1, max(0.01, deadline - time.monotonic())))
         return self.youtube is not None
 

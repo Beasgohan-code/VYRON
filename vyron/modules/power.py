@@ -10,6 +10,7 @@
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 import os
@@ -129,6 +130,27 @@ async def run_eval(code: str, client: Client, message: Message) -> str:
             + B.note(f"<code>{rich.esc(truncate(code, 200))}</code>")
             + f"<pre>{rich.esc(truncate(trace, 2600))}</pre>"
         )
+
+
+def _purge(target: Path) -> tuple[int, int]:
+    """Delete every file in *target*. Returns ``(count, bytes_freed)``."""
+    removed = 0
+    freed = 0
+    if not target.is_dir():
+        return removed, freed
+    for entry in target.glob("*"):
+        try:
+            if entry.is_file():
+                freed += entry.stat().st_size
+                entry.unlink()
+                removed += 1
+            elif entry.is_dir():
+                freed += _directory_size(entry)[0]
+                shutil.rmtree(entry, ignore_errors=True)
+                removed += 1
+        except OSError:
+            continue
+    return removed, freed
 
 
 def _directory_size(path: Path) -> tuple[int, int]:
@@ -479,21 +501,8 @@ def register(client: Client) -> None:
     @client.on_message(cmd(["clearcache"]) & owner)
     async def _clearcache(_: Client, message: Message) -> None:
         target = Path(settings.downloads_dir)
-        removed = 0
-        freed = 0
-        if target.is_dir():
-            for entry in target.glob("*"):
-                try:
-                    if entry.is_file():
-                        freed += entry.stat().st_size
-                        entry.unlink()
-                        removed += 1
-                    elif entry.is_dir():
-                        freed += _directory_size(entry)[0]
-                        shutil.rmtree(entry, ignore_errors=True)
-                        removed += 1
-                except Exception:
-                    continue
+        # Walking a downloads directory is real disk work; do it off the loop.
+        removed, freed = await asyncio.to_thread(_purge, target)
         if runtime.downloader and hasattr(runtime.downloader, "clear"):
             try:
                 runtime.downloader.clear()

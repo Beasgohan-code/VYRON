@@ -78,3 +78,18 @@ def _clean_resolver_health():
     reset()
     yield
     reset()
+
+
+@pytest.fixture(autouse=True)
+def _clean_token_epochs():
+    """Revocation epochs are cached process-wide; no test may inherit one.
+
+    Without this, a test that revokes leaves the cache at epoch 1 and the next
+    test's freshly minted token (epoch 0) looks revoked — a 401 that only
+    appears when the test order changes.
+    """
+    from vyron.core import tokens
+
+    tokens.reset_cache()
+    yield
+    tokens.reset_cache()

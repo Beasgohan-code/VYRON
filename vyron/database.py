@@ -410,7 +410,7 @@ def ephemeral_reason(settings: Settings) -> str:
         if os.environ.get(marker):
             return f"{marker} gives this container an ephemeral disk"
     data_dir = str(getattr(settings, "data_dir", "") or "")
-    if data_dir.startswith(("/tmp", "/var/tmp", "/dev/shm")):
+    if data_dir.startswith(("/tmp", "/var/tmp", "/dev/shm")):  # noqa: S108
         return f"DATA_DIR is {data_dir}, which is wiped on restart"
     return ""
 

@@ -234,7 +234,9 @@ def test_video_id_parsing():
     assert routes.video_id_from({"video_id": "abc12345678"}) == "abc12345678"
     assert routes.video_id_from({"url": "https://youtu.be/abc12345678"}) == "abc12345678"
     assert routes.video_id_from({"url": "https://www.youtube.com/watch?v=abc12345678&t=30"}) == "abc12345678"
-    with pytest.raises(Exception):
+    from vyron.api.errors import ApiError
+
+    with pytest.raises(ApiError):
         routes.video_id_from({"video_id": "not-an-id"})
 
 

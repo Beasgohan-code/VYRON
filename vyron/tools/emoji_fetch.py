@@ -64,7 +64,8 @@ async def run(args: argparse.Namespace) -> int:
             unmatched.append(f"{name} ({glyph})")
 
     out = Path(args.out)
-    out.write_text(json.dumps(mapping, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    payload = json.dumps(mapping, indent=2, ensure_ascii=False) + "\n"
+    await asyncio.to_thread(out.write_text, payload, encoding="utf-8")
 
     print(f"✔ {len(mapping)}/{len(GLYPHS)} glyphs matched from “{args.pack}”")
     print(f"✔ wrote {out}")

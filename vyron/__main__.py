@@ -502,8 +502,8 @@ def run() -> None:
                 runner = await health_module.start_degraded(settings.port, reason)
                 if runner is None:
                     return
-                while True:
-                    await asyncio.sleep(3600)
+                # Park forever without burning a wake-up every hour.
+                await asyncio.Event().wait()
 
             logger.error(
                 "serving a degraded /health on port %s so the platform keeps the "

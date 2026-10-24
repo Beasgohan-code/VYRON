@@ -17,6 +17,11 @@ from pyrogram import Client
 from vyron.config import settings
 
 
+def _append_env(line: str) -> None:
+    with open(".env", "a", encoding="utf-8") as handle:
+        handle.write(line)
+
+
 async def _prompt(label: str, default: str = "") -> str:
     suffix = f" [{default}]" if default else ""
     value = await asyncio.to_thread(input, f"{label}{suffix}: ")
@@ -61,8 +66,7 @@ async def main() -> None:
     print("═" * 60)
 
     if os.getenv("VYRON_WRITE_ENV") == "1":
-        with open(".env", "a", encoding="utf-8") as handle:
-            handle.write(f"\nSTRING_SESSION={session_string}\n")
+        await asyncio.to_thread(_append_env, f"\nSTRING_SESSION={session_string}\n")
         print("✔ appended to .env")
 
 

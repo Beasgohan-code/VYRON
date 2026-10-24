@@ -78,13 +78,25 @@ jobs:
       - name: Lint
         run: |
           pip install ruff
-          ruff check vyron tests main.py --select F,E9
+          ruff check vyron tests main.py
+
+      - name: Lint (extra rule sets reported, never blocking)
+        continue-on-error: true
+        run: pip install ruff && ruff check vyron --select RUF,PIE
 
       - name: Byte-compile
         run: python -m compileall -q vyron main.py
 
       - name: Tests
         run: python -m pytest tests -q
+
+      # Ordering bugs are invisible in a fixed order. Two shuffled runs per
+      # job keep them honest without making CI slow or flaky-by-lottery.
+      - name: Tests (shuffled)
+        run: |
+          pip install pytest-randomly
+          python -m pytest tests -q -p randomly --randomly-seed=12345
+          python -m pytest tests -q -p randomly --randomly-seed=98765
 
   docker:
     runs-on: ubuntu-latest

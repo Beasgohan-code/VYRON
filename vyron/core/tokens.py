@@ -69,17 +69,23 @@ async def revoke_all(owner_id: int) -> int:
 
 
 async def accepts(owner_id: int, token_epoch: int) -> bool:
-    """Does a token carrying *token_epoch* still verify for this owner?"""
-    return int(token_epoch or 0) == await epoch(owner_id)
+    """Does a token carrying *token_epoch* still verify for this owner?
+
+    A revocation only invalidates tokens minted *before* it. Equality would
+    also reject every token minted afterwards — which is how a revoke locked
+    the owner out of their own console until they rotated the bot token.
+    """
+    return int(token_epoch or 0) >= await epoch(owner_id)
+
+
+def reset_cache() -> None:
+    """Forget every cached epoch (tests, and after swapping storage)."""
+    _CACHE.clear()
 
 
 def forge_test_epoch(owner_id: int, value: int) -> None:
     """Test helper: pin the cached epoch without touching storage."""
     _CACHE[int(owner_id)] = (int(value), time.monotonic())
-
-
-def reset_cache() -> None:
-    _CACHE.clear()
 
 
 __all__ = ["accepts", "cached_epoch", "epoch", "forge_test_epoch", "reset_cache", "revoke_all"]

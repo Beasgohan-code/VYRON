@@ -224,4 +224,7 @@ def test_a_json_locale_file_is_validated_like_the_rest(tmp_path, monkeypatch):
         i18n.CATALOGS.pop("ta", None)
         i18n.NAMES.pop("ta", None)
         i18n._CACHE.clear()
-        i18n._load_json_locales()
+        # Do NOT reload here: `_LOCALES_DIR` is still the temporary directory
+        # (monkeypatch only restores it after the test), so reloading would
+        # put the partial catalog back and every later coverage test would
+        # see a language at 7.7%.

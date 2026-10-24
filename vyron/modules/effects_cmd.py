@@ -155,9 +155,9 @@ def register(client: Client) -> None:
 
         return _on, _off
 
-    for shortcut, effect_name in (("bass", "bass"), ("nightcore", "nightcore"), ("vaporwave", "vaporwave")):
+    for effect_name in ("bass", "nightcore", "vaporwave"):
         on_handler, off_handler = _make_shortcut(effect_name)
-        client.on_message(cmd(["{shortcut}"]))(on_handler)
+        client.on_message(cmd([effect_name]))(on_handler)
         client.on_message(cmd(["{shortcut}off"]))(off_handler)
 
 

@@ -275,7 +275,8 @@ def register(client: Client) -> None:
             ),
         )
         await asyncio.sleep(2)
-        os.execv(sys.executable, [sys.executable, "-m", "vyron"])
+        # Self-restart: the same interpreter running the same module.
+        os.execv(sys.executable, [sys.executable, "-m", "vyron"])  # noqa: S606
 
     @client.on_callback_query(filters.regex(r"^v:unblock:"))
     async def _unblock_cb(_: Client, cq) -> None:

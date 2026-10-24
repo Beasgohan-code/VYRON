@@ -38,6 +38,14 @@ _QUEUE_META = "queues"
 _SAVE_DELAY = 1.5
 
 
+def _is_local_file(url: str) -> bool:
+    """Is this a path we already downloaded? A stat, so stay synchronous."""
+    try:
+        return bool(url) and Path(url).is_file()
+    except OSError:
+        return False
+
+
 class StreamError(RuntimeError):
     """Playback could not be started; message is user-presentable."""
 
@@ -378,7 +386,7 @@ class Player:
             )
         state = self.queues.get(chat_id)
         url = ""
-        if track.source == "telegram" and Path(track.url).is_file():
+        if track.source == "telegram" and _is_local_file(track.url):
             # already downloaded locally — stream the file, not a URL
             url = track.url
         elif (

@@ -15,13 +15,28 @@ from vyron.runtime import runtime
 logger = logging.getLogger(__name__)
 
 
+def _build_stamp() -> str:
+    """The build stamp, even before `run()` has written it to the runtime.
+
+    `/health` and `/status` are read by operators *because* something is wrong,
+    often in a harness that never went through `vyron.__main__`. An empty
+    string there reads as "no build" instead of "unknown build".
+    """
+    try:
+        from vyron import __build__
+
+        return runtime.build or __build__
+    except Exception:  # pragma: no cover - defensive
+        return runtime.build or "dev"
+
+
 async def _index(_request: web.Request) -> web.Response:
     return web.json_response(
         {
             "ok": True,
             "service": "vyron",
             "version": runtime.version,
-            "build": runtime.build,
+            "build": _build_stamp(),
             "uptime": round(runtime.uptime, 1),
             "streaming": runtime.streaming_ready,
             "problems": list(runtime.boot_problems),
@@ -101,7 +116,7 @@ async def _health(_request: web.Request) -> web.Response:
             },
             "prefixes": prefixes,
             "version": runtime.version,
-            "build": runtime.build,
+            "build": _build_stamp(),
             "instance": _lease_status(),
             "database": _database(),
             "apis": {
@@ -180,7 +195,7 @@ async def start_degraded(port: int, reason: str, problems: list[str] | None = No
                 "ready": False,
                 "service": "vyron",
                 "version": runtime.version,
-            "build": runtime.build,
+            "build": _build_stamp(),
                 "reason": reason,
                 "problems": details,
                 "hint": "fix the env var(s) above in the dashboard, then redeploy",
@@ -193,7 +208,8 @@ async def start_degraded(port: int, reason: str, problems: list[str] | None = No
     runner = web.AppRunner(app, access_log=None)
     try:
         await runner.setup()
-        site = web.TCPSite(runner, host="0.0.0.0", port=port)
+        # All interfaces: Render/Koyeb route to the container, not to a loopback.
+        site = web.TCPSite(runner, host="0.0.0.0", port=port)  # noqa: S104
         await site.start()
         logger.error("degraded mode on 0.0.0.0:%s — %s", port, reason)
         return runner
@@ -209,7 +225,8 @@ async def start(port: int) -> web.AppRunner | None:
     runner = web.AppRunner(build_app(), access_log=None)
     try:
         await runner.setup()
-        site = web.TCPSite(runner, host="0.0.0.0", port=port)
+        # All interfaces: Render/Koyeb route to the container, not to a loopback.
+        site = web.TCPSite(runner, host="0.0.0.0", port=port)  # noqa: S104
         await site.start()
         logger.info("health server listening on 0.0.0.0:%s", port)
         return runner

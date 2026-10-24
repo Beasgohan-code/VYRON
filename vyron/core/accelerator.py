@@ -173,16 +173,16 @@ async def fetch(
         else:
             continue
         if ok:
-            if _sized(target, cap):
-                logger.info("downloaded %s with %s (%d bytes)", target.name, name, target.stat().st_size)
+            size = _harvest(target, cap)
+            if size:
+                logger.info("downloaded %s with %s (%d bytes)", target.name, name, size)
                 if on_progress:
-                    on_progress(target.stat().st_size, target.stat().st_size)
+                    on_progress(size, size)
                 return name
             errors.append(f"{name}: empty or oversized file")
-            target.unlink(missing_ok=True)
             continue
         errors.append(f"{name}: {why}")
-        target.unlink(missing_ok=True)
+        _discard(target)
         logger.info("%s could not fetch %s (%s)", name, target.name, why)
 
     # Last resort: the pure-Python client. One connection, but it never
@@ -195,11 +195,26 @@ async def fetch(
     return "aiohttp"
 
 
-def _sized(path: Path, cap: int) -> bool:
-    if not path.is_file():
-        return False
-    size = path.stat().st_size
-    return size > 0 and (not cap or size <= cap)
+def _harvest(path: Path, cap: int) -> int:
+    """Size of a finished download, or ``0`` after deleting an unusable one.
+
+    Deliberately synchronous: a `stat` and an `unlink` on a file we have just
+    written are syscalls, not I/O waits — a thread hop would cost more than
+    the calls themselves.
+    """
+    size = path.stat().st_size if path.is_file() else 0
+    if size <= 0 or (cap and size > cap):
+        _discard(path)
+        return 0
+    return size
+
+
+def _discard(path: Path) -> None:
+    """Best-effort removal of a partial file."""
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 async def _aiohttp(

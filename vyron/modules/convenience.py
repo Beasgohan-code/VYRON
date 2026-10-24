@@ -6,11 +6,13 @@
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import logging
 import os
 import time
+from pathlib import Path
 
 from pyrogram import Client
 from pyrogram.types import Message
@@ -132,8 +134,7 @@ def register(client: Client) -> None:
 
         path = await client.download_media(replied)
         try:
-            with open(path, "r", encoding="utf-8") as handle:
-                payload = json.load(handle)
+            payload = json.loads(await asyncio.to_thread(Path(path).read_text, "utf-8"))
         except Exception:
             await rich.send(
                 client,

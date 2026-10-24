@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from urllib.parse import parse_qsl
 
 TOKEN_TTL = 12 * 3600
-OWNER_TOKEN_PREFIX = "vown_"
+OWNER_TOKEN_PREFIX = "vown_"  # noqa: S105 - a token *prefix*, not a password
 OWNER_TOKEN_TTL = 30 * 86400  # long enough for scripts, short enough to rotate
 
 

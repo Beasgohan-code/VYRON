@@ -63,7 +63,8 @@ async def _warm_services(*, use_db: bool) -> None:
 async def main() -> None:
     parser = argparse.ArgumentParser(description="VYRON web app preview")
     parser.add_argument("--port", type=int, default=8080)
-    parser.add_argument("--host", default="0.0.0.0")
+    # 0.0.0.0 on purpose: the preview has to be reachable from the container.
+    parser.add_argument("--host", default="0.0.0.0")  # noqa: S104
     parser.add_argument(
         "--no-owner",
         action="store_true",

@@ -903,3 +903,37 @@ def test_stream_answers_429_with_retry_after(monkeypatch):
         assert payload["error"] == "rate_limited" and payload["retry_after"] == 42
 
     asyncio.run(_with_client(scenario))
+
+
+def test_a_revocation_only_kills_tokens_minted_before_it(tmp_path):
+    """Revoking must not lock the owner out of their own console.
+
+    The epoch is monotonic; a token minted after the bump carries a *higher*
+    epoch and has to keep working. Equality rejected it forever, which is how
+    a `/revoke` left the owner with a 401 on every fresh token.
+    """
+    from vyron.config import Settings
+    from vyron.core import tokens
+    from vyron.database import JsonStorage
+    from vyron.runtime import runtime
+
+    storage = JsonStorage(dataclasses.replace(Settings(), data_dir=tmp_path))
+    asyncio.run(storage.connect())
+    previous, runtime.storage = runtime.storage, storage
+    tokens.reset_cache()
+    try:
+        old = auth.make_owner_token(TOKEN, 424242, epoch=0)
+        assert asyncio.run(tokens.accepts(424242, 0)) is True
+
+        new_epoch = asyncio.run(tokens.revoke_all(424242))
+        assert new_epoch == 1
+        assert asyncio.run(tokens.accepts(424242, 0)) is False  # old token dead
+        assert asyncio.run(tokens.accepts(424242, 1)) is True   # fresh one alive
+
+        fresh = auth.make_owner_token(TOKEN, 424242, epoch=new_epoch)
+        assert fresh != old
+        assert auth.verify_owner_token(fresh, TOKEN, expected_epoch=1) is not None
+        assert auth.verify_owner_token(old, TOKEN, expected_epoch=1) is None
+    finally:
+        runtime.storage = previous
+        tokens.reset_cache()

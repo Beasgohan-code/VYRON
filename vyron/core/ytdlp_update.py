@@ -94,7 +94,8 @@ def upgrade(timeout: float = 300.0) -> tuple[bool, str]:
     """`pip install -U yt-dlp` in a child process. Returns (ok, message)."""
     command = [sys.executable, "-m", "pip", "install", "--no-cache-dir", "-U", "yt-dlp"]
     try:
-        result = subprocess.run(
+        # A fixed argv with no shell: nothing here comes from a message.
+        result = subprocess.run(  # noqa: S603
             command, capture_output=True, timeout=timeout, text=True, check=False
         )
     except Exception as exc:  # pragma: no cover - pip missing / no permission
