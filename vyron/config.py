@@ -82,9 +82,16 @@ class Settings:
     # No cookies? Impersonating a real browser is the next best thing: it fixes
     # the TLS/JA3 fingerprint YouTube uses to spot a datacenter IP.
     impersonate: str = field(default_factory=lambda: _env("IMPERSONATE", "chrome"))
+    # Which characters may start a command. `/` is always included; an empty
+    # entry enables prefix-less commands (`play x`) — opt-in only.
+    command_prefixes: str = field(default_factory=lambda: _env("COMMAND_PREFIXES"))
     # YouTube breaks old extractors first. Checking PyPI once a day and
     # upgrading in place is what keeps a deployment playing without cookies.
     ytdlp_autoupdate: bool = field(default_factory=lambda: _flag("YTDLP_AUTOUPDATE", True))
+    # auto → aria2 (16 connections) → curl → aiohttp. `none` stays pure Python.
+    download_accelerator: str = field(
+        default_factory=lambda: (_env("DOWNLOAD_ACCELERATOR", "auto") or "auto").lower()
+    )
     # yt-dlp is CPU-bound: two extractions at a time keeps the event loop (and
     # therefore the Mini App) responsive on a small host.
     extract_concurrency: int = field(default_factory=lambda: max(1, _int("EXTRACT_CONCURRENCY", 2)))

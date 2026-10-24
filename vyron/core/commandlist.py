@@ -5,6 +5,9 @@
 # runtime could say "these are the commands that exist", so an unknown-command
 # hint had to guess. Parsing the decorators once (cached) is exact, needs no
 # second list to keep in sync, and cannot drift from what pyrogram registered.
+#
+# Handlers register through `utils.commands.cmd(...)` (the multi-prefix filter)
+# rather than `filters.command(...)`, so both spellings are recognised here.
 from __future__ import annotations
 
 import ast
@@ -37,7 +40,9 @@ def command_names(root: str | None = None) -> tuple[str, ...]:
         except (SyntaxError, UnicodeDecodeError):  # pragma: no cover - defensive
             continue
         for node in ast.walk(tree):
-            if not (isinstance(node, ast.Call) and getattr(node.func, "attr", "") == "command"):
+            if not isinstance(node, ast.Call):
+                continue
+            if getattr(node.func, "attr", "") != "command" and getattr(node.func, "id", "") != "cmd":
                 continue
             found.update(name.strip().lower() for name in _names_from(node) if name.strip())
     return tuple(sorted(found))

@@ -6,7 +6,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from pyrogram import Client, filters
+from pyrogram import Client
 from pyrogram.errors import FloodWait
 from pyrogram.types import Message
 
@@ -19,10 +19,11 @@ from vyron.utils.helpers import command_args, is_private_chat
 
 logger = logging.getLogger(__name__)
 from vyron.utils.filters import owner
+from vyron.utils.commands import cmd
 
 
 def register(client: Client) -> None:
-    @client.on_message(filters.command(["stats"]))
+    @client.on_message(cmd(["stats"]))
     async def _stats(_: Client, message: Message) -> None:
         if not runtime.storage:
             return
@@ -31,6 +32,9 @@ def register(client: Client) -> None:
         active = len(runtime.player.active_chats()) if runtime.player else 0
         cache = runtime.downloader.cache_size() if runtime.downloader else 0
         api_stats = await get_music_api().stats()
+        from vyron.utils import sysinfo
+
+        system = await asyncio.to_thread(sysinfo.snapshot)
         links: dict[str, str] = {}
         sender = message.from_user.id if message.from_user else 0
         if sender and sender in settings.owners:
@@ -51,10 +55,11 @@ def register(client: Client) -> None:
             version=runtime.version,
             api=api_stats,
             links=links,
+            system=system,
         )
         await rich.send(client, message.chat.id, markup, reply_to=message.id)
 
-    @client.on_message(filters.command("active") & owner)
+    @client.on_message(cmd("active") & owner)
     async def _active(_: Client, message: Message) -> None:
         if not runtime.player:
             return
@@ -70,7 +75,7 @@ def register(client: Client) -> None:
             f"{E('live')} <b>Active sessions</b>\n<blockquote>{body}</blockquote>",
         )
 
-    @client.on_message(filters.command(["broadcast"]) & owner)
+    @client.on_message(cmd(["broadcast"]) & owner)
     async def _broadcast(_: Client, message: Message) -> None:
         text = command_args(message)
         target = message.reply_to_message
@@ -124,7 +129,7 @@ def register(client: Client) -> None:
                 cards.ok_card(f"<b>Broadcast finished</b> — {sent} sent, {failed} failed."),
             )
 
-    @client.on_message(filters.command(["leaveall"]) & owner)
+    @client.on_message(cmd(["leaveall"]) & owner)
     async def _leaveall(_: Client, message: Message) -> None:
         if not runtime.player:
             return
@@ -138,7 +143,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["emojireload", "reload"]) & owner)
+    @client.on_message(cmd(["emojireload", "reload"]) & owner)
     async def _reload(_: Client, message: Message) -> None:
         reload_pack()
         await rich.send(

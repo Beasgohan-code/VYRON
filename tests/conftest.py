@@ -23,6 +23,16 @@ import pytest  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
+def _clean_prefixes():
+    """Prefix overrides are process-wide; every test starts from the defaults."""
+    from vyron.utils import commands
+
+    commands.override(None)
+    yield
+    commands.override(None)
+
+
+@pytest.fixture(autouse=True)
 def _clean_resolver_health():
     """Resolver cooldowns are process-wide; no test may inherit another's."""
     from vyron.core.resolvers import reset

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import logging
 
-from pyrogram import Client, filters
+from pyrogram import Client
 from pyrogram.types import Message
 
 from vyron.core.queue import LoopMode
@@ -14,6 +14,7 @@ from vyron.ui import blocks as B
 from vyron.ui import cards, keyboards, nowplaying, rich
 from vyron.ui.theme import E
 from vyron.utils.helpers import command_args, parse_seek
+from vyron.utils.commands import cmd
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ def register(client: Client) -> None:
             return False
         return True
 
-    @client.on_message(filters.command(["pause"]))
+    @client.on_message(cmd(["pause"]))
     async def _pause(_: Client, message: Message) -> None:
         if not await _guard(message):
             return
@@ -39,7 +40,7 @@ def register(client: Client) -> None:
         else:
             await rich.send(message._client, chat_id, cards.warn_card("Nothing is playing right now."))
 
-    @client.on_message(filters.command(["resume"]))
+    @client.on_message(cmd(["resume"]))
     async def _resume(_: Client, message: Message) -> None:
         if not await _guard(message):
             return
@@ -48,7 +49,7 @@ def register(client: Client) -> None:
         else:
             await rich.send(message._client, message.chat.id, cards.warn_card("That track is not paused."))
 
-    @client.on_message(filters.command(["skip"]))
+    @client.on_message(cmd(["skip"]))
     async def _skip(_: Client, message: Message) -> None:
         if not await _guard(message):
             return
@@ -62,7 +63,7 @@ def register(client: Client) -> None:
         else:
             await rich.react(message, "⏭")
 
-    @client.on_message(filters.command(["stop"]))
+    @client.on_message(cmd(["stop"]))
     async def _stop(_: Client, message: Message) -> None:
         if not await _guard(message):
             return
@@ -73,7 +74,7 @@ def register(client: Client) -> None:
             cards.ok_card("<b>Stopped</b> — left the voice chat and cleared the queue."),
         )
 
-    @client.on_message(filters.command(["seek"]))
+    @client.on_message(cmd(["seek"]))
     async def _seek(_: Client, message: Message) -> None:
         if not await _guard(message):
             return
@@ -87,7 +88,7 @@ def register(client: Client) -> None:
         await _player().seek(message.chat.id, target)
         await rich.react(message, "👍")
 
-    @client.on_message(filters.command(["volume"]))
+    @client.on_message(cmd(["volume"]))
     async def _volume(_: Client, message: Message) -> None:
         if not await _guard(message):
             return
@@ -115,7 +116,7 @@ def register(client: Client) -> None:
             f"{E('volume')} <b>Volume set</b> <code>{volume}%</code>",
         )
 
-    @client.on_message(filters.command(["loop"]))
+    @client.on_message(cmd(["loop"]))
     async def _loop(_: Client, message: Message) -> None:
         if not await _guard(message):
             return
@@ -130,7 +131,7 @@ def register(client: Client) -> None:
             f"{E('loop')} <b>Loop</b> <code>{state.loop.label}</code>",
         )
 
-    @client.on_message(filters.command(["shuffle"]))
+    @client.on_message(cmd(["shuffle"]))
     async def _shuffle(_: Client, message: Message) -> None:
         if not await _guard(message):
             return
@@ -142,7 +143,7 @@ def register(client: Client) -> None:
             f"{E('shuffle')} <b>Shuffled</b> <code>{count}</code> queued tracks",
         )
 
-    @client.on_message(filters.command(["autoplay"]))
+    @client.on_message(cmd(["autoplay"]))
     async def _autoplay(_: Client, message: Message) -> None:
         if not await _guard(message):
             return
@@ -250,7 +251,7 @@ def register(client: Client) -> None:
             ),
         )
 
-    @client.on_message(filters.command(["np"]))
+    @client.on_message(cmd(["np"]))
     async def _np(_: Client, message: Message) -> None:
         if not await _guard(message):
             return

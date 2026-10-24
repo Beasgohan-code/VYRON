@@ -21,6 +21,7 @@ from vyron.ui.progress import human_size, human_time, truncate
 from vyron.ui.theme import E
 from vyron.utils.filters import owner
 from vyron.utils.helpers import command_args, display_name, is_owner
+from vyron.utils.commands import cmd
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ def _blocked_store():
 
 def register(client: Client) -> None:
     # ── blocklist ──────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["block", "gblock", "ublock"]) & owner)
+    @client.on_message(cmd(["block", "gblock", "ublock"]) & owner)
     async def _block(_: Client, message: Message) -> None:
         arg = command_args(message)
         target = None
@@ -54,7 +55,7 @@ def register(client: Client) -> None:
             B.row(B.btn(f"{E('cross')} Blocked {target}", data="v:noop", style="danger")),
         )
 
-    @client.on_message(filters.command(["unblock", "gunblock", "uunblock"]) & owner)
+    @client.on_message(cmd(["unblock"]) & owner)
     async def _unblock(_: Client, message: Message) -> None:
         arg = command_args(message)
         target = int(arg) if arg.lstrip("-").isdigit() else None
@@ -71,7 +72,7 @@ def register(client: Client) -> None:
             B.row(B.btn(f"{E('check')} Unblocked {target}", data="v:noop", style="success")),
         )
 
-    @client.on_message(filters.command(["blocklist"]))
+    @client.on_message(cmd(["blocklist"]))
     async def _blocklist(_: Client, message: Message) -> None:
         if not is_owner(message.from_user.id):
             return
@@ -127,7 +128,7 @@ def register(client: Client) -> None:
         )
 
     # ── active voice chats ─────────────────────────────────────────────────
-    @client.on_message(filters.command(["vc"]) & owner)
+    @client.on_message(cmd(["vc"]) & owner)
     async def _activevc(_: Client, message: Message) -> None:
         if not runtime.player:
             return
@@ -155,7 +156,7 @@ def register(client: Client) -> None:
         )
 
     # ── system stats ───────────────────────────────────────────────────────
-    @client.on_message(filters.command(["sysstats"]) & owner)
+    @client.on_message(cmd(["sysstats"]) & owner)
     async def _sysstats(_: Client, message: Message) -> None:
         uptime = runtime.uptime
         try:
@@ -190,7 +191,7 @@ def register(client: Client) -> None:
         await rich.send(client, message.chat.id, B.heading(f"{E('stats')} system", 3) + body)
 
     # ── leave every voice chat ─────────────────────────────────────────────
-    @client.on_message(filters.command(["leavevc"]) & owner)
+    @client.on_message(cmd(["leavevc"]) & owner)
     async def _leaveall(_: Client, message: Message) -> None:
         if not runtime.player:
             return
@@ -204,7 +205,7 @@ def register(client: Client) -> None:
         )
 
     # ── restart hint ───────────────────────────────────────────────────────
-    @client.on_message(filters.command(["restart"]) & owner)
+    @client.on_message(cmd(["restart"]) & owner)
     async def _restart(_: Client, message: Message) -> None:
         await rich.send(
             client,

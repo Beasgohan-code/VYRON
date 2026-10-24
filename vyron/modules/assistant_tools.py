@@ -15,7 +15,7 @@ from __future__ import annotations
 import io
 import logging
 
-from pyrogram import Client, filters
+from pyrogram import Client
 from pyrogram.types import Message
 
 from vyron.runtime import runtime
@@ -25,6 +25,7 @@ from vyron.ui.progress import truncate
 from vyron.ui.theme import E
 from vyron.utils.filters import owner
 from vyron.utils.helpers import command_args
+from vyron.utils.commands import cmd
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +97,7 @@ def engine_card() -> str:
 
 
 def register(client: Client) -> None:
-    @client.on_message(filters.command(["voice"]))
+    @client.on_message(cmd(["voice"]))
     async def _voice(_: Client, message: Message) -> None:
         await rich.send(client, message.chat.id, engine_card(), reply_to=message.id)
 
@@ -114,14 +115,14 @@ def register(client: Client) -> None:
             return False
         return True
 
-    @client.on_message(filters.command(["assistant"]) & owner)
+    @client.on_message(cmd(["assistant"]) & owner)
     async def _info(_: Client, message: Message) -> None:
         if not await _guard(message):
             return
         me = await runtime.assistant.get_me()
         await rich.send(client, message.chat.id, _card(me), reply_to=message.id)
 
-    @client.on_message(filters.command(["setname"]) & owner)
+    @client.on_message(cmd(["setname"]) & owner)
     async def _setname(_: Client, message: Message) -> None:
         if not await _guard(message):
             return
@@ -153,7 +154,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["setbio"]) & owner)
+    @client.on_message(cmd(["setbio"]) & owner)
     async def _setbio(_: Client, message: Message) -> None:
         if not await _guard(message):
             return
@@ -186,7 +187,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["setpfp"]) & owner)
+    @client.on_message(cmd(["setpfp"]) & owner)
     async def _setpfp(_: Client, message: Message) -> None:
         if not await _guard(message):
             return
@@ -231,7 +232,7 @@ def register(client: Client) -> None:
         else:
             await rich.send(client, message.chat.id, markup)
 
-    @client.on_message(filters.command(["delpfp"]) & owner)
+    @client.on_message(cmd(["delpfp"]) & owner)
     async def _delpfp(_: Client, message: Message) -> None:
         if not await _guard(message):
             return

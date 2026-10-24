@@ -7,7 +7,7 @@
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 
-from pyrogram import Client, filters
+from pyrogram import Client
 from pyrogram.types import Message
 
 from vyron.core import chatcfg, i18n
@@ -15,6 +15,7 @@ from vyron.ui import blocks as B
 from vyron.ui import rich
 from vyron.ui.theme import E, small_caps
 from vyron.utils.helpers import is_chat_admin, is_owner, is_private_chat
+from vyron.utils.commands import cmd
 
 
 def language_card(current: str, *, text_key: str = "lang.note") -> str:
@@ -75,7 +76,7 @@ async def can_change(client: Client, message: Message) -> bool:
 
 
 def register(client: Client) -> None:
-    @client.on_message(filters.command(["language", "lang"]))
+    @client.on_message(cmd(["language", "lang"]))
     async def _language(_: Client, message: Message) -> None:
         current = str(await chatcfg.get(message.chat.id, "lang", "") or "")
         await rich.send(

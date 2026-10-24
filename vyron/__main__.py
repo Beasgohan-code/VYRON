@@ -27,10 +27,8 @@ logger = logging.getLogger("vyron")
 COMMANDS = [
     ("start", "home screen"),
     ("play", "stream audio in voice chat"),
-    ("vplay", "stream video"),
     ("playforce", "clear the queue and play now"),
     ("song", "download an MP3"),
-    ("vsong", "download a video file"),
     ("search", "search and pick a result"),
     ("playlist", "queue a YouTube playlist"),
     ("pause", "pause playback"),

@@ -14,13 +14,14 @@ from __future__ import annotations
 
 import logging
 
-from pyrogram import Client, filters
+from pyrogram import Client
 from pyrogram.enums import ChatType
 from pyrogram.types import Message
 
 from vyron.core import chatcfg
 from vyron.ui import cards, rich
 from vyron.utils.helpers import is_chat_admin, is_owner
+from vyron.utils.commands import cmd
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +119,7 @@ async def clear_art(client: Client, message: Message) -> None:
 
 
 def register(client: Client) -> None:
-    @client.on_message(filters.command(["thumbnail"]))
+    @client.on_message(cmd(["thumbnail"]))
     async def _thumbnail(actor: Client, message: Message) -> None:
         argument = (message.command[1].lower() if len(message.command) > 1 else "").strip()
         file_id = photo_file_id(message)

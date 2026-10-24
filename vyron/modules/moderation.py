@@ -27,6 +27,7 @@ from vyron.utils.helpers import (
     is_owner,
     parse_duration,
 )
+from vyron.utils.commands import cmd
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +95,7 @@ async def _log(client: Client, text: str) -> None:
 
 def register(client: Client) -> None:
     # ── ban / unban / kick ─────────────────────────────────────────────────
-    @client.on_message(filters.command(["ban"]) & BOT_ADMIN)
+    @client.on_message(cmd(["ban"]) & BOT_ADMIN)
     async def _ban(_: Client, message: Message) -> None:
         if not await _require_admin(client, message):
             return
@@ -133,7 +134,7 @@ def register(client: Client) -> None:
                 reply_to=message.id,
             )
 
-    @client.on_message(filters.command("unban") & BOT_ADMIN)
+    @client.on_message(cmd("unban") & BOT_ADMIN)
     async def _unban(_: Client, message: Message) -> None:
         if not await _require_admin(client, message):
             return
@@ -170,7 +171,7 @@ def register(client: Client) -> None:
                 reply_to=message.id,
             )
 
-    @client.on_message(filters.command(["kick"]) & BOT_ADMIN)
+    @client.on_message(cmd(["kick"]) & BOT_ADMIN)
     async def _kick(_: Client, message: Message) -> None:
         if not await _require_admin(client, message):
             return
@@ -210,7 +211,7 @@ def register(client: Client) -> None:
             )
 
     # ── mute / unmute ──────────────────────────────────────────────────────
-    @client.on_message(filters.command(["mute", "tmute"]) & BOT_ADMIN)
+    @client.on_message(cmd(["mute", "tmute"]) & BOT_ADMIN)
     async def _mute(_: Client, message: Message) -> None:
         if not await _require_admin(client, message):
             return
@@ -266,7 +267,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command("unmute") & BOT_ADMIN)
+    @client.on_message(cmd("unmute") & BOT_ADMIN)
     async def _unmute(_: Client, message: Message) -> None:
         if not await _require_admin(client, message):
             return
@@ -313,7 +314,7 @@ def register(client: Client) -> None:
             )
 
     # ── promote / demote ───────────────────────────────────────────────────
-    @client.on_message(filters.command("promote") & BOT_ADMIN)
+    @client.on_message(cmd("promote") & BOT_ADMIN)
     async def _promote(_: Client, message: Message) -> None:
         if not await _require_admin(client, message):
             return
@@ -363,7 +364,7 @@ def register(client: Client) -> None:
                 reply_to=message.id,
             )
 
-    @client.on_message(filters.command("demote") & BOT_ADMIN)
+    @client.on_message(cmd("demote") & BOT_ADMIN)
     async def _demote(_: Client, message: Message) -> None:
         if not await _require_admin(client, message):
             return
@@ -414,7 +415,7 @@ def register(client: Client) -> None:
             )
 
     # ── warns ──────────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["warn", "dwarn"]) & BOT_ADMIN)
+    @client.on_message(cmd(["warn"]) & BOT_ADMIN)
     async def _warn(_: Client, message: Message) -> None:
         if not await _require_admin(client, message):
             return
@@ -455,7 +456,7 @@ def register(client: Client) -> None:
             )
         await rich.send(client, message.chat.id, markup)
 
-    @client.on_message(filters.command(["warns"]) & BOT_ADMIN)
+    @client.on_message(cmd(["warns"]) & BOT_ADMIN)
     async def _warns(_: Client, message: Message) -> None:
         target = await _resolve_id(client, _target(message))
         if not target:
@@ -478,7 +479,7 @@ def register(client: Client) -> None:
             B.table(["user", "warns", "limit"], [(f"<code>{target}</code>", str(count), str(limit))]),
         )
 
-    @client.on_message(filters.command(["resetwarns", "unwarn"]) & BOT_ADMIN)
+    @client.on_message(cmd(["resetwarns", "unwarn"]) & BOT_ADMIN)
     async def _resetwarns(_: Client, message: Message) -> None:
         if not await _require_admin(client, message):
             return
@@ -500,7 +501,7 @@ def register(client: Client) -> None:
             B.row(B.btn(f"{E('check')} Warnings cleared", data="v:noop", style="success")),
         )
 
-    @client.on_message(filters.command(["warnlimit"]) & BOT_ADMIN)
+    @client.on_message(cmd(["warnlimit"]) & BOT_ADMIN)
     async def _warnlimit(_: Client, message: Message) -> None:
         if not await _require_admin(client, message):
             return
@@ -530,7 +531,7 @@ def register(client: Client) -> None:
         )
 
     # ── purge / pin ────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["purge", "del"]) & BOT_ADMIN)
+    @client.on_message(cmd(["purge", "del"]) & BOT_ADMIN)
     async def _purge(_: Client, message: Message) -> None:
         if not await _require_admin(client, message):
             return
@@ -575,7 +576,7 @@ def register(client: Client) -> None:
                 except Exception:
                     pass
 
-    @client.on_message(filters.command("pin") & BOT_ADMIN)
+    @client.on_message(cmd("pin") & BOT_ADMIN)
     async def _pin(_: Client, message: Message) -> None:
         if not await _require_admin(client, message):
             return
@@ -596,7 +597,7 @@ def register(client: Client) -> None:
                 reply_to=message.id,
             )
 
-    @client.on_message(filters.command("unpin") & BOT_ADMIN)
+    @client.on_message(cmd("unpin") & BOT_ADMIN)
     async def _unpin(_: Client, message: Message) -> None:
         if not await _require_admin(client, message):
             return
@@ -617,7 +618,7 @@ def register(client: Client) -> None:
             )
 
     # ── welcome / goodbye ──────────────────────────────────────────────────
-    @client.on_message(filters.command("setwelcome") & BOT_ADMIN)
+    @client.on_message(cmd("setwelcome") & BOT_ADMIN)
     async def _setwelcome(_: Client, message: Message) -> None:
         if not await _require_admin(client, message):
             return
@@ -640,7 +641,7 @@ def register(client: Client) -> None:
             B.row(B.btn(f"{E('check')} Welcome message saved", data="v:noop", style="success")),
         )
 
-    @client.on_message(filters.command(["welcome"]) & BOT_ADMIN)
+    @client.on_message(cmd(["welcome"]) & BOT_ADMIN)
     async def _welcome_status(_: Client, message: Message) -> None:
         text = await chatcfg.get(message.chat.id, "welcome", "")
         await rich.send(
@@ -654,7 +655,7 @@ def register(client: Client) -> None:
             ),
         )
 
-    @client.on_message(filters.command("setgoodbye") & BOT_ADMIN)
+    @client.on_message(cmd("setgoodbye") & BOT_ADMIN)
     async def _setgoodbye(_: Client, message: Message) -> None:
         if not await _require_admin(client, message):
             return
@@ -711,7 +712,7 @@ def register(client: Client) -> None:
         await client.send_message(message.chat.id, text)
 
     # ── admin list ─────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["admins"]) & BOT_ADMIN)
+    @client.on_message(cmd(["admins"]) & BOT_ADMIN)
     async def _admins(_: Client, message: Message) -> None:
         try:
             rows = []

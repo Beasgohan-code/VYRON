@@ -3,7 +3,7 @@
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 
-from pyrogram import Client, filters
+from pyrogram import Client
 from pyrogram.types import Message
 
 from vyron.core import chatcfg, effects
@@ -12,6 +12,7 @@ from vyron.ui import blocks as B
 from vyron.ui import rich
 from vyron.ui.theme import E
 from vyron.utils.helpers import command_args, is_chat_admin, is_owner
+from vyron.utils.commands import cmd
 
 
 async def _active(chat_id: int) -> list[str]:
@@ -52,7 +53,7 @@ def panel(active: list[str]) -> str:
 
 
 def register(client: Client) -> None:
-    @client.on_message(filters.command(["effects"]))
+    @client.on_message(cmd(["effects"]))
     async def _effects(_: Client, message: Message) -> None:
         chat_id = message.chat.id
         state = await _active(chat_id)
@@ -121,7 +122,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["effecton"]))
+    @client.on_message(cmd(["effecton"]))
     async def _effect_on(_: Client, message: Message) -> None:
         name = effects.resolve([command_args(message).strip()])
         if not name:
@@ -130,7 +131,7 @@ def register(client: Client) -> None:
             return
         await _toggle_effect(message, name[0], True)
 
-    @client.on_message(filters.command(["effectoff"]))
+    @client.on_message(cmd(["effectoff"]))
     async def _effect_off(_: Client, message: Message) -> None:
         arg = command_args(message).strip()
         if not arg:
@@ -156,8 +157,8 @@ def register(client: Client) -> None:
 
     for shortcut, effect_name in (("bass", "bass"), ("nightcore", "nightcore"), ("vaporwave", "vaporwave")):
         on_handler, off_handler = _make_shortcut(effect_name)
-        client.on_message(filters.command(["{shortcut}"]))(on_handler)
-        client.on_message(filters.command(["{shortcut}off"]))(off_handler)
+        client.on_message(cmd(["{shortcut}"]))(on_handler)
+        client.on_message(cmd(["{shortcut}off"]))(off_handler)
 
 
 

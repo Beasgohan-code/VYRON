@@ -32,6 +32,7 @@ from vyron.ui.progress import human_size, human_time, truncate
 from vyron.ui.theme import E
 from vyron.utils.filters import owner
 from vyron.utils.helpers import command_args, display_name, is_chat_admin, is_private_chat
+from vyron.utils.commands import cmd
 
 logger = logging.getLogger(__name__)
 
@@ -173,7 +174,7 @@ def _target_user(message: Message) -> int | None:
 def register(client: Client) -> None:
     # ── vote skip ──────────────────────────────────────────────────────────
     @client.on_message(
-        filters.command(["voteskip", "setvoteskip"]) & filters.group
+        cmd(["voteskip", "setvoteskip"]) & filters.group
     )
     async def _voteskip(_: Client, message: Message) -> None:
         chat_id = message.chat.id
@@ -294,7 +295,7 @@ def register(client: Client) -> None:
         )
 
     # ── /eval ──────────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["eval"]) & owner)
+    @client.on_message(cmd(["eval"]) & owner)
     async def _eval(_: Client, message: Message) -> None:
         code = command_args(message)
         if code.startswith("```"):
@@ -334,7 +335,7 @@ def register(client: Client) -> None:
         await rich.send(client, message.chat.id, card, reply_to=message.id)
 
     # ── /vars ──────────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["vars"]) & owner)
+    @client.on_message(cmd(["vars"]) & owner)
     async def _vars(_: Client, message: Message) -> None:
         rows = var_rows()
         card = (
@@ -359,7 +360,7 @@ def register(client: Client) -> None:
         await rich.send(client, message.chat.id, card, reply_to=message.id)
 
     # ── /dbstats ───────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["dbstats"]) & owner)
+    @client.on_message(cmd(["dbstats"]) & owner)
     async def _dbstats(_: Client, message: Message) -> None:
         storage = runtime.storage
         if storage is None:
@@ -413,7 +414,7 @@ def register(client: Client) -> None:
         )
 
     # ── /dbcleanup ─────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["dbcleanup"]) & owner)
+    @client.on_message(cmd(["dbcleanup"]) & owner)
     async def _dbcleanup(_: Client, message: Message) -> None:
         storage = runtime.storage
         if storage is None:
@@ -457,7 +458,7 @@ def register(client: Client) -> None:
             await rich.send(client, message.chat.id, markup)
 
     # ── /clearcache ────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["clearcache"]) & owner)
+    @client.on_message(cmd(["clearcache"]) & owner)
     async def _clearcache(_: Client, message: Message) -> None:
         target = Path(settings.downloads_dir)
         removed = 0
@@ -494,7 +495,7 @@ def register(client: Client) -> None:
         )
 
     # ── runtime sudoers ────────────────────────────────────────────────────
-    @client.on_message(filters.command(["addsudo"]) & owner)
+    @client.on_message(cmd(["addsudo"]) & owner)
     async def _addsudo(_: Client, message: Message) -> None:
         target = _target_user(message)
         if target is None:
@@ -517,7 +518,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["delsudo"]) & owner)
+    @client.on_message(cmd(["delsudo"]) & owner)
     async def _delsudo(_: Client, message: Message) -> None:
         target = _target_user(message)
         if target is None:
@@ -547,7 +548,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["sudolist"]) & owner)
+    @client.on_message(cmd(["sudolist"]) & owner)
     async def _sudolist(_: Client, message: Message) -> None:
         env_ids = {int(i) for i in settings.sudo_users}
         runtime_ids = acl.extra_ids()

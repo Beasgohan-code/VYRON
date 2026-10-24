@@ -25,6 +25,7 @@ from vyron.ui import blocks as B
 from vyron.ui import cards, keyboards, rich
 from vyron.ui.theme import E
 from vyron.utils.helpers import is_owner
+from vyron.utils.commands import cmd
 
 logger = logging.getLogger(__name__)
 
@@ -201,7 +202,6 @@ async def check(client: Client, chat_id: int) -> str:
 
 
 def register(client: Client) -> None:
-    from pyrogram import filters
 
     async def _owner_only(message: Message) -> bool:
         user = message.from_user
@@ -215,7 +215,7 @@ def register(client: Client) -> None:
         )
         return False
 
-    @client.on_message(filters.command(["uistyle"]))
+    @client.on_message(cmd(["uistyle"]))
     async def _uistyle(_: Client, message: Message) -> None:
         if not await _owner_only(message):
             return
@@ -249,7 +249,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["uicheck"]))
+    @client.on_message(cmd(["uicheck"]))
     async def _uicheck(_: Client, message: Message) -> None:
         if not await _owner_only(message):
             return

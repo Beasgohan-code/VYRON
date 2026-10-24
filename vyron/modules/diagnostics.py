@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 
-from pyrogram import Client, filters
+from pyrogram import Client
 from pyrogram.types import Message
 
 from vyron.config import settings
@@ -18,13 +18,14 @@ from vyron.ui import rich
 from vyron.ui.theme import E
 from vyron.utils.filters import owner
 from vyron.utils.helpers import display_name
+from vyron.utils.commands import cmd
 
 logger = logging.getLogger(__name__)
 
 
 def register(client: Client) -> None:
     # ── /sudoers ───────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["sudoers"]) & owner)
+    @client.on_message(cmd(["sudoers"]) & owner)
     async def _sudoers(_: Client, message: Message) -> None:
         ids = sorted(settings.owners)
         names: dict[int, str] = {}

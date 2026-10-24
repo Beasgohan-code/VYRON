@@ -21,7 +21,7 @@ import asyncio
 import logging
 import time
 
-from pyrogram import Client, filters
+from pyrogram import Client
 from pyrogram.types import Message
 
 from vyron import __build__, __version__
@@ -31,6 +31,7 @@ from vyron.ui import blocks as B
 from vyron.ui import rich
 from vyron.ui.theme import E
 from vyron.utils.helpers import is_owner
+from vyron.utils.commands import cmd
 
 logger = logging.getLogger(__name__)
 
@@ -150,7 +151,7 @@ def _engine_state() -> tuple[bool, str]:
 
 
 def register(client: Client) -> None:
-    @client.on_message(filters.command(["doctor"]))
+    @client.on_message(cmd(["doctor"]))
     async def _doctor(_: Client, message: Message) -> None:
         user = message.from_user
         if not (user and is_owner(user.id)):
@@ -232,6 +233,18 @@ def register(client: Client) -> None:
             rows.append(_row(f"{E('download')} mirror tier", None, "STREAM_FALLBACK=off (yt-dlp only)"))
 
         rows.append(_impersonate_row())
+        from vyron.core import accelerator
+
+        rows.append(
+            _row(
+                f"{E('download')} accelerator",
+                accelerator.detect() != "aiohttp" or None,
+                accelerator.describe(),
+            )
+        )
+        from vyron.utils import commands
+
+        rows.append(_row(f"{E('spark')} prefixes", True, commands.describe()))
         resolver_row = _resolver_row()
         if resolver_row:
             rows.append(resolver_row)

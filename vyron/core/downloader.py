@@ -107,6 +107,47 @@ class Downloader:
             self._locks[key] = lock
         return lock
 
+    # ── accelerators ───────────────────────────────────────────────────────
+    def accelerator_order(self) -> tuple[str, ...]:
+        """`DOWNLOAD_ACCELERATOR` → the tools to try, in order."""
+        preference = (getattr(self.settings, "download_accelerator", "") or "auto").lower()
+        if preference in {"none", "off", "aiohttp", "builtin"}:
+            return ()
+        if preference in {"aria2", "aria2c"}:
+            return ("aria2", "curl")
+        if preference == "curl":
+            return ("curl", "aria2")
+        return ("aria2", "curl")
+
+    def _external_downloader(self) -> dict:
+        """yt-dlp's own hand-off: aria2c gets the media, yt-dlp gets the info.
+
+        This is what makes a `.m4a` land in two seconds instead of twenty, and
+        unlike a post-download accelerator it works for formats that need the
+        extractor to authorise each fragment.
+        """
+        import shutil
+
+        preference = (getattr(self.settings, "download_accelerator", "") or "auto").lower()
+        if preference not in {"auto", "aria2", "aria2c"}:
+            return {}
+        binary = shutil.which("aria2c")
+        if not binary:
+            return {}
+        return {
+            "external_downloader": {"default": binary},
+            "external_downloader_args": {
+                "default": [
+                    "-x", "16",
+                    "-s", "16",
+                    "-k", "1M",
+                    "--min-split-size=1M",
+                    "--file-allocation=none",
+                    "--console-log-level=error",
+                ]
+            },
+        }
+
     # ── yt-dlp options ─────────────────────────────────────────────────────
     def _base_opts(self) -> dict:
         opts: dict = {
@@ -137,6 +178,7 @@ class Downloader:
                 opts.update(YouTube._parse_ytdlp_args(self.settings.ytdlp_args))
             except Exception:  # pragma: no cover - operator args are advisory
                 pass
+        opts.update(self._external_downloader())
         return opts
 
     def _attempts(self) -> list[tuple[str, dict]]:
@@ -321,25 +363,33 @@ class Downloader:
         headers: dict[str, str],
         on_progress: ProgressHook | None,
     ) -> None:
-        """Stream *url* to *target* with progress, enforcing the size cap."""
-        import aiohttp
+        """Fetch *url* into *target* with aria2 → curl → aiohttp.
+
+        A signed media URL is a plain HTTP file, so the accelerator that wins is
+        simply the fastest one installed: aria2 pulls it over 16 connections,
+        curl over one ranged transfer, and the pure-Python client covers images
+        that have neither binary.
+        """
+        from vyron.core import accelerator
 
         cap = self.settings.max_download_mb * 1024 * 1024
-        timeout = aiohttp.ClientTimeout(total=None, sock_read=45)
-        written = 0
-        async with aiohttp.ClientSession(timeout=timeout, headers=headers or None) as session:
-            async with session.get(url) as response:
-                if response.status != 200:
-                    raise DownloadError(f"the mirror answered HTTP {response.status}")
-                total = int(response.headers.get("Content-Length") or 0)
-                with target.open("wb") as handle:
-                    async for chunk in response.content.iter_chunked(256 * 1024):
-                        written += len(chunk)
-                        if written > cap:
-                            raise DownloadError("that file is larger than the allowed size")
-                        handle.write(chunk)
-                        if on_progress and total:
-                            on_progress(min(0.8, 0.1 + 0.7 * written / total), "downloading")
+
+        def progress(written: int, total: int) -> None:
+            if on_progress and total:
+                on_progress(min(0.8, 0.1 + 0.7 * written / total), "downloading")
+
+        try:
+            await accelerator.fetch(
+                url,
+                target,
+                headers=headers or {},
+                timeout=900,
+                cap=cap,
+                on_progress=progress,
+                order=self.accelerator_order(),
+            )
+        except Exception as exc:
+            raise DownloadError(f"could not fetch the file ({exc})") from exc
 
     # ── public API ─────────────────────────────────────────────────────────
     async def fetch(

@@ -21,6 +21,7 @@ from vyron.ui import rich
 from vyron.ui.progress import fmt_duration, human_time, truncate
 from vyron.ui.theme import E
 from vyron.utils.helpers import command_args
+from vyron.utils.commands import cmd
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ def _picker(query: str, tracks, prefix: str = "v:p") -> str:
 
 def register(client: Client) -> None:
     # ── /suggest ───────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["similar"]))
+    @client.on_message(cmd(["similar"]))
     async def _suggest(_: Client, message: Message) -> None:
         if not runtime.youtube:
             return
@@ -127,7 +128,7 @@ def register(client: Client) -> None:
         await rich.edit(client, message.chat.id, status.id, markup)
 
     # ── /next <query> ──────────────────────────────────────────────────────
-    @client.on_message(filters.command(["playnext"]) & filters.regex(r"^/\w+\s+\S"))
+    @client.on_message(cmd(["playnext"]) & filters.regex(r"^/\w+\s+\S"))
     async def _play_next(_: Client, message: Message) -> None:
         if not runtime.player or not runtime.youtube:
             return
@@ -173,7 +174,7 @@ def register(client: Client) -> None:
             )
 
     # ── /queueinfo ─────────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["queueinfo"]))
+    @client.on_message(cmd(["queueinfo"]))
     async def _queueinfo(_: Client, message: Message) -> None:
         if not runtime.player:
             return

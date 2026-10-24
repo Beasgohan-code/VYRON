@@ -28,6 +28,7 @@ from vyron.ui import cards, rich
 from vyron.ui.theme import E
 from vyron.utils.filters import owner
 from vyron.utils.helpers import is_owner
+from vyron.utils.commands import cmd
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +123,7 @@ def logger_card() -> str:
 
 
 def register(client: Client) -> None:
-    @client.on_message(filters.command("logger") & owner)
+    @client.on_message(cmd("logger") & owner)
     async def _logger(_: Client, message: Message) -> None:
         arg = (message.command[1].lower() if len(message.command) > 1 else "").strip()
         if arg in {"on", "enable", "start"}:
@@ -156,7 +157,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command("logs") & owner)
+    @client.on_message(cmd("logs") & owner)
     async def _logs(_: Client, message: Message) -> None:
         if message.chat.type != ChatType.PRIVATE:
             await rich.send(

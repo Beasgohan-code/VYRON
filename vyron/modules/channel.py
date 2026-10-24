@@ -7,18 +7,20 @@ from __future__ import annotations
 
 import logging
 
-from pyrogram import Client, filters
+from pyrogram import Client
 from pyrogram.enums import ChatMemberStatus, ChatType
 from pyrogram.types import Message
 
-from vyron.core import chatcfg
+from vyron.core import chatcfg, effects
 from vyron.core.search import MediaError, looks_like_url
 from vyron.runtime import runtime
 from vyron.ui import blocks as B
 from vyron.ui import rich
 from vyron.ui.progress import truncate
 from vyron.ui.theme import E
-from vyron.utils.helpers import command_args, display_name, is_chat_admin, is_owner
+from vyron.ui.progress import human_time
+from vyron.utils.helpers import command_args, display_name, is_chat_admin, is_owner, parse_seek
+from vyron.utils.commands import cmd
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +86,7 @@ async def _target_chat(client: Client, message: Message) -> int | None:
 
 
 def register(client: Client) -> None:
-    @client.on_message(filters.command(["cplay"]))
+    @client.on_message(cmd(["cplay"]))
     async def _cplay(_: Client, message: Message) -> None:
         if not runtime.player:
             return
@@ -131,7 +133,7 @@ def register(client: Client) -> None:
             else:
                 results = await runtime.youtube.search(query, limit=1, requester=requester)
                 track = results[0]
-            await runtime.player.play_track(target, track, video=track.is_video)
+            await runtime.player.play_track(target, track, video=False)
             markup = (
                 f"{E('live')} <b>Channel stream started</b>\n"
                 f"<blockquote>{E('note')} {rich.esc(truncate(track.title, 54))}\n"
@@ -147,7 +149,7 @@ def register(client: Client) -> None:
             await rich.edit(client, message.chat.id, status.id, markup)
 
     # ── /cplayset — pin the channel a group should stream into ────────────
-    @client.on_message(filters.command(["cplayset"]))
+    @client.on_message(cmd(["cplayset"]))
     async def _cplayset(_: Client, message: Message) -> None:
         chat_id = message.chat.id
         user = message.from_user
@@ -209,7 +211,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["cstop"]))
+    @client.on_message(cmd(["cstop"]))
     async def _cstop(_: Client, message: Message) -> None:
         if not runtime.player:
             return
@@ -224,7 +226,7 @@ def register(client: Client) -> None:
             B.row(B.btn(f"{E('check')} Channel stream stopped", data="v:noop", style="success")),
         )
     # ── /addchannel · /delchannel — the validated link ────────────────────
-    @client.on_message(filters.command(["addchannel"]))
+    @client.on_message(cmd(["addchannel"]))
     async def _addchannel(_: Client, message: Message) -> None:
         """Bind this group to a channel, with the checks that make it safe.
 
@@ -371,7 +373,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["delchannel"]))
+    @client.on_message(cmd(["delchannel"]))
     async def _delchannel(_: Client, message: Message) -> None:
         chat_id = message.chat.id
         user = message.from_user
@@ -424,11 +426,11 @@ def register(client: Client) -> None:
         )
         return False
 
-    @client.on_message(filters.command(["cplayforce", "cvplayforce"]))
+    @client.on_message(cmd(["cplayforce"]))
     async def _cplayforce(_: Client, message: Message) -> None:
         if not runtime.player:
             return
-        video = message.command[0].lower() in {"cvplayforce", "cvpf"}
+        video = False
         target = await _channel_target(message)
         if target is None or not await _admin_or_warn(message):
             return
@@ -469,7 +471,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["cpause", "cresume", "cskip", "cclear", "cautoplay"]))
+    @client.on_message(cmd(["cpause", "cresume", "cskip", "cclear", "cautoplay"]))
     async def _cctl(_: Client, message: Message) -> None:
         if not runtime.player:
             return
@@ -510,7 +512,160 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["cthumbnail"]))
+    @client.on_message(cmd(["cseek"]))
+    async def _cseek(_: Client, message: Message) -> None:
+        """Seek the channel's stream — same syntax as `/seek` (`+30`, `1:20`)."""
+        if not runtime.player:
+            return
+        target = await _channel_target(message)
+        if target is None or not await _admin_or_warn(message):
+            return
+        state = runtime.player.queues.get(target)
+        if not state or not state.current:
+            await rich.send(
+                client,
+                message.chat.id,
+                B.note(f"{E('info')} Nothing is playing in the channel."),
+                reply_to=message.id,
+            )
+            return
+        arg = command_args(message) or "+15"
+        seconds = parse_seek(arg, state.elapsed(), state.current.duration or 0)
+        await runtime.player.seek(target, seconds)
+        await rich.react(message, "👍")
+        await rich.send(
+            client,
+            message.chat.id,
+            B.note(
+                f"{E('clock')} <b>Channel seek</b> · {human_time(seconds)}"
+                f" / {human_time(state.current.duration or 0)}"
+            ),
+            reply_to=message.id,
+        )
+
+    @client.on_message(cmd(["cvolume"]))
+    async def _cvolume(_: Client, message: Message) -> None:
+        """Channel volume — `/cvolume 120`, `/cvolume +10`, `/cvolume -10`."""
+        if not runtime.player:
+            return
+        target = await _channel_target(message)
+        if target is None or not await _admin_or_warn(message):
+            return
+        state = runtime.player.queues.get(target)
+        arg = command_args(message).strip()
+        if not arg:
+            current = state.volume if state else 100
+            await rich.send(
+                client,
+                message.chat.id,
+                B.note(f"{E('volume')} <b>Channel volume</b> <code>{current}%</code>"),
+                reply_to=message.id,
+            )
+            return
+        base = state.volume if state else 100
+        if arg[0] in "+-" and arg[1:].isdigit():
+            value = base + (int(arg[1:]) if arg[0] == "+" else -int(arg[1:]))
+        elif arg.isdigit():
+            value = int(arg)
+        else:
+            await rich.send(
+                client,
+                message.chat.id,
+                B.note(f"{E('warn')} Use a number between 1 and 200."),
+                reply_to=message.id,
+            )
+            return
+        volume = await runtime.player.set_volume(target, value)
+        await rich.react(message, "👍")
+        await rich.send(
+            client,
+            message.chat.id,
+            B.note(f"{E('volume')} <b>Channel volume</b> <code>{volume}%</code>"),
+            reply_to=message.id,
+        )
+
+    async def _channel_effects(target: int) -> list[str]:
+        return effects.resolve(await chatcfg.get(target, "effects", []) or [])
+
+    async def _channel_effect(message: Message, *, enable: bool) -> None:
+        if not runtime.player:
+            return
+        target = await _channel_target(message)
+        if target is None or not await _admin_or_warn(message):
+            return
+        arg = command_args(message).strip()
+        current = await _channel_effects(target)
+        if not arg:
+            if not enable:  # `/ceffectoff` with no name clears everything
+                updated: list[str] = []
+            else:
+                names = ", ".join(effects.EFFECTS)
+                await rich.send(
+                    client,
+                    message.chat.id,
+                    B.note(f"{E('info')} Pick one: {names}"),
+                    reply_to=message.id,
+                )
+                return
+        else:
+            name = effects.resolve([arg])
+            if not name:
+                await rich.send(
+                    client,
+                    message.chat.id,
+                    B.note(f"{E('warn')} Unknown effect."),
+                    reply_to=message.id,
+                )
+                return
+            if enable and name[0] not in current:
+                updated = effects.resolve([*current, name[0]])
+            else:
+                updated = [item for item in current if item != name[0]]
+        await chatcfg.set(target, "effects", updated)
+        state = runtime.player.queues.get(target)
+        if state:
+            state.effects = updated
+            state.touch()
+        await rich.send(
+            client,
+            message.chat.id,
+            B.note(
+                f"{E('spark')} <b>Channel effects</b> · {effects.labels(updated)}&nbsp;"
+                f"<i>(applies from the next track)</i>"
+            ),
+            reply_to=message.id,
+        )
+
+    @client.on_message(cmd(["ceffecton"]))
+    async def _ceffect_on(_: Client, message: Message) -> None:
+        await _channel_effect(message, enable=True)
+
+    @client.on_message(cmd(["ceffectoff"]))
+    async def _ceffect_off(_: Client, message: Message) -> None:
+        await _channel_effect(message, enable=False)
+
+    @client.on_message(cmd(["ceffects"]))
+    async def _ceffects(_: Client, message: Message) -> None:
+        target = await _channel_target(message)
+        if target is None:
+            return
+        active = await _channel_effects(target)
+        available = ", ".join(effects.EFFECTS)
+        await rich.send(
+            client,
+            message.chat.id,
+            B.heading(f"{E('spark')} channel effects", 3)
+            + B.kv(
+                [
+                    (f"{E('globe')} channel", f"<code>{target}</code>"),
+                    (f"{E('bolt')} active", f"<b>{effects.labels(active)}</b>"),
+                    (f"{E('note')} available", f"<i>{available}</i>"),
+                ]
+            ),
+            reply_to=message.id,
+        )
+
+    @client.on_message(cmd(["cthumbnail"]))
     async def _cthumbnail(_: Client, message: Message) -> None:
         """The channel's own poster artwork, same rules as `/thumbnail`."""
         from vyron.modules import thumbnail_cmd

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 
-from pyrogram import Client, filters
+from pyrogram import Client
 from pyrogram.types import Message
 
 from vyron.core import playlists as store
@@ -23,6 +23,7 @@ from vyron.ui import keyboards, rich
 from vyron.ui.progress import fmt_duration, truncate
 from vyron.ui.theme import E
 from vyron.utils.helpers import command_args
+from vyron.utils.commands import cmd
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ def _uid(message: Message) -> int:
 
 def register(client: Client) -> None:
     # ── /playlists ─────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["playlists"]))
+    @client.on_message(cmd(["playlists"]))
     async def _playlists(_: Client, message: Message) -> None:
         items = await store.list_playlists(_uid(message))
         if not items:
@@ -63,7 +64,7 @@ def register(client: Client) -> None:
         )
 
     # ── /savepl ────────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["savepl"]))
+    @client.on_message(cmd(["savepl"]))
     async def _save(_: Client, message: Message) -> None:
         if not runtime.storage:
             return
@@ -117,7 +118,7 @@ def register(client: Client) -> None:
         )
 
     # ── /pl <name>──────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["pplay"]))
+    @client.on_message(cmd(["pplay"]))
     async def _play_saved(_: Client, message: Message) -> None:
         name = command_args(message)
         if not name:
@@ -160,7 +161,7 @@ def register(client: Client) -> None:
         )
 
     # ── /pldel ─────────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["pdelete"]))
+    @client.on_message(cmd(["pdelete"]))
     async def _delete(_: Client, message: Message) -> None:
         name = command_args(message)
         playlist = await store.find(_uid(message), name) if name else None
@@ -180,7 +181,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
     # ── /pcreate · /padd · /pview · /premove (Shizu command names) ─────────
-    @client.on_message(filters.command(["pcreate"]))
+    @client.on_message(cmd(["pcreate"]))
     async def _pcreate(_: Client, message: Message) -> None:
         name = store.clean_name(command_args(message) or "")
         if not name:
@@ -216,7 +217,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["padd"]))
+    @client.on_message(cmd(["padd"]))
     async def _padd(_: Client, message: Message) -> None:
         """Add the current track (or a replied audio) to a named playlist."""
         name = store.clean_name(command_args(message) or "")
@@ -261,7 +262,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["pview"]))
+    @client.on_message(cmd(["pview"]))
     async def _pview(_: Client, message: Message) -> None:
         name = store.clean_name(command_args(message) or "")
         playlist = await store.find(_uid(message), name) if name else None
@@ -304,7 +305,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["premove"]))
+    @client.on_message(cmd(["premove"]))
     async def _premove(_: Client, message: Message) -> None:
         """``/premove <name> <index>`` — the index shown by /pview."""
         args = command_args(message).split()

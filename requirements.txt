@@ -19,6 +19,7 @@ richgram>=0.2.0
 
 # ─── Media ──────────────────────────────────────────────────────────────────
 yt-dlp>=2025.1.1
+psutil>=5.9
 # Browser impersonation for yt-dlp (TLS/JA3 fingerprint, header order, HTTP/2
 # settings). This is the best *no-cookie* fix for a datacenter IP: YouTube
 # refuses the request fingerprint, not the account. Optional at runtime — if the

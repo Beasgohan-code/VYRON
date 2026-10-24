@@ -28,7 +28,11 @@ def _commands(roots: tuple[str, ...] = ("vyron",)) -> dict[str, list[str]]:
         for path in sorted((ROOT / base).rglob("*.py")):
             tree = ast.parse(path.read_text(encoding="utf-8"))
             for node in ast.walk(tree):
-                if not (isinstance(node, ast.Call) and getattr(node.func, "attr", "") == "command"):
+                if not isinstance(node, ast.Call):
+                    continue
+                # handlers use the multi-prefix helper `cmd(...)`; `filters.command`
+                # is still parsed so a stray one cannot hide from these checks
+                if getattr(node.func, "attr", "") != "command" and getattr(node.func, "id", "") != "cmd":
                     continue
                 if not node.args:
                     continue
@@ -79,7 +83,7 @@ def test_help_card_only_advertises_real_commands():
 def test_core_commands_are_present():
     registered = set(_commands())
     for name in (
-        "play", "vplay", "song", "vsong", "pause", "resume", "skip", "stop",
+        "play", "song", "pause", "resume", "skip", "stop",
         "seek", "volume", "loop", "shuffle", "np", "queue", "lyrics",
         "voteskip", "setvoteskip", "cplayset",
         "eval", "vars", "dbstats", "dbcleanup", "clearcache",
@@ -158,3 +162,14 @@ def test_unknown_command_hints_point_at_live_commands():
     assert suggest("vskip") == ["skip"]
     # a nonsense token must not invent a suggestion
     assert suggest("qwertyuiop") == []
+
+
+def test_channel_controls_are_registered():
+    """The channel-side control set ported from ShizuMusic stays complete."""
+    names = set(_commands())
+    expected = {
+        "cplay", "cplayforce", "cstop", "cpause", "cresume", "cskip",
+        "cclear", "cseek", "cvolume", "ceffecton", "ceffectoff", "ceffects",
+        "cautoplay", "cthumbnail", "cplayset", "addchannel", "delchannel",
+    }
+    assert expected <= names, sorted(expected - names)

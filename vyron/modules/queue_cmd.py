@@ -3,17 +3,18 @@
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 
-from pyrogram import Client, filters
+from pyrogram import Client
 from pyrogram.types import Message
 
 from vyron.runtime import runtime
 from vyron.ui import cards, keyboards, rich
 from vyron.ui.theme import E
 from vyron.utils.helpers import command_args
+from vyron.utils.commands import cmd
 
 
 def register(client: Client) -> None:
-    @client.on_message(filters.command(["queue"]))
+    @client.on_message(cmd(["queue"]))
     async def _queue(_: Client, message: Message) -> None:
         if not runtime.player:
             return
@@ -29,7 +30,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["clearqueue"]))
+    @client.on_message(cmd(["clearqueue"]))
     async def _clear(_: Client, message: Message) -> None:
         if not runtime.player:
             return
@@ -42,7 +43,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["remove"]))
+    @client.on_message(cmd(["remove"]))
     async def _remove(_: Client, message: Message) -> None:
         if not runtime.player:
             return
@@ -62,7 +63,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["move"]))
+    @client.on_message(cmd(["move"]))
     async def _move(_: Client, message: Message) -> None:
         if not runtime.player:
             return
@@ -79,7 +80,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["jump"]))
+    @client.on_message(cmd(["jump"]))
     async def _jump(_: Client, message: Message) -> None:
         if not runtime.player:
             return

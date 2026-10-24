@@ -43,9 +43,7 @@ DESCRIPTION = (
 # ── command menus ───────────────────────────────────────────────────────────
 USER_COMMANDS = [
     ("play", "stream audio in the voice chat"),
-    ("vplay", "stream video"),
     ("song", "download an MP3"),
-    ("video", "download an MP4"),
     ("search", "search and pick a result"),
     ("queue", "what is coming up"),
     ("np", "now playing"),
@@ -71,6 +69,10 @@ ADMIN_COMMANDS = [
     ("captcha", "verify new members"),
     ("zombies", "find deleted accounts"),
     ("report", "flag a message to admins"),
+    ("cplay", "stream from the linked channel"),
+    ("cstop", "stop the channel stream"),
+    ("cseek", "seek the channel stream"),
+    ("cvolume", "channel volume"),
 ]
 
 OWNER_COMMANDS = ADMIN_COMMANDS + [

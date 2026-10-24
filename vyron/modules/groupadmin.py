@@ -29,6 +29,7 @@ from vyron.utils.helpers import (
     is_owner,
     parse_duration,
 )
+from vyron.utils.commands import cmd
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +129,7 @@ async def _target_id(client: Client, message: Message) -> int | None:
 # ── registration ────────────────────────────────────────────────────────────
 def register(client: Client) -> None:
     # ── the map ────────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["gadmin"]) & GROUP)
+    @client.on_message(cmd(["gadmin"]) & GROUP)
     async def _panel(_: Client, message: Message) -> None:
         if not await _can_manage(client, message):
             await _deny(client, message)
@@ -155,7 +156,7 @@ def register(client: Client) -> None:
         )
 
     # ── rules ──────────────────────────────────────────────────────────────
-    @client.on_message(filters.command("rules") & GROUP)
+    @client.on_message(cmd("rules") & GROUP)
     async def _rules(_: Client, message: Message) -> None:
         chat_id = message.chat.id
         text = await chatcfg.get(chat_id, "rules", "") or ""
@@ -177,7 +178,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["setrules"]) & GROUP)
+    @client.on_message(cmd(["setrules"]) & GROUP)
     async def _setrules(_: Client, message: Message) -> None:
         if not await _can_manage(client, message):
             await _deny(client, message)
@@ -208,7 +209,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["delrules"]) & GROUP)
+    @client.on_message(cmd(["delrules"]) & GROUP)
     async def _clearrules(_: Client, message: Message) -> None:
         if not await _can_manage(client, message):
             await _deny(client, message)
@@ -222,7 +223,7 @@ def register(client: Client) -> None:
         )
 
     # ── chat info ──────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["chatinfo"]) & GROUP)
+    @client.on_message(cmd(["chatinfo"]) & GROUP)
     async def _info(_: Client, message: Message) -> None:
         chat_id = message.chat.id
         info: dict = {"id": chat_id, "title": message.chat.title}
@@ -267,7 +268,7 @@ def register(client: Client) -> None:
         await rich.send(client, chat_id, cards.chat_info_card(info), reply_to=message.id)
 
     # ── title · description · photo ────────────────────────────────────────
-    @client.on_message(filters.command(["settitle"]) & GROUP)
+    @client.on_message(cmd(["settitle"]) & GROUP)
     async def _settitle(_: Client, message: Message) -> None:
         if not await _can_manage(client, message):
             await _deny(client, message)
@@ -302,7 +303,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["setdesc"]) & GROUP)
+    @client.on_message(cmd(["setdesc"]) & GROUP)
     async def _setdesc(_: Client, message: Message) -> None:
         if not await _can_manage(client, message):
             await _deny(client, message)
@@ -328,7 +329,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["setchatphoto"]) & GROUP)
+    @client.on_message(cmd(["setchatphoto"]) & GROUP)
     async def _setphoto(_: Client, message: Message) -> None:
         if not await _can_manage(client, message):
             await _deny(client, message)
@@ -364,7 +365,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["delchatphoto"]) & GROUP)
+    @client.on_message(cmd(["delchatphoto"]) & GROUP)
     async def _delphoto(_: Client, message: Message) -> None:
         if not await _can_manage(client, message):
             await _deny(client, message)
@@ -387,7 +388,7 @@ def register(client: Client) -> None:
         )
 
     # ── slow mode ──────────────────────────────────────────────────────────
-    @client.on_message(filters.command("slowmode") & GROUP)
+    @client.on_message(cmd("slowmode") & GROUP)
     async def _slowmode(_: Client, message: Message) -> None:
         if not await _can_manage(client, message):
             await _deny(client, message)
@@ -435,7 +436,7 @@ def register(client: Client) -> None:
         )
 
     # ── pinning ────────────────────────────────────────────────────────────
-    @client.on_message(filters.command("unpinall") & GROUP)
+    @client.on_message(cmd("unpinall") & GROUP)
     async def _unpinall(_: Client, message: Message) -> None:
         if not await _can_manage(client, message):
             await _deny(client, message)
@@ -457,7 +458,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["pinned"]) & GROUP)
+    @client.on_message(cmd(["pinned"]) & GROUP)
     async def _pinned(_: Client, message: Message) -> None:
         pinned = getattr(message.chat, "pinned_message", None)
         text = None
@@ -493,7 +494,7 @@ def register(client: Client) -> None:
         )
 
     # ── invites ────────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["invitelink"]) & GROUP)
+    @client.on_message(cmd(["invitelink"]) & GROUP)
     async def _invite(_: Client, message: Message) -> None:
         if not await _can_manage(client, message):
             await _deny(client, message)
@@ -528,7 +529,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command("revokeinvite") & GROUP)
+    @client.on_message(cmd("revokeinvite") & GROUP)
     async def _revoke(_: Client, message: Message) -> None:
         if not await _can_manage(client, message):
             await _deny(client, message)
@@ -557,7 +558,7 @@ def register(client: Client) -> None:
         )
 
     # ── reports ────────────────────────────────────────────────────────────
-    @client.on_message(filters.command("report") & GROUP)
+    @client.on_message(cmd("report") & GROUP)
     async def _report(_: Client, message: Message) -> None:
         user = message.from_user
         if user is None:
@@ -642,7 +643,7 @@ def register(client: Client) -> None:
         await _log(client, f"report in <code>{message.chat.id}</code> by {user.id} · {link}")
 
     # ── approvals (locks / anti-flood exemptions) ──────────────────────────
-    @client.on_message(filters.command("approve") & GROUP)
+    @client.on_message(cmd("approve") & GROUP)
     async def _approve(_: Client, message: Message) -> None:
         if not await _can_manage(client, message):
             await _deny(client, message)
@@ -685,7 +686,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command("unapprove") & GROUP)
+    @client.on_message(cmd("unapprove") & GROUP)
     async def _unapprove(_: Client, message: Message) -> None:
         if not await _can_manage(client, message):
             await _deny(client, message)
@@ -714,7 +715,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command("approved") & GROUP)
+    @client.on_message(cmd("approved") & GROUP)
     async def _approved_list(_: Client, message: Message) -> None:
         ids = await _approved(message.chat.id)
         entries = [(f"user {index + 1}", str(uid)) for index, uid in enumerate(ids)]
@@ -723,7 +724,7 @@ def register(client: Client) -> None:
         )
 
     # ── deleted accounts ───────────────────────────────────────────────────
-    @client.on_message(filters.command(["zombies"]) & GROUP)
+    @client.on_message(cmd(["zombies"]) & GROUP)
     async def _zombies(_: Client, message: Message) -> None:
         if not await _can_manage(client, message):
             await _deny(client, message)
@@ -780,7 +781,7 @@ def register(client: Client) -> None:
             await _log(client, f"zombies: {len(found)} found, {kicked} kicked in <code>{message.chat.id}</code>")
 
     # ── captcha gate ───────────────────────────────────────────────────────
-    @client.on_message(filters.command("captcha") & GROUP)
+    @client.on_message(cmd("captcha") & GROUP)
     async def _captcha_toggle(_: Client, message: Message) -> None:
         if not await _can_manage(client, message):
             await _deny(client, message)
@@ -826,7 +827,7 @@ def register(client: Client) -> None:
             )
 
     # ── fallback: reply to any unknown /group-style help ───────────────────
-    @client.on_message(filters.command(["adminhelp"]) & GROUP)
+    @client.on_message(cmd(["adminhelp"]) & GROUP)
     async def _grouphelp(_: Client, message: Message) -> None:
         await rich.send(
             client,

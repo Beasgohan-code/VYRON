@@ -19,6 +19,7 @@ from vyron.runtime import runtime
 from vyron.ui import cards, keyboards, rich
 from vyron.ui.theme import E
 from vyron.utils.helpers import is_private_chat
+from vyron.utils.commands import cmd, prefixes
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +95,7 @@ def register(client: Client) -> None:
                 reply_to=message.id,
             )
 
-    @client.on_message(filters.command(["start"]))
+    @client.on_message(cmd(["start"]))
     async def _start(_: Client, message: Message) -> None:
         # t.me/<bot>?start=app deep-links straight into the player, so a shared
         # link lands people where the music actually is.
@@ -151,7 +152,7 @@ def register(client: Client) -> None:
             if message.chat.type.name in {"GROUP", "SUPERGROUP"}:
                 await runtime.storage.bump("chats")
 
-    @client.on_message(filters.command("help"))
+    @client.on_message(cmd("help"))
     async def _help(_: Client, message: Message) -> None:
         await rich.send(
             message._client,
@@ -161,7 +162,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["about", "repo"]))
+    @client.on_message(cmd(["about", "repo"]))
     async def _about(_: Client, message: Message) -> None:
         await rich.send(
             message._client,
@@ -171,11 +172,11 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["app", "player"]))
+    @client.on_message(cmd(["app", "player"]))
     async def _webapp(_: Client, message: Message) -> None:
         await _send_app(message)
 
-    @client.on_message(filters.command("ping"))
+    @client.on_message(cmd("ping"))
     async def _ping(_: Client, message: Message) -> None:
         started = time.perf_counter()
         sent = await rich.send(message._client, message.chat.id, cards.ok_card("<b>Measuring…</b>"))
@@ -190,29 +191,42 @@ def register(client: Client) -> None:
 
     # ── unknown commands get a hint, not silence ───────────────────────────
     known = frozenset(command_names())
+    # Every configured prefix, regex-escaped (`?`, `$` and `&` are not literal
+    # in a character class without it).
+    typed_prefix = re.compile(
+        r"^(?P<prefix>[" + re.escape("".join(p for p in prefixes() if p)) + r"])"
+        r"(?P<name>[A-Za-z0-9_]+)"
+    )
 
-    @client.on_message(filters.regex(r"^/[A-Za-z0-9_]+") & filters.private, group=1)
+    @client.on_message(filters.private & filters.regex(r"^\S"), group=1)
     async def _unknown(_: Client, message: Message) -> None:
         """Runs in a later group, so it only sees commands nobody claimed.
 
         The alias prune left a lot of muscle memory pointing at names that no
         longer exist (`/pl`, `/favs`, `/vskip`); instead of dropping those on
-        the floor we answer with the closest live command.
+        the floor we answer with the closest live command — in the prefix the
+        person actually typed.
+
+        Non-slash prefixes stay quiet unless they are a near-miss for a real
+        command: `.` and `?` are ordinary punctuation, and nobody wants the bot
+        correcting their prose.
         """
-        token = re.match(r"^/([A-Za-z0-9_]+)", (message.text or "").strip())
-        if not token:
+        match = typed_prefix.match((message.text or "").strip())
+        if not match:
             return
-        name = token.group(1).lower()
+        prefix, name = match.group("prefix"), match.group("name").lower()
         if name in known:
             return  # a real command: its handler already ran in group 0
         close = command_suggest(name)
-        hint = f"<b>/{name}</b> isn't a command."
+        if not close and prefix != "/":
+            return  # punctuation, not an attempt at a command
+        hint = f"<b>{prefix}{name}</b> isn't a command."
         if close:
-            hint += f" Did you mean <code>/{close[0]}</code>?"
+            hint += f" Did you mean <code>{prefix}{close[0]}</code>?"
         hint += "\n<blockquote>/help lists everything the bot can do.</blockquote>"
         await rich.send(message._client, message.chat.id, hint, reply_to=message.id)
 
-    @client.on_message(filters.command(["id"]))
+    @client.on_message(cmd(["id"]))
     async def _id(_: Client, message: Message) -> None:
         chat = message.chat
         lines = [

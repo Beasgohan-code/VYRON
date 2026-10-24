@@ -158,9 +158,9 @@ Health check → <http://localhost:8080/health> · Mini App → <http://localhos
 
 ### Downloads that survive a bad day
 
-Every file the bot sends — `/song`, `/vsong`, `POST /v1/tracks`,
-`/v1/downloads` — goes through one engine in `vyron/core/downloader.py`, and it
-is deliberately paranoid:
+Every file the bot sends — `/song`, `POST /v1/tracks`, `/v1/downloads`, and
+every track the player caches before streaming — goes through one engine in
+`vyron/core/downloader.py`, and it is deliberately paranoid:
 
 1. **Client ladder.** The same player clients the stream resolver walks
    (`default → tv_simply → web_embedded → android_vr → ios → tv → web_safari →
@@ -180,8 +180,18 @@ is deliberately paranoid:
 4. **One cache, one lock.** Two people asking for the same song at once share a
    single download; the file is reused until `DOWNLOAD_CACHE_HOURS` expires.
 
-`/doctor` reports all four: yt-dlp version (and whether a newer one exists),
-ffmpeg, the mirror tier and a live YouTube probe. `/sources` goes further: it
+5. **Native accelerators.** Before Python touches the bytes, the download is
+   handed to the best open-source transfer tool that is installed:
+   [aria2c](https://aria2.github.io) (`-x16 -s16 -k1M`, sixteen connections per
+   server, the package is in our Docker image) → `curl` (HTTP/2, ranged
+   `--parallel`) → `aiohttp`. The same ladder backs yt-dlp itself through
+   `external_downloader`, so `/song`, the API and the web player all move the
+   file the fast way. A download that fails on one tool is retried on the next
+   and the error from *every* tool is reported — you never get a bare
+   "download failed". `DOWNLOAD_ACCELERATOR=aria2|curl|none` pins it.
+
+`/doctor` reports all five: yt-dlp version (and whether a newer one exists),
+ffmpeg, the active accelerator, the mirror tier and a live YouTube probe. `/sources` goes further: it
 probes every player client and every mirror *for one video, right now*, and
 prints which ones actually answered.
 
@@ -831,6 +841,8 @@ The interesting optional ones:
 | `STREAM_FAILURE_TTL` | `60` | how long a track that just failed answers instantly instead of retrying |
 | `EXTRACT_CONCURRENCY` | `2` | yt-dlp extractions allowed at once (the rest queue, so web requests stay fast) |
 | `IMPERSONATE` | `chrome` | browser fingerprint to imitate via `curl_cffi`; `off` disables |
+| `DOWNLOAD_ACCELERATOR` | `auto` | transfer ladder: `auto` (aria2 → curl → aiohttp), `aria2`, `curl`, `none` |
+| `COMMAND_PREFIXES` | `/!.?#%$&~` | characters that may start a command; comma/space separated, `/` always on, `off` for slash-only, an empty entry enables prefix-less |
 | `YTDLP_AUTOUPDATE` | `on` | check PyPI on boot/daily and upgrade yt-dlp in place |
 | `COBALT_URLS` | – | your own Cobalt instance(s), comma separated; `off` disables the tier |
 | `MONGO_URL` | – | persistence (JSON file otherwise) |

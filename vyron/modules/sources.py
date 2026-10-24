@@ -18,7 +18,7 @@ import asyncio
 import logging
 import time
 
-from pyrogram import Client, filters
+from pyrogram import Client
 from pyrogram.types import Message
 
 from vyron.config import settings
@@ -28,6 +28,7 @@ from vyron.ui import blocks as B
 from vyron.ui import rich
 from vyron.ui.theme import E
 from vyron.utils.helpers import is_owner
+from vyron.utils.commands import cmd
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +138,7 @@ def _env_rows() -> list[tuple[str, str]]:
 
 
 def register(client: Client) -> None:
-    @client.on_message(filters.command(["sources"]))
+    @client.on_message(cmd(["sources"]))
     async def _sources(_: Client, message: Message) -> None:
         user = message.from_user
         if not (user and is_owner(user.id)):

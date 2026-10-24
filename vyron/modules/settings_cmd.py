@@ -3,15 +3,16 @@
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 
-from pyrogram import Client, filters
+from pyrogram import Client
 from pyrogram.types import Message
 
 from vyron.runtime import runtime
 from vyron.ui import cards, keyboards, panels, rich
+from vyron.utils.commands import cmd
 
 
 def register(client: Client) -> None:
-    @client.on_message(filters.command(["settings"]))
+    @client.on_message(cmd(["settings"]))
     async def _settings(_: Client, message: Message) -> None:
         if not runtime.player:
             return
@@ -25,7 +26,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(filters.command(["247"]))
+    @client.on_message(cmd(["247"]))
     async def _always(_: Client, message: Message) -> None:
         if not runtime.player:
             return

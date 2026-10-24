@@ -41,12 +41,16 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
+# aria2 gives every download 16 parallel connections (the single biggest speed
+# win for /song and the download API); curl is the fallback for images that
+# cannot install it, and the pure-Python client covers both missing.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ffmpeg \
         fonts-dejavu-core \
         ca-certificates \
         curl \
+        aria2 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

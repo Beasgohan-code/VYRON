@@ -6,7 +6,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from pyrogram import Client, filters
+from pyrogram import Client
 from pyrogram.types import Message
 
 from vyron.core.pending import put as remember_search
@@ -26,6 +26,7 @@ from vyron.utils.helpers import (
     track_from_message,
 )
 from vyron.utils.net import fetch_bytes
+from vyron.utils.commands import cmd
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +34,7 @@ USAGE = (
     f"{E('info')} <b>How to use</b>\n"
     f"<blockquote><code>/play believer</code>\n"
     f"<code>/play https://youtu.be/…</code>\n"
-    f"<code>/song …</code> — send an MP3\n"
-    f"<code>/vsong …</code> — send an MP4</blockquote>"
+    f"<code>/song …</code> — send the MP3</blockquote>"
 )
 
 
@@ -73,13 +73,15 @@ async def _edit(client: Client, chat_id: int, message_id: int | None, markup: st
 
 
 def register(client: Client) -> None:
-    # ── /play /vplay ───────────────────────────────────────────────────────
-    @client.on_message(filters.command(["play", "vplay"]))
+    # ── /play ──────────────────────────────────────────────────────────────
+    # Audio only: video playback was removed on purpose. A voice chat is a
+    # radio, not a screen, and every `/vplay` path doubled the surface of the
+    # thing people actually use.
+    @client.on_message(cmd(["play"]))
     async def _play_cmd(_: Client, message: Message) -> None:
         if not runtime.player:
             return
-        command = message.command[0].lower()
-        video = command in {"vplay", "vp"}
+        video = False
         chat_id = message.chat.id
         query = command_args(message)
         reply = message.reply_to_message
@@ -192,8 +194,8 @@ def register(client: Client) -> None:
             keyboards.search_results(tracks),
         )
 
-    # ── /playforce /vplayforce ─────────────────────────────────────────────
-    @client.on_message(filters.command(["playforce", "vplayforce"]))
+    # ── /playforce ─────────────────────────────────────────────────────────
+    @client.on_message(cmd(["playforce"]))
     async def _playforce_cmd(_: Client, message: Message) -> None:
         """Skip the queue and start this request now.
 
@@ -202,8 +204,7 @@ def register(client: Client) -> None:
         """
         if not runtime.player:
             return
-        command = message.command[0].lower()
-        video = command in {"vplayforce", "vpf"}
+        video = False
         chat_id = message.chat.id
         query = command_args(message)
         if not query:
@@ -270,13 +271,10 @@ def register(client: Client) -> None:
             + f"\n<footer>{E('bolt')} queue cleared by an admin</footer>",
         )
 
-    # ── /song /vsong (one download command per format) ───────────────────────────────────────────────────────
-    @client.on_message(
-        filters.command(["song", "vsong"])
-    )
+    # ── /song (the file, one command) ──────────────────────────────────────
+    @client.on_message(cmd(["song"]))
     async def _download_cmd(_: Client, message: Message) -> None:
-        command = message.command[0].lower()
-        want_video = command == "vsong"
+        want_video = False
         query = command_args(message)
         chat_id = message.chat.id
         if not query:
@@ -306,7 +304,7 @@ def register(client: Client) -> None:
                 query,
                 tracks,
                 mode="download",
-                video=want_video,
+                video=False,
             )
 
         if len(tracks) == 1:
@@ -329,7 +327,7 @@ def register(client: Client) -> None:
             )
 
     # ── /search ────────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["search"]))
+    @client.on_message(cmd(["search"]))
     async def _search_cmd(_: Client, message: Message) -> None:
         query = command_args(message)
         if not query:
@@ -363,7 +361,7 @@ def register(client: Client) -> None:
         )
 
     # ── /playlist ──────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["playlist"]))
+    @client.on_message(cmd(["playlist"]))
     async def _playlist_cmd(_: Client, message: Message) -> None:
         query = command_args(message)
         if not query or not looks_like_url(query):
@@ -475,7 +473,9 @@ async def deliver(
     hint: str | None = None,
 ) -> None:
     """Download a track and send it as a real Telegram file."""
-    markup = cards.download_card(track, "video" if want_video else "audio")
+    # Audio only: video was removed from the bot, so there is one file path.
+    want_video = False
+    markup = cards.download_card(track, "audio")
     if hint:
         markup = B.note(hint) + markup
     await _edit(client, chat_id, status_id, markup)

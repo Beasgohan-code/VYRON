@@ -12,7 +12,7 @@ import logging
 import os
 import time
 
-from pyrogram import Client, filters
+from pyrogram import Client
 from pyrogram.types import Message
 
 from vyron.core import playlists as store
@@ -23,6 +23,7 @@ from vyron.ui import rich
 from vyron.ui.progress import truncate
 from vyron.ui.theme import E
 from vyron.utils.helpers import command_args, display_name
+from vyron.utils.commands import cmd
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ def _uid(message: Message) -> int:
 
 def register(client: Client) -> None:
     # ── /exportpl ──────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["exportpl"]))
+    @client.on_message(cmd(["exportpl"]))
     async def _export(_: Client, message: Message) -> None:
         if runtime.storage is None:
             return
@@ -111,7 +112,7 @@ def register(client: Client) -> None:
             )
 
     # ── /importpl ──────────────────────────────────────────────────────────
-    @client.on_message(filters.command(["importpl"]))
+    @client.on_message(cmd(["importpl"]))
     async def _import(_: Client, message: Message) -> None:
         if runtime.storage is None:
             return

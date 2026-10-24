@@ -3,7 +3,7 @@
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 
-from pyrogram import Client, filters
+from pyrogram import Client
 from pyrogram.types import Message
 
 from vyron.core.lyrics import split_title
@@ -12,10 +12,11 @@ from vyron.ui import cards, rich
 from vyron.ui.progress import truncate
 from vyron.ui.theme import E
 from vyron.utils.helpers import command_args
+from vyron.utils.commands import cmd
 
 
 def register(client: Client) -> None:
-    @client.on_message(filters.command(["lyrics"]))
+    @client.on_message(cmd(["lyrics"]))
     async def _lyrics(_: Client, message: Message) -> None:
         if not runtime.lyrics:
             return
@@ -49,7 +50,7 @@ def register(client: Client) -> None:
         if status:
             await rich.edit(client, message.chat.id, status.id, cards.lyrics_card(track_for_card, result))
 
-    @client.on_message(filters.command(["fav", "save"]))
+    @client.on_message(cmd(["fav", "save"]))
     async def _fav(_: Client, message: Message) -> None:
         if not runtime.player or not runtime.storage:
             return
@@ -68,14 +69,14 @@ def register(client: Client) -> None:
         else:
             await rich.send(client, message.chat.id, cards.warn_card("Already in your favourites."))
 
-    @client.on_message(filters.command(["favorites"]))
+    @client.on_message(cmd(["favorites"]))
     async def _favs(_: Client, message: Message) -> None:
         if not runtime.storage:
             return
         items = await runtime.storage.favorites(message.from_user.id, limit=10)
         await rich.send(client, message.chat.id, cards.favorites_card(items), reply_to=message.id)
 
-    @client.on_message(filters.command(["history"]))
+    @client.on_message(cmd(["history"]))
     async def _history(_: Client, message: Message) -> None:
         if not runtime.storage:
             return

@@ -174,9 +174,7 @@ _HELP: dict[str, tuple[str, list[tuple[str, str]]]] = {
         [
             ("/start", "open the home card"),
             ("/play <song|link>", "stream audio in the voice chat"),
-            ("/vplay <song|link>", "stream video"),
             ("/song <song|link>", "send the MP3 here"),
-            ("/vsong <song|link>", "send the MP4 here"),
             ("/search <text>", "browse results, then pick"),
             ("/lyrics [song]", "lyrics for the current track"),
             ("/ping", "latency + uptime"),
@@ -230,11 +228,13 @@ _HELP: dict[str, tuple[str, list[tuple[str, str]]]] = {
             ("/voteskip set 3", "require votes before a skip"),
             ("/voteskip", "cast your vote"),
             ("/cplayset <id>", "stream into a specific channel"),
+            ("/cplay · /cstop · /cseek", "drive the linked channel's stream"),
+            ("/cvolume · /ceffects", "channel volume and audio effects"),
             ("/similar", "tracks like the one playing"),
             ("/skip <song>", "insert a track up front"),
             ("/savepl [name]", "save the queue to a playlist"),
             ("/playlists · /playlists <name>", "list and queue your playlists"),
-            ("/song · /vsong", "get an MP3 or MP4 in the chat"),
+            ("/song", "get the MP3 in the chat"),
             ("/locks · /antiflood", "content locks and flood control"),
             ("/gadmin", "the group manager panel"),
             ("/rules · /setrules", "read or set this chat's rules"),
@@ -275,6 +275,13 @@ _HELP: dict[str, tuple[str, list[tuple[str, str]]]] = {
 }
 
 
+def _prefix_line() -> str:
+    """`/play !play .play ?play #play` — the configured set, as a hint."""
+    from vyron.utils.commands import prefixes
+
+    return "  ".join(f"{prefix}play" for prefix in prefixes())
+
+
 def help_card(section: str = "main") -> str:
     section = section if section in _HELP else "main"
     title, rows = _HELP[section]
@@ -286,6 +293,7 @@ def help_card(section: str = "main") -> str:
         f"{E('info')} <b>Good to know</b>",
         B.bullets(
             [
+                f"Any of these prefixes works: <code>{esc(_prefix_line())}</code>",
                 "YouTube links, playlists, replies to audio files and plain text all work",
                 "In groups only admins can control playback",
                 "Everything is cached — replays start instantly",
@@ -685,6 +693,7 @@ def stats_card(
     version: str,
     api: dict | None = None,
     links: dict[str, str] | None = None,
+    system: dict | None = None,
 ) -> str:
     body = B.kv(
         [
@@ -707,6 +716,38 @@ def stats_card(
                 (f"{E('shield')} API scopes", ", ".join(api.get("scopes") or []) or "read, search, download"),
             ]
         )
+    system_block = ""
+    if system:
+        rows: list[tuple[str, str]] = []
+        if system.get("cpu_percent") is not None:
+            cores = system.get("cores_logical") or system.get("cores_physical")
+            tail = f" · {int(cores)}c" if cores else ""
+            rows.append((f"{E('bolt')} CPU", f"<b>{system['cpu_percent']}%</b>{tail}"))
+        if system.get("ram_percent") is not None:
+            rows.append(
+                (
+                    f"{E('cloud')} RAM",
+                    f"<b>{system['ram_used_gb']} / {system['ram_total_gb']} GB</b>"
+                    f" · {system['ram_percent']}%",
+                )
+            )
+        if system.get("disk_percent") is not None:
+            rows.append(
+                (
+                    f"{E('download')} Disk",
+                    f"<b>{system['disk_used_gb']} / {system['disk_total_gb']} GB</b>"
+                    f" · {system['disk_percent']}%",
+                )
+            )
+        if system.get("os"):
+            host = f"{system['os']} {system.get('release') or ''}".strip()
+            py = system.get("python")
+            rows.append((f"{E('code')} Host", f"<b>{esc(host)}</b>" + (f" · py {py}" if py else "")))
+        if system.get("loadavg") is not None:
+            rows.append((f"{E('stats')} Load", f"<b>{system['loadavg']}</b>"))
+        if rows:
+            system_block = B.kv(rows)
+
     owner_row = ""
     if links:
         buttons = []
@@ -721,6 +762,7 @@ def stats_card(
     return (
         B.heading(f"{E('stats')} {small_caps('statistics')}", 2)
         + body
+        + system_block
         + api_block
         + B.row(
             B.btn(f"{E('live')} Active", data="v:admin:active", style="primary"),
