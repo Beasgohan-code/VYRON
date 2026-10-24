@@ -29,7 +29,7 @@ import { Sparks } from "../components/Sparks";
 import { TrackRow } from "../components/TrackRow";
 import { reveal, useTilt } from "../lib/anim";
 import { api } from "../lib/api";
-import { fmtDuration, hashOf } from "../lib/format";
+import { activeLyricLine, fmtDuration, hashOf } from "../lib/format";
 import { useApp } from "../lib/store";
 
 interface LyricLine {
@@ -134,17 +134,29 @@ export function Player() {
     }
   };
 
-  const activeLine = lyrics?.lines.reduce(
-    (best, line, index) => (line.time <= audio.position + 0.4 ? index : best),
-    -1
-  );
+  const activeLine = activeLyricLine(lyrics?.lines, audio.position);
 
+  /**
+   * Follow the song — unless the listener has taken over.
+   *
+   * Auto-scrolling while somebody is reading a verse is the fastest way to make
+   * a lyrics panel unusable, so following pauses for a few seconds after a
+   * manual scroll and resumes on its own.
+   */
+  const followedAt = useRef(0);
   useEffect(() => {
     if (activeLine === undefined || activeLine < 0 || !lyricsBox.current) return;
+    if (Date.now() - followedAt.current < 4000) return;
     lyricsBox.current
       .querySelector(`[data-line="${activeLine}"]`)
       ?.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [activeLine]);
+
+  /** Tap a line to jump there — the timings are already known. */
+  const seekToLine = (time: number) => {
+    followedAt.current = 0;
+    audio.seek(time);
+  };
 
   return (
     <div className="player" role="dialog" aria-label="Player" aria-modal="true" style={tint}>
@@ -352,12 +364,28 @@ export function Player() {
         {(showLyrics || showQueue) && (
           <aside className="pv-side">
             {showLyrics && (
-              <div className="lyrics" ref={lyricsBox}>
+              <div
+                className="lyrics"
+                ref={lyricsBox}
+                onScroll={() => {
+                  followedAt.current = Date.now();
+                }}
+              >
                 {lyrics?.lines.length ? (
                   lyrics.lines.map((line, index) => (
-                    <p key={`${line.time}-${index}`} data-line={index} className={index === activeLine ? "on" : ""}>
+                    <button
+                      type="button"
+                      key={`${line.time}-${index}`}
+                      data-line={index}
+                      className={`lyric-line ${index === activeLine ? "on" : ""} ${
+                        activeLine !== undefined && index < activeLine ? "past" : ""
+                      }`}
+                      aria-current={index === activeLine ? "true" : undefined}
+                      onClick={() => seekToLine(line.time)}
+                      title={`Jump to ${Math.floor(line.time / 60)}:${String(Math.floor(line.time % 60)).padStart(2, "0")}`}
+                    >
                       {line.text}
-                    </p>
+                    </button>
                   ))
                 ) : (
                   <pre className="lyrics-plain">{lyrics?.text || "No lyrics for this one."}</pre>

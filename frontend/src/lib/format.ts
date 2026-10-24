@@ -65,3 +65,23 @@ export function compact(value: number | undefined): string {
   if (num >= 1_000) return `${(num / 1_000).toFixed(1)}k`;
   return String(num);
 }
+
+/**
+ * Which lyric line is playing right now (`-1` before the first one).
+ *
+ * A small lead-in is deliberate: highlighting a line a beat early reads better
+ * than a line that lights up after it has already been sung.
+ */
+export function activeLyricLine(
+  lines: { time: number; text?: string }[] | undefined,
+  position: number,
+  lead = 0.4
+): number {
+  if (!lines?.length) return -1;
+  let active = -1;
+  for (let index = 0; index < lines.length; index += 1) {
+    if (lines[index].time <= position + lead) active = index;
+    else break;
+  }
+  return active;
+}
