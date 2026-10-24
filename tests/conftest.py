@@ -45,7 +45,7 @@ def _keep_an_event_loop():
     asyncio.set_event_loop(previous)
 
 
-_LOOPBACK = {"127.0.0.1", "::1", "localhost", "0.0.0.0", ""}
+_LOOPBACK = {"127.0.0.1", "::1", "localhost", ""}  # a local test server
 
 
 @pytest.fixture(autouse=True)
