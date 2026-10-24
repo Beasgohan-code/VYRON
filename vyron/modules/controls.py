@@ -23,6 +23,39 @@ def _player():
     return runtime.require_player()
 
 
+def _volume_card(volume: int, *, changed: bool = False) -> str:
+    """Volume, with the four buttons that cover 95% of what people want."""
+    level = (
+        "muted" if volume <= 0
+        else "quiet" if volume < 40
+        else "loud" if volume > 100
+        else "normal"
+    )
+    return cards.change_card(
+        "volume set" if changed else "volume",
+        glyph="mute" if volume <= 0 else "volume",
+        label="level",
+        value=f"<b>{volume}%</b> · {level}",
+        note=(
+            "Applied to the live stream straight away."
+            if changed
+            else "Send a number, or tap one of the steps below."
+        ),
+        extra=[("info", "range", "1–200 · <code>/volume +20</code> nudges it")],
+        actions=B.row(
+            B.btn("−10", data="v:vol:-10"),
+            B.btn("−1", data="v:vol:-1"),
+            B.btn("+1", data="v:vol:+1", style="primary"),
+            B.btn("+10", data="v:vol:+10", style="primary"),
+        )
+        + B.row(
+            B.btn(f"{E('mute')} Mute", data="v:vol:-200", style="danger"),
+            B.btn(f"{E('now')} Now playing", data="v:np"),
+            B.btn(f"{E('close')} Close", data="v:close"),
+        ),
+    )
+
+
 def register(client: Client) -> None:
     async def _guard(message: Message) -> bool:
         if not runtime.player:
@@ -98,7 +131,8 @@ def register(client: Client) -> None:
             await rich.send(
                 message._client,
                 message.chat.id,
-                f"{E('volume')} <b>Volume</b> <code>{state.volume}%</code>",
+                _volume_card(state.volume),
+                reply_to=message.id,
             )
             return
         if arg[0] in "+-" and arg[1:].isdigit():
@@ -113,7 +147,8 @@ def register(client: Client) -> None:
         await rich.send(
             message._client,
             message.chat.id,
-            f"{E('volume')} <b>Volume set</b> <code>{volume}%</code>",
+            _volume_card(volume, changed=True),
+            reply_to=message.id,
         )
 
     @client.on_message(cmd(["loop"]))
@@ -128,7 +163,19 @@ def register(client: Client) -> None:
         await rich.send(
             message._client,
             message.chat.id,
-            f"{E('loop')} <b>Loop</b> <code>{state.loop.label}</code>",
+            cards.change_card(
+                "loop mode",
+                glyph="loop",
+                label="now",
+                value=f"<b>{state.loop.label}</b>",
+                note=_LOOP_HINT.get(state.loop.label, "Looping follows the queue."),
+                actions=B.row(
+                    B.btn(f"{E('loop')} Next mode", data="v:loop", style="primary"),
+                    B.btn(f"{E('queue')} The queue", data="v:queue"),
+                    B.btn(f"{E('close')} Close", data="v:close"),
+                ),
+            ),
+            reply_to=message.id,
         )
 
     @client.on_message(cmd(["shuffle"]))
@@ -140,7 +187,23 @@ def register(client: Client) -> None:
         await rich.send(
             message._client,
             message.chat.id,
-            f"{E('shuffle')} <b>Shuffled</b> <code>{count}</code> queued tracks",
+            cards.change_card(
+                "queue shuffled",
+                glyph="shuffle",
+                label="in the mix",
+                value=f"<b>{count}</b> track{'s' if count != 1 else ''}",
+                note=(
+                    "The order is new; the track that is playing was not touched."
+                    if count
+                    else "Nothing was queued, so there was nothing to shuffle."
+                ),
+                actions=B.row(
+                    B.btn(f"{E('queue')} See the queue", data="v:queue", style="primary"),
+                    B.btn(f"{E('now')} Now playing", data="v:np"),
+                    B.btn(f"{E('close')} Close", data="v:close"),
+                ),
+            ),
+            reply_to=message.id,
         )
 
     @client.on_message(cmd(["autoplay"]))
@@ -161,14 +224,25 @@ def register(client: Client) -> None:
             lane = auto.describe(state.mood, state.language) or "no lane — anything goes"
             return (
                 B.banner("autoplay", glyph="spark")
-                + B.kv(
+                + B.context(
+                    "When the queue runs dry, I keep playing in this lane "
+                    "instead of stopping."
+                )
+                + B.fields(
                     [
-                        ("state", "<b>on</b>" if state.autoplay else "<b>off</b>"),
-                        ("mood", f"<b>{state.mood or '–'}</b>"),
-                        ("language", f"<b>{state.language or '–'}</b>"),
-                        ("lane", lane),
+                        ("spark", "state", "<b>on</b>" if state.autoplay else "<b>off</b>"),
+                        ("moon", "mood", f"<b>{state.mood or '–'}</b>"),
+                        ("globe", "language", f"<b>{state.language or '–'}</b>"),
+                        ("note", "lane", lane),
                     ]
                 )
+                + B.actions(
+                    B.row(
+                        B.btn(f"{E('spark')} Toggle", data="v:autoplay:toggle", style="primary"),
+                        B.btn(f"{E('close')} Close", data="v:close"),
+                    )
+                )
+                + B.footer(f"{E('info')} /autoplay mood · /autoplay lang")
             )
 
         if not option:  # bare /autoplay keeps the old toggle behaviour
@@ -177,7 +251,26 @@ def register(client: Client) -> None:
             await rich.send(
                 client_,
                 chat_id,
-                f"{E('spark')} <b>Autoplay</b> <code>{'on' if state.autoplay else 'off'}</code>",
+                cards.change_card(
+                    f"autoplay {'on' if state.autoplay else 'off'}",
+                    glyph="spark" if state.autoplay else "moon",
+                    label="lane",
+                    value=f"<b>{auto.describe(state.mood, state.language) or 'no lane — anything goes'}</b>",
+                    note=(
+                        "When the queue runs dry I keep the same kind of music going."
+                        if state.autoplay
+                        else "I stop at the end of the queue now."
+                    ),
+                    actions=B.row(
+                        B.btn(
+                            f"{E('spark')} {'Pause' if state.autoplay else 'Resume'}",
+                            data="v:set:autoplay",
+                            style="primary",
+                        ),
+                        B.btn(f"{E('close')} Close", data="v:close"),
+                    ),
+                ),
+                reply_to=message.id,
             )
             return
 
@@ -288,6 +381,13 @@ def register(client: Client) -> None:
             markup_keyboard=keyboard,
             reply_to=message.id,
         )
+
+
+_LOOP_HINT = {
+    "off": "The queue plays once, then stops.",
+    "one": "This one track repeats until you turn loop off.",
+    "all": "The queue repeats from the top when it ends.",
+}
 
 
 __all__ = ["register"]

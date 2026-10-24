@@ -140,7 +140,7 @@ def register(client: Client) -> None:
         status = await rich.send(
             client,
             message.chat.id,
-            f"{E('clock')} {B.think()} <b>Queuing next…</b>",
+            cards.working_card("autoplay", "Choosing the next track that fits."),
             reply_to=message.id,
             editable=True,
         )

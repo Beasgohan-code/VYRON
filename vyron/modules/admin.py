@@ -84,11 +84,22 @@ def register(client: Client) -> None:
             state = runtime.player.queues.get(chat_id)
             if state.current:
                 lines.append(f"• <code>{chat_id}</code> — {rich.esc(state.current.title[:40])}")
-        body = "\n".join(lines) if lines else "<i>No active voice chats.</i>"
         await rich.send(
             client,
             message.chat.id,
-            f"{E('live')} <b>Active sessions</b>\n<blockquote>{body}</blockquote>",
+            cards.change_card(
+                "active sessions",
+                glyph="live",
+                label="voice chats",
+                value=f"<b>{len(lines)}</b>",
+                note="Every chat with a live stream right now.",
+                extra=[("live", f"chat {index}", line)
+                       for index, line in enumerate(lines[:10], start=1)],
+                actions=B.row(
+                    B.btn(f"{E('stats')} Statistics", data="v:admin:stats", style="primary"),
+                    B.btn(f"{E('close')} Close", data="v:close"),
+                ),
+            ),
         )
 
     # ── /broadcast — flags, forward→copy fallback, one run at a time ──────

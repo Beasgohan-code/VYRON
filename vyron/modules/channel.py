@@ -149,7 +149,10 @@ def register(client: Client) -> None:
                 status = await rich.send(
                     client,
                     message.chat.id,
-                    f"{E('clock')} <b>Downloading from Telegram…</b>",
+                    cards.working_card(
+                        "downloading",
+                        f"Reading <b>{rich.esc(truncate(media_track.title, 44))}</b> from Telegram.",
+                    ),
                     reply_to=message.id,
                 )
                 try:
@@ -185,7 +188,10 @@ def register(client: Client) -> None:
         status = await rich.send(
             client,
             message.chat.id,
-            f"{E('clock')} <b>Resolving for the channel…</b>",
+            cards.working_card(
+                "resolving",
+                f"Finding <b>{rich.esc(truncate(query, 44))}</b> for the channel.",
+            ),
             reply_to=message.id,
         )
         try:
@@ -276,7 +282,14 @@ def register(client: Client) -> None:
             return
         target = await _target_chat(client, message)
         if target is None:
-            await rich.send(client, message.chat.id, f"{E('info')} No linked chat found.")
+            await rich.send(
+                client,
+                message.chat.id,
+                cards.info_card(
+                    "No linked chat found — add me to a group first, then link its channel."
+                ),
+                reply_to=message.id,
+            )
             return
         await runtime.player.stop(target, leave=True)
         await rich.send(

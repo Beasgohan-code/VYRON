@@ -32,7 +32,9 @@ def register(client: Client) -> None:
         status = await rich.send(
             client,
             message.chat.id,
-            f"{E('clock')} <b>Looking up lyrics…</b>",
+            cards.working_card(
+                "lyrics", f"Looking for <b>{rich.esc(truncate(query or 'this track', 44))}</b>."
+            ),
             reply_to=message.id,
         )
         if current and not query:

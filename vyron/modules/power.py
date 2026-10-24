@@ -459,7 +459,9 @@ def register(client: Client) -> None:
         status = await rich.send(
             client,
             message.chat.id,
-            f"{E('clock')} {B.think()} <b>Pruning rows older than {days} days…</b>",
+            cards.working_card(
+                "cleanup", f"Pruning rows older than <b>{days}</b> days."
+            ),
             reply_to=message.id,
             editable=True,
         )

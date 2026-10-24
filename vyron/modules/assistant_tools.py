@@ -204,7 +204,7 @@ def register(client: Client) -> None:
         status = await rich.send(
             client,
             message.chat.id,
-            f"{E('clock')} {B.think()} <b>Uploading profile photo…</b>",
+            cards.working_card("assistant", "Uploading the new profile photo."),
             reply_to=message.id,
             editable=True,
         )
