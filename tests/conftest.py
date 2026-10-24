@@ -45,6 +45,33 @@ def _keep_an_event_loop():
     asyncio.set_event_loop(previous)
 
 
+_LOOPBACK = {"127.0.0.1", "::1", "localhost", "0.0.0.0", ""}
+
+
+@pytest.fixture(autouse=True)
+def _offline(monkeypatch):
+    """No test may reach the internet, on any machine.
+
+    "The suite is fully offline" was already the claim above, and nothing
+    enforced it: on CI (which has egress) a background task happily called
+    YouTube Music and a timing-sensitive test failed, while the same test
+    passed in a sandbox with no network. Guarding `connect` makes both
+    environments behave the same way — and localhost servers still work.
+    """
+    import socket
+
+    real_connect = socket.socket.connect
+
+    def guarded(self, address):
+        host = address[0] if isinstance(address, tuple) else address
+        if isinstance(host, str) and host not in _LOOPBACK:
+            raise OSError(f"network is disabled in tests ({host})")
+        return real_connect(self, address)
+
+    monkeypatch.setattr(socket.socket, "connect", guarded)
+    yield
+
+
 @pytest.fixture(autouse=True)
 def _no_catalogue_network(monkeypatch):
     """The substitution tier calls real APIs (JioSaavn, Audius, SoundCloud).

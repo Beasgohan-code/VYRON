@@ -160,12 +160,28 @@ def test_home_returns_partial_shelves_when_a_source_fails():
     assert payload["shelves"] == []  # empty, not an exception
 
 
-def test_home_primes_in_the_background():
+def test_home_primes_in_the_background(monkeypatch):
+    """Priming is fire-and-forget — so wait for the task, not for a stopwatch.
+
+    A fixed 50 ms sleep used to pass because this sandbox has no egress: the
+    YouTube Music chart call failed instantly. On CI, where it is a real HTTP
+    request, the same sleep was too short and the test failed for a reason that
+    had nothing to do with priming.
+    """
+    from vyron.core import ytmusic
+
+    monkeypatch.setattr(ytmusic, "available", lambda: False)
+    async def no_charts(*_args, **_kwargs):
+        return []
+
+    monkeypatch.setattr(ytmusic, "chart_tracks", no_charts)
     charts = Charts(CountingYouTube(), ttl=60)
 
     async def run():
         charts.prime()
-        await asyncio.sleep(0.05)
-        return charts._home_cache is not None
+        task = charts._prime_task
+        assert task is not None
+        await asyncio.wait_for(asyncio.shield(task), timeout=10)
+        return charts._home_cache
 
-    assert asyncio.run(run())
+    assert asyncio.run(run()) is not None
