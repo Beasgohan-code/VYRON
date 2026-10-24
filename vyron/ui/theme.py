@@ -36,7 +36,7 @@ BULLET = "▸"
 # Font-ish numerals for the "now playing" hero (keeps cards aligned).
 SMALL_CAPS = str.maketrans(
     "abcdefghijklmnopqrstuvwxyz",
-    "ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘQʀꜱᴛᴜᴠᴡxʏᴢ",
+    "ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀꜱᴛᴜᴠᴡxʏᴢ",
 )
 
 

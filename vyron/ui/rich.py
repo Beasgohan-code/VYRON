@@ -291,6 +291,12 @@ def to_plain_text(markup: str) -> str:
 _style_override: bool | None = None
 
 
+def blockquote(markup: str) -> str:
+    """A quoted asid — `<blockquote>` is a Telegram HTML tag, so this is just
+    the wrapper with the escaping done for you (used by /logs and /doctor)."""
+    return f"<blockquote>{esc(markup)}</blockquote>"
+
+
 def rich_enabled() -> bool:
     """Is the rich lane on *right now* for this process?"""
     if _style_override is not None:
@@ -582,6 +588,7 @@ async def react(message, glyph: str) -> None:
 
 __all__ = [
     "RICH_AVAILABLE",
+    "blockquote",
     "edit",
     "edit_inline",
     "esc",

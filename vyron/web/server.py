@@ -871,12 +871,27 @@ async def action(request: web.Request) -> web.Response:
             title, tracks = await pl.as_tracks(user.user_id, playlist_id)
             if not tracks:
                 return web.json_response({"ok": False, "error": "playlist is empty"}, status=400)
-            started = 0
-            for track in tracks[:60]:
+            # The first track has to actually start: enqueue() starts playback
+            # only when the player is idle, so cast it explicitly and let the
+            # rest of the list follow in order.
+            first = tracks[0]
+            started_now = not (state_obj is not None and state_obj.playing)
+            if started_now:
+                await player.play_track(chat_id, first)
+                await _mirror_now_playing(user, chat_id)
+            else:
+                await player.enqueue(chat_id, first)
+            queued = 0
+            for track in tracks[1:60]:
                 position = await player.enqueue(chat_id, track)
                 if position > 0:
-                    started += 1
-            return ok(queued=started, name=title)
+                    queued += 1
+            return ok(
+                started=started_now,
+                queued=queued + (0 if started_now else 1),
+                track=_track_json(first),
+                name=title,
+            )
 
         if name == "search":
             query = str(value or "").strip()

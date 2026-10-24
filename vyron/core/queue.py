@@ -17,7 +17,7 @@ class LoopMode(str, Enum):
     ALL = "all"
 
     @classmethod
-    def parse(cls, value: str | "LoopMode" | None) -> "LoopMode":
+    def parse(cls, value: str | LoopMode | None) -> LoopMode:
         if isinstance(value, LoopMode):
             return value
         try:

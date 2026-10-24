@@ -206,3 +206,15 @@ def test_escaped_newlines_in_the_env_cookie_are_understood(tmp_path):
     )
     _materialise_cookies(settings)
     assert (tmp_path / "cookies.txt").read_text().startswith("a\tb\nc")
+
+
+def test_small_caps_has_no_uppercase_leftovers():
+    """`ǫ` was a literal `Q`, so every card said ᴘQʀ instead of ᴘǫʀ."""
+    from vyron.ui.theme import small_caps
+
+    converted = small_caps("abcdefghijklmnopqrstuvwxyz")
+
+    assert len(converted) == 26
+    assert not any(char.isupper() and char.isascii() for char in converted)
+    assert converted[16] == "ǫ"
+    assert converted[25] == "ᴢ"

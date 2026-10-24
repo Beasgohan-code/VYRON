@@ -16,7 +16,6 @@ logger = logging.getLogger(__name__)
 
 try:  # pragma: no cover - depends on the installed build
     import richgram as _rg
-    from richgram import add_html_hook as _add_html_hook
 
     RICHGRAM = True
 except Exception:  # pragma: no cover
@@ -331,6 +330,11 @@ def install_hooks() -> None:
             flags=re.I | re.S,
         )
 
+    try:
+        from richgram import add_html_hook as _add_html_hook
+    except Exception as exc:  # pragma: no cover - optional package
+        logger.debug("richgram hook unavailable: %s", exc)
+        return
     try:
         _add_html_hook(_emoji_hook)
     except Exception as exc:  # pragma: no cover

@@ -231,3 +231,31 @@ def test_no_card_ever_ends_without_an_action():
         cards.ping_card(90.0, 60.0),
     ):
         assert "<tg-button" in markup
+
+
+def test_every_rich_helper_the_code_calls_actually_exists():
+    """`rich.blockquote` was called by /logs and never defined.
+
+    Nothing imported it, nothing type-checked it, and the failure only appeared
+    when somebody ran the command in a group. This walks the real call sites.
+    """
+    import ast
+    from pathlib import Path
+
+    from vyron.ui import blocks, cards, keyboards, rich, theme
+
+    modules = {"rich": rich, "blocks": blocks, "cards": cards, "keyboards": keyboards, "theme": theme}
+    root = Path(__file__).resolve().parents[1] / "vyron"
+    missing: list[str] = []
+    for path in root.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Attribute)
+                and isinstance(node.value, ast.Name)
+                and node.value.id in modules
+                and not hasattr(modules[node.value.id], node.attr)
+            ):
+                missing.append(f"{path.relative_to(root)}: {node.value.id}.{node.attr}")
+
+    assert missing == []
