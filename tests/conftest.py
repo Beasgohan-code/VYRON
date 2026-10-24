@@ -46,6 +46,26 @@ def _keep_an_event_loop():
 
 
 @pytest.fixture(autouse=True)
+def _no_catalogue_network(monkeypatch):
+    """The substitution tier calls real APIs (JioSaavn, Audius, SoundCloud).
+
+    On a developer machine with no egress those calls fail instantly and a test
+    that expects an error still gets one — on CI, with internet, the same test
+    could suddenly succeed and fail for the wrong reason. Tests that exercise
+    the tier patch `_from_source` themselves; everything else stays offline.
+    """
+    from vyron.core import alternate
+
+    async def offline(name: str, query: str, limit: int):
+        return []
+
+    alternate.reset_cache()
+    monkeypatch.setattr(alternate, "_from_source", offline)
+    yield
+    alternate.reset_cache()
+
+
+@pytest.fixture(autouse=True)
 def _no_journal_mirror():
     """The journal mirrors warnings into storage on a 2 s debounce.
 

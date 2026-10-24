@@ -382,8 +382,11 @@ async def audio_info(request: web.Request) -> web.Response:
     # this track, a cached file exists, or it is still up to the resolver. So
     # the app can say "playing from JioSaavn" instead of implying YouTube.
     served_by = track.source
-    if not cached and runtime.youtube is not None:
-        served_by = runtime.youtube.stream_source(track) or served_by
+    resolver = runtime.youtube
+    if not cached and resolver is not None:
+        ask = getattr(resolver, "stream_source", None)
+        if callable(ask):
+            served_by = ask(track) or served_by
     payload = {
         "ok": True,
         "id": track.id,
