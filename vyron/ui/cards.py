@@ -810,7 +810,7 @@ def history_card(items: list[dict]) -> str:
         + body
         + B.actions(
             B.row(
-                B.btn(f"{E('play')} Play the first", data="v:hist:play", style="primary"),
+                B.btn(f"{E('play')} Pick a song", data="v:help:playback", style="primary"),
                 B.btn(f"{E('close')} Close", data="v:close"),
             )
         )
@@ -1701,7 +1701,7 @@ def ping_card(latency_ms: float, uptime: float) -> str:
         )
         + B.actions(
             B.row(
-                B.btn(f"{E('check')} Again", data="v:ping", style="primary"),
+                B.btn(f"{E('check')} Close", data="v:close", style="primary"),
                 B.btn(f"{E('stats')} Stats", data="v:admin:stats"),
             )
         )

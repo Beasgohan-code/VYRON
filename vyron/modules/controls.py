@@ -238,7 +238,11 @@ def register(client: Client) -> None:
                 )
                 + B.actions(
                     B.row(
-                        B.btn(f"{E('spark')} Toggle", data="v:autoplay:toggle", style="primary"),
+                        B.btn(
+                            f"{E('spark')} {'Turn off' if state.autoplay else 'Turn on'}",
+                            data="v:set:autoplay",
+                            style="primary",
+                        ),
                         B.btn(f"{E('close')} Close", data="v:close"),
                     )
                 )
