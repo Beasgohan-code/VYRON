@@ -138,19 +138,27 @@ def make_player(*, assistant=None, calls=None, downloader=None, settings=None):
     return player, calls, youtube, storage
 
 
-def track(track_id: str, title: str | None = None, duration: int = 180) -> Track:
+def track(track_id: str, title: str | None = None, duration: int = 180, **extra) -> Track:
     return Track(
         id=track_id,
         title=title or track_id.title(),
         duration=duration,
-        uploader="Artist",
+        uploader=extra.pop("uploader", "Artist"),
         requested_by=7,
         requested_name="Rahul",
+        **extra,
     )
 
 
 def run(coro):
     return asyncio.run(coro)
+
+
+def _async_return(value):
+    async def inner(*args, **kwargs):
+        return list(value) if isinstance(value, list) else value
+
+    return inner
 
 
 # ── starting ────────────────────────────────────────────────────────────────
@@ -562,3 +570,59 @@ def test_without_an_assistant_everything_still_reports_cleanly(monkeypatch):
     player, _, _, _ = make_player()
     assert run(player._assistant_joined(-100)) is False
     assert run(player.ensure_assistant(-100)) is False
+
+
+# ── mid-song recovery ───────────────────────────────────────────────────────
+def _end_event(chat_id: int = 10):
+    return SimpleNamespace(chat_id=chat_id, stream_type="AUDIO")
+
+
+def test_an_early_stream_end_resumes_the_same_song(monkeypatch):
+    """A 403 at 0:40 is a drop, not "the song finished"."""
+    player, calls, youtube, storage = make_player()
+    song = track("abc", duration=240, title="Kesariya", uploader="Arijit Singh")
+    run(player.play_track(10, song))
+    state = player.queues.get(10)
+    state.started_at -= 40                      # pretend we are 40 s in
+
+    fresh = track("xyz", duration=240, title="Kesariya", uploader="Arijit Singh", source="jiosaavn")
+    monkeypatch.setattr(
+        "vyron.core.sources.fallback_search",
+        _async_return([fresh]),
+    )
+    youtube.search_results = [track("yt2", duration=240, title="Kesariya")]
+
+    run(player.on_stream_end(None, _end_event()))
+
+    state = player.queues.get(10)
+    assert state.current.id == "xyz"            # another source, same song
+    assert state.offset >= 30                   # resumed where it stopped
+    assert len(calls.played) == 2
+    assert storage.counters["tracks"] == 1      # a recovery is not a new play
+
+
+def test_a_finished_song_still_advances(monkeypatch):
+    player, calls, _, _ = make_player()
+    run(player.play_track(10, track("abc", duration=200)))
+    run(player.enqueue(10, track("next", duration=120)))
+    state = player.queues.get(10)
+    state.started_at -= 199                     # the song is over
+
+    monkeypatch.setattr("vyron.core.sources.fallback_search", _async_return([]))
+    run(player.on_stream_end(None, _end_event()))
+
+    assert player.queues.get(10).current.id == "next"
+
+
+def test_recovery_is_rate_limited_per_chat(monkeypatch):
+    player, calls, youtube, _ = make_player()
+    monkeypatch.setattr("vyron.core.sources.fallback_search", _async_return([]))
+    youtube.search_results = [track("yt2", duration=240, title="same")]
+
+    async def scenario():
+        first = await player._recover_stream(10, SimpleNamespace(current=track("abc", duration=240), is_video=False), 40)
+        second = await player._recover_stream(10, SimpleNamespace(current=track("abc", duration=240), is_video=False), 40)
+        return first, second
+
+    first, second = run(scenario())
+    assert first is True and second is False

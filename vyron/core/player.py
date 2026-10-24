@@ -91,6 +91,8 @@ class Player:
         self._vc_attempts: dict[int, float] = {}
         self._save_task: asyncio.Task | None = None
         self._in_call: set[int] = set()
+        # last mid-song recovery per chat: a drop is retried once, not forever
+        self._recovered_at: dict[int, float] = {}
         self._idle_task: asyncio.Task | None = None
         self._running = False
         self.tracks_played = 0
@@ -944,6 +946,72 @@ class Player:
         state.ended_at = now
         return False
 
+    async def _recover_stream(self, chat_id: int, state, played: float) -> bool:
+        """A stream died mid-song — pick the song up where it stopped.
+
+        YouTube URLs expire, a datacenter IP gets throttled, a direct host
+        hiccups. None of that should skip to the next track: the listener is
+        two minutes into a four-minute song, so the right answer is to resolve
+        the same song somewhere else and resume with a small rewind.
+        """
+        now = clock()
+        if now - self._recovered_at.get(chat_id, 0.0) < 25.0:
+            return False            # one attempt per track, not a retry storm
+        current = state.current
+        if current is None:
+            return False
+        self._recovered_at[chat_id] = now
+        seek = max(0, int(played) - 3)
+        query = f"{current.title} {current.uploader or ''}".strip()
+
+        candidates: list[Track] = []
+        try:
+            from vyron.core import sources as source_registry
+
+            candidates.extend(
+                await source_registry.fallback_search(query, 2, settings=self.settings)
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("recovery search failed: %s", exc)
+        try:
+            found = await self.youtube.search(query, limit=1)
+            candidates.extend(found)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("recovery youtube search failed: %s", exc)
+
+        seen: set[str] = {current.id}
+        for candidate in candidates:
+            key = f"{candidate.source}:{candidate.id}"
+            if candidate.id in seen:
+                continue
+            seen.add(candidate.id)
+            try:
+                await self.play_track(
+                    chat_id,
+                    candidate,
+                    video=candidate.is_video or state.is_video,
+                    seek=seek,
+                    announce=False,
+                    count_play=False,
+                )
+            except StreamError as exc:
+                logger.info("recovery via %s failed: %s", key, exc)
+                continue
+            logger.info(
+                "recovered “%s” in %s at %ss via %s", current.title, chat_id, seek, candidate.source
+            )
+            journal.warn(
+                "player",
+                f"stream dropped — resumed “{current.title}” at {seek}s from {candidate.source}",
+                chat=chat_id,
+                track=current.id,
+                elapsed=round(played, 1),
+                source=candidate.source,
+            )
+            return True
+        journal.error("player", f"could not recover “{current.title}”", chat=chat_id, track=current.id)
+        return False
+
     async def on_stream_end(self, _client, update) -> None:
         chat_id = int(getattr(update, "chat_id", 0) or 0)
         if not chat_id:
@@ -957,6 +1025,17 @@ class Player:
         if self.duplicate_stream_end(state, clock()):
             logger.debug("ignoring duplicate stream end in %s", chat_id)
             return
+
+        # A stream that ends early is a drop, not a finished song. Check before
+        # treating it as "next track", otherwise a 403 at 0:40 looks exactly
+        # like a track that simply ended.
+        track = state.current
+        played = state.elapsed(clock())
+        duration = int(getattr(track, "duration", 0) or 0)
+        unfinished = duration > 30 and played < duration - 5
+        if unfinished and not state.paused and played >= 5:
+            if await self._recover_stream(chat_id, state, played):
+                return
         try:
             await self.skip(chat_id, natural=True)
         except Exception as exc:
