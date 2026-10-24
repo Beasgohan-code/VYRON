@@ -1,4 +1,4 @@
-import { Heart, History, ListMusic, Play, Plus, Trash2 } from "lucide-react";
+import { Heart, History, ListMusic, Play, Plus, Radio, Shuffle, Trash2 } from "lucide-react";
 import { useApp } from "../lib/store";
 import { fmtDuration } from "../lib/format";
 import { Cover } from "../components/Cover";
@@ -17,6 +17,8 @@ export function Library() {
     play,
     act,
     toast,
+    audio,
+    refreshPlaylists,
   } = useApp();
   const stage = useViewReveal<HTMLDivElement>("library", ".stage-block");
 
@@ -113,12 +115,42 @@ export function Library() {
                     {selectedPlaylist.count} tracks · {fmtDuration(selectedPlaylist.duration)}
                   </span>
                   <div className="playlist-actions">
+                    {/* Play the tracks themselves. This used to pass the
+                        playlist *name* to the song resolver, so "Play" on a
+                        playlist called "Chill" searched for a song called
+                        Chill — and usually played something else entirely. */}
                     <button
                       type="button"
                       className="btn btn-primary sm"
-                      onClick={() => void play(selectedPlaylist.name, "play_now")}
+                      disabled={(selectedPlaylist.tracks ?? []).length === 0}
+                      onClick={() => {
+                        const tracks = selectedPlaylist.tracks ?? [];
+                        if (tracks[0]) audio.play(tracks[0], tracks);
+                      }}
                     >
                       <Play size={14} fill="currentColor" /> Play
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost sm"
+                      disabled={(selectedPlaylist.tracks ?? []).length === 0}
+                      onClick={() => {
+                        const tracks = [...(selectedPlaylist.tracks ?? [])];
+                        for (let index = tracks.length - 1; index > 0; index -= 1) {
+                          const swap = Math.floor(Math.random() * (index + 1));
+                          [tracks[index], tracks[swap]] = [tracks[swap], tracks[index]];
+                        }
+                        if (tracks[0]) audio.play(tracks[0], tracks);
+                      }}
+                    >
+                      <Shuffle size={13} /> Shuffle
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost sm"
+                      onClick={() => void act("playlist_play", selectedPlaylist.id)}
+                    >
+                      <Radio size={13} /> Cast
                     </button>
                     <button type="button" className="btn btn-ghost sm" onClick={() => openPlaylist(null)}>
                       Close
@@ -128,7 +160,26 @@ export function Library() {
               </header>
               <ul className="rows">
                 {(selectedPlaylist.tracks ?? []).map((track, index) => (
-                  <TrackRow key={`${track.id ?? track.title}-${index}`} track={track} index={index + 1} />
+                  <TrackRow
+                    key={`${track.id ?? track.title}-${index}`}
+                    track={track}
+                    index={index + 1}
+                    onRemove={async () => {
+                      const payload = await act("playlist_remove", {
+                        playlist_id: selectedPlaylist.id,
+                        id: track.id,
+                      });
+                      if (payload) {
+                        toast("Removed from the playlist", "success");
+                        await refreshPlaylists();
+                        openPlaylist({
+                          ...selectedPlaylist,
+                          tracks: (selectedPlaylist.tracks ?? []).filter((item) => item !== track),
+                          count: Math.max(0, selectedPlaylist.count - 1),
+                        });
+                      }
+                    }}
+                  />
                 ))}
                 {(selectedPlaylist.tracks ?? []).length === 0 && (
                   <li className="fine">This playlist is empty — add tracks from any result.</li>
