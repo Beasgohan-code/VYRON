@@ -59,18 +59,19 @@ def test_human_helpers():
 
 # ── progress bar ────────────────────────────────────────────────────────────
 def test_progress_bar_shape():
+    """Played is a heavy rule, the rest is light, and the playhead is a heart."""
     bar = progress_bar(30, 120, length=14)
     assert len(bar) == 14
-    assert bar.count("◉") == 1
-    assert bar[0] == "█"
+    assert bar.count("♡") == 1
+    assert bar[0] == "━"
 
 
 def test_progress_bar_edges():
-    assert progress_bar(0, 100, length=10).startswith("◉")
+    assert progress_bar(0, 100, length=10).startswith("♡")
     finished = progress_bar(100, 100, length=10)
-    assert finished.endswith("◉")
-    assert progress_bar(0, 0, length=10).count("█") == 0
-    assert progress_bar(9999, 10, length=10).endswith("◉")
+    assert finished.endswith("♡")
+    assert progress_bar(0, 0, length=10).count("━") == 0
+    assert progress_bar(9999, 10, length=10).endswith("♡")
 
 
 def test_percentage_clamps():

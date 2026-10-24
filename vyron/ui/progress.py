@@ -10,9 +10,13 @@ import math
 import re
 import time
 
-BAR_FULL = "█"
-BAR_EMPTY = "▬"
-KNOB = "◉"
+# The bar is a line of music, not a load meter: a heavy rule for what has
+# played, a light one for what is left, and the heart as the playhead — the
+# same "—♡—" idea people already read in music bots, but with the played
+# part actually filled in.
+BAR_FULL = "━"
+BAR_EMPTY = "─"
+KNOB = "♡"
 
 def parse_duration(value: str | int | float | None) -> int:
     """Parse ``1:02:03``, ``3:45``, ``95`` or ``'95'`` into seconds."""
@@ -58,12 +62,12 @@ def progress_bar(
     elapsed: float,
     total: float,
     *,
-    length: int = 14,
+    length: int = 13,
     knob: str = KNOB,
     full: str = BAR_FULL,
     empty: str = BAR_EMPTY,
 ) -> str:
-    """Render ``█████◉▬▬▬▬`` for a track position."""
+    """Render ``━━━━━♡─────`` for a track position."""
     length = max(5, int(length))
     total = float(total or 0)
     elapsed = max(0.0, float(elapsed or 0))

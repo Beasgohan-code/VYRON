@@ -52,15 +52,21 @@ def _watch_link(track: Track) -> str:
 
 
 def progress_block(state: ChatState, track: Track) -> str:
-    """Two monospace lines: the bar, then the clock. Same width every time."""
+    """One line: where it is, how far into it, where it ends.
+
+    ``1:03 ━━━━♡──────── 2:44`` reads left to right like the song plays; the
+    old stacked "bar, then clock, then percent" made you look twice.
+    """
     elapsed = state.elapsed()
     total = track.duration or 0
-    bar = progress_bar(elapsed, total, length=16)
     if not total:
-        return f"<code>{bar}</code>\n<code>{fmt_duration(elapsed)} · live</code>"
+        return (
+            f"<code>{fmt_duration(elapsed)}</code> "
+            f"{progress_bar(elapsed, 0, length=13)} <i>{small_caps('live')}</i>"
+        )
     return (
-        f"<code>{bar}</code>\n"
-        f"<code>{fmt_duration(elapsed)}</code> · {percentage(elapsed, total)}% · "
+        f"<code>{fmt_duration(elapsed)}</code> "
+        f"<code>{progress_bar(elapsed, total, length=13)}</code> "
         f"<code>{fmt_duration(total)}</code>"
     )
 
@@ -422,47 +428,62 @@ def help_card(section: str = "main") -> str:
 
 # ── now playing (live, editable) ────────────────────────────────────────────
 def now_playing_card(state: ChatState, track: Track | None = None) -> str:
-    """The live card — classic HTML only, because it is edited in place."""
+    """The live card — edited in place every few seconds, so it stays short.
+
+    Read top to bottom it answers: what is this, who made it, where am I in
+    it, and what is next. The buttons live on the attached keyboard, not in
+    the text, because this message is edited rather than re-sent.
+    """
     track = track or state.current
     if not track:
         return (
-            f"{E('moon')} <b>Nothing is playing</b>\n"
-            f"<blockquote>Send <code>/play</code> with a song name, a link or a reply.</blockquote>"
+            B.banner("nothing playing", glyph="moon")
+            + B.context(
+                "Send <code>/play</code> with a song name, a link, or a reply to a file."
+            )
         )
 
     status = "paused" if state.paused else "streaming"
     glyph = E("pause") if state.paused else E("live")
+    elapsed = state.elapsed()
+    total = track.duration or 0
     requester = _requester(track)
-    meta = (
-        f"{esc(truncate(track.uploader, 32) or 'unknown artist')}"
-        f" · {fmt_duration(track.duration)} · {_source_badge(track)}"
-    )
-    if requester:
-        meta += f" · {requester}"
 
-    upcoming = state.queue[0] if state.queue else None
-    next_line = ""
-    if upcoming:
-        next_line = (
-            f"\n◈ {E('queue')} <b>{small_caps('up next')}</b>: "
-            f"{esc(truncate(upcoming.title, 40))} · {fmt_duration(upcoming.duration)}"
-        )
+    artist = esc(truncate(track.uploader, 32) or "unknown artist")
+    meta = f"{artist} · {fmt_duration(total)} · {_source_badge(track)}"
+
+    lines = [progress_block(state, track)]
+    state_bits = [f"{glyph} <b>{status}</b>", f"🔊 {int(state.volume)}%" if state.volume else "🔇 muted"]
+    if total:
+        state_bits.insert(1, f"{percentage(elapsed, total)}%")
+    lines.append(" · ".join(state_bits))
 
     flags = []
-    if state.autoplay:
-        flags.append("autoplay")
+    if getattr(state.loop, "value", "off") != "off":
+        flags.append(f"{E('loop')} {state.loop.label}")
     if state.always_on:
-        flags.append("24/7")
-    tail = f"{state.volume}% volume · {state.loop.label} loop · {len(state.queue)} queued"
+        flags.append(f"{E('clock')} 24/7")
+    if state.autoplay:
+        flags.append(f"{E('spark')} autoplay")
+    if requester:
+        flags.append(f"{E('user')} {requester}")
     if flags:
-        tail += f" · {', '.join(flags)}"
+        lines.append(f"<i>{' · '.join(flags)}</i>")
+
+    if state.queue:
+        upcoming = state.queue[0]
+        lines.append(
+            f"{E('skip')} <i>{small_caps('up next')}</i> "
+            f"{esc(truncate(upcoming.title, 40))} · {fmt_duration(upcoming.duration)}"
+            + (f" · <i>{len(state.queue)} queued</i>" if len(state.queue) > 1 else "")
+        )
 
     return (
-        f"◈ {glyph} <b>{small_caps('now playing')}</b>: <b>{status}</b>\n"
-        f"<blockquote><b>{_watch_link(track)}</b>\n{meta}</blockquote>\n"
-        f"{progress_block(state, track)}{next_line}\n"
-        f"<i>{tail}</i>"
+        B.banner("now playing", glyph="live")
+        + B.context(f"<b>{_watch_link(track)}</b>\n{meta}")
+        + "\n".join(lines)
     )
+
 
 def now_playing_caption(state: ChatState, catalog=None) -> str:
     """Caption for the poster: the live clock, nothing the picture already says.
@@ -478,38 +499,55 @@ def now_playing_caption(state: ChatState, catalog=None) -> str:
 
     elapsed = state.elapsed()
     total = track.duration or 0
-    bar = progress_bar(elapsed, total, length=18)
-    clock_line = (
-        f"<code>{fmt_duration(elapsed)}</code> · {percentage(elapsed, total)}% · "
-        f"<code>{fmt_duration(total)}</code>"
-        if total
-        else f"<code>{fmt_duration(elapsed)}</code> · live"
-    )
     status = (
         label("np.paused", "paused") if state.paused else label("np.streaming", "streaming")
     )
-    lines = [f"<code>{bar}</code>", f"{E('live')} {status} · {clock_line}"]
+    status_glyph = E("pause") if state.paused else E("live")
 
+    # Line 1 — the song's own clock, in the order it is heard: now, the bar
+    # between, then the end. Times hug the bar, so the eye lands on the ♡.
+    if total:
+        lines = [
+            f"<code>{fmt_duration(elapsed)}</code> "
+            f"<code>{progress_bar(elapsed, total, length=13)}</code> "
+            f"<code>{fmt_duration(total)}</code>"
+        ]
+    else:
+        lines = [
+            f"{progress_bar(elapsed, 0, length=13)} "
+            f"<i>{label('np.live', 'live')}</i>"
+        ]
+
+    # Line 2 — what it is doing, and how loud, in one breath.
+    state_bits = [
+        f"{status_glyph} {status}",
+        f"{percentage(elapsed, total)}%" if total else "",
+        f"{E('volume')} {int(state.volume)}%" if state.volume else f"{E('mute')} muted",
+    ]
+    lines.append(" · ".join(bit for bit in state_bits if bit))
+
+    # Line 3 — anything that changes how the queue behaves, then who asked.
+    flags = [
+        f"{E('loop')} {state.loop.label}" if getattr(state.loop, "value", "off") != "off" else "",
+        f"{E('clock')} 24/7" if state.always_on else "",
+        f"{E('queue')} {label('np.queued', '{count} queued', count=len(state.queue))}"
+        if state.queue
+        else "",
+    ]
+    requester = _requester(track)
+    meta = [flag for flag in flags if flag]
+    if requester:
+        meta.append(f"{E('user')} {requester}")
+    if meta:
+        lines.append(f"<i>{' · '.join(meta)}</i>")
+
+    # Line 4 — only when there is one, and always last: it is the future.
     if state.queue:
         upcoming = state.queue[0]
         lines.append(
-            f"{E('queue')} <i>{label('np.up_next', 'up next')}</i> "
+            f"{E('skip')} <i>{label('np.up_next', 'up next')}</i> "
             f"{esc(truncate(upcoming.title, 34))}"
         )
-    requester = _requester(track)
-    if requester:
-        lines.append(f"{E('user')} {requester}")
-    # A bare "100%" at the end of a caption reads like a download figure, so
-    # every flag now says what it is, and mute gets a word instead of a zero.
-    flags = [
-        f"{E('volume')} {int(state.volume)}%" if state.volume else f"{E('mute')} muted",
-        f"{E('loop')} {state.loop.label}" if getattr(state.loop, "value", "off") != "off" else "",
-        f"{E('clock')} 24/7" if state.always_on else "",
-        label("np.queued", "{count} queued", count=len(state.queue)) if state.queue else "",
-    ]
-    tail = " · ".join(flag for flag in flags if flag)
-    if tail:
-        lines.append(f"<i>{tail}</i>")
     return "\n".join(lines)
 
 
