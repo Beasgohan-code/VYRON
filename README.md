@@ -289,7 +289,8 @@ No API keys, no logins, no credentials.
 | `open.spotify.com/album/…` · `/playlist/…` | public embed page | the whole track list |
 | `deezer.com/track/…` · `/album/…` · `/playlist/…` | open Deezer API | title, artist, cover, full album |
 | `music.apple.com/…/song/…` · `/album/…?i=…` | iTunes lookup API | title, artist, artwork, album |
-| `soundcloud.com/artist/track` | SoundCloud oEmbed | title, artist, artwork |
+| `soundcloud.com/artist/track` | **yt-dlp `scsearch` / extraction** | **plays that upload** — real audio, no key |
+| `artist.bandcamp.com/track/…` | **yt-dlp extraction** | **plays that page** — the artist's own stream |
 | `music.youtube.com/watch?v=…` | already a YouTube id | straight to the ladder |
 | `audius.co/<artist>/<track>` | Audius public API | **a real direct audio stream** — no YouTube involved |
 | `jiosaavn.com/song/…` · `/album/…` | JioSaavn public API (`saavn.dev`) | **a real direct audio stream**, best bitrate (320 kbps) |
@@ -299,20 +300,22 @@ three concurrent searches), skipping the ones that do not resolve instead of
 failing the whole album. `/play <track link>` starts the best match, and the
 catalogue's artwork replaces the YouTube thumbnail when it is available. The
 tier is controlled by `MUSIC_SOURCES` (`off` = YouTube-only behaviour; the
-direct-stream fallbacks are `audius` and `jiosaavn`, and both are always on).
+direct-stream fallbacks are `audius`, `jiosaavn`, `soundcloud` and `bandcamp`).
 
-**Audius and JioSaavn are different.** Both are open platforms whose APIs serve
-the audio itself, so a link from either becomes a playable track with no
-extraction step at all: the player streams the returned URL, `/song` downloads
-it through the aria2 → curl → aiohttp ladder. They are also the search fallback
-when YouTube returns nothing, which means a fresh deployment can play something
-even while YouTube is throttling its IP.
+**Four sources hand out audio themselves.** Audius and JioSaavn are open
+platforms whose APIs serve the file: a link becomes a playable track with no
+extraction step at all, the player streams the returned URL and `/song`
+downloads it through the aria2 → curl → aiohttp ladder. SoundCloud and Bandcamp
+are different in mechanism but not in spirit — yt-dlp reads *that* page, so a
+rare remix plays the actual upload instead of the closest YouTube guess. All
+four are the search fallback when YouTube returns nothing, which means a fresh
+deployment can play something even while YouTube is throttling its IP.
 
 **Nothing needs to be chosen.** All of this sits behind one ordered registry
 (`vyron/core/sources.py`), in the order VYRON actually tries them:
 
 ```
-ytmusic · ytdlp  →  audius  →  jiosaavn
+ytmusic · ytdlp  →  audius  →  jiosaavn  →  soundcloud  →  bandcamp
 ```
 
 If a tier fails twice inside a minute it cools down for 60 s and the next one
@@ -936,7 +939,7 @@ The interesting optional ones:
 | `COMMAND_PREFIXES` | `/!.?#%$&~` | characters that may start a command; comma/space separated, `/` always on, `off` for slash-only, an empty entry enables prefix-less |
 | `YTDLP_AUTOUPDATE` | `on` | check PyPI on boot/daily and upgrade yt-dlp in place |
 | `COBALT_URLS` | – | your own Cobalt instance(s), comma separated; `off` disables the tier |
-| `MUSIC_SOURCES` | `spotify,deezer,apple,soundcloud` | catalogue links to read for metadata; `off` = YouTube only |
+| `MUSIC_SOURCES` | `spotify,deezer,apple` | catalogue links to read for metadata; `off` = YouTube only (the direct-stream tier — Audius, JioSaavn, SoundCloud, Bandcamp — is not affected) |
 | `YTMUSIC_SEARCH` | `on` | YouTube Music search via `ytmusicapi` (better artist/album matching), falls back to yt-dlp |
 | `MONGO_URL` | – | persistence (JSON file otherwise) |
 | `PREMIUM_EMOJI_FILE` | `./emoji.json` | custom emoji pack |

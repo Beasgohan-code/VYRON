@@ -23,6 +23,7 @@ from vyron.config import Settings
 from vyron.core import effects as audio_fx
 from vyron.core.queue import ChatState, LoopMode, QueueManager, Track
 from vyron.core.sources import DIRECT_SOURCES as _DIRECT_SOURCES
+from vyron.core.sources import EXTRACT_SOURCES as _EXTRACT_SOURCES
 from vyron.core.search import MediaError, YouTube
 from vyron.database import Storage
 from vyron.core.journal import journal
@@ -382,6 +383,15 @@ class Player:
                     exc,
                 )
                 journal.warn("player", "disk playback failed, using the URL", track=track.id, error=str(exc))
+        if not url and track.source in _EXTRACT_SOURCES and track.url:
+            # SoundCloud / Bandcamp: the page must be extracted before ntgcalls
+            # can be handed anything, and it is not a YouTube id.
+            from vyron.core import extract
+
+            try:
+                url = await extract.stream_url(track)
+            except Exception as exc:
+                logger.warning("extraction failed for %s (%s)", track.id, exc)
         if not url:
             try:
                 url = await self.youtube.stream_url(track, video=video)

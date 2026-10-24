@@ -571,10 +571,11 @@ class YouTube:
                 direct.requested_by, direct.requested_name = requester
                 return direct
 
-        # A Spotify / Deezer / Apple Music / SoundCloud link is metadata, not
-        # audio: read the catalogue entry, then let the normal ladder find the
-        # song. The catalogue's artwork is usually the best-looking cover, so
-        # it wins over the YouTube thumbnail when we have it.
+        # A Spotify / Deezer / Apple Music link is metadata, not audio: read the
+        # catalogue entry, then let the normal ladder find the song. The
+        # catalogue's artwork is usually the best-looking cover, so it wins over
+        # the YouTube thumbnail when we have it. (SoundCloud and Bandcamp are
+        # handled above: yt-dlp extracts *those* uploads directly.)
         if self._catalogue_enabled() and metasources.is_catalogue_link(query):
             found = await self._from_catalogue(query, requester=requester)
             if found is not None:

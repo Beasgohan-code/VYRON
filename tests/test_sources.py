@@ -692,3 +692,115 @@ def test_content_status_is_json_safe():
     rows = sources.status()
     for row in rows:
         assert set(row) >= {"name", "kind", "enabled", "available", "last_ok"}
+
+
+# ── SoundCloud / Bandcamp: platforms yt-dlp reads itself ────────────────────
+class _FakeYDL:
+    """Stands in for yt-dlp: records what was asked, returns canned info."""
+
+    calls: list[str] = []
+    info: dict = {}
+
+    def __init__(self, opts):
+        self.opts = opts
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def extract_info(self, target, download=False):
+        _FakeYDL.calls.append(target)
+        return _FakeYDL.info
+
+
+def _use_fake(monkeypatch, info):
+    from vyron.core import extract
+
+    _FakeYDL.calls = []
+    _FakeYDL.info = info
+    monkeypatch.setattr(extract.yt_dlp, "YoutubeDL", _FakeYDL)
+    return extract
+
+
+def test_extract_recognises_its_platforms():
+    from vyron.core import extract
+
+    assert extract.service_of("https://soundcloud.com/artist/remix") == "soundcloud"
+    assert extract.service_of("https://on.soundcloud.com/abc") == "soundcloud"
+    assert extract.service_of("https://artist.bandcamp.com/track/song") == "bandcamp"
+    assert extract.service_of("https://open.spotify.com/track/x") == ""
+    assert extract.service_of("") == ""
+    assert not extract.is_soundcloud("https://soundcloud.example.com/x")
+
+
+def test_extract_search_builds_scsearch_and_maps_entries(monkeypatch):
+    extract = _use_fake(
+        monkeypatch,
+        {
+            "entries": [
+                {
+                    "id": "123456",
+                    "title": "Kesariya (Slowed)",
+                    "duration": 260,
+                    "uploader": "someone",
+                    "webpage_url": "https://soundcloud.com/someone/kesariya",
+                    "thumbnails": [{"url": "https://i/120.jpg", "width": 120, "height": 120},
+                                   {"url": "https://i/500.jpg", "width": 500, "height": 500}],
+                },
+                {"id": "broken", "title": ""},
+            ]
+        },
+    )
+    tracks = asyncio.run(extract.search_soundcloud("kesariya", 3))
+    assert _FakeYDL.calls == ["scsearch3:kesariya"]
+    assert len(tracks) == 1                       # the empty entry is dropped
+    track = tracks[0]
+    assert track.source == "soundcloud" and track.id == "123456"
+    assert track.thumbnail == "https://i/500.jpg"  # largest thumbnail wins
+    assert track.url == "https://soundcloud.com/someone/kesariya"
+
+
+def test_extract_resolve_is_host_scoped(monkeypatch):
+    extract = _use_fake(
+        monkeypatch,
+        {
+            "id": "99",
+            "title": "Home",
+            "duration": 200,
+            "uploader": "artist",
+            "webpage_url": "https://artist.bandcamp.com/track/home",
+            "formats": [],
+        },
+    )
+    assert asyncio.run(extract.resolve_soundcloud("https://example.com/x")) is None
+    track = asyncio.run(extract.resolve_bandcamp("https://artist.bandcamp.com/track/home"))
+    assert track is not None and track.source == "bandcamp" and track.id == "99"
+
+
+def test_extract_stream_url_prefers_audio_only(monkeypatch):
+    extract = _use_fake(
+        monkeypatch,
+        {
+            "formats": [
+                {"url": "https://a/128", "acodec": "mp3", "vcodec": "none", "abr": 128},
+                {"url": "https://a/256", "acodec": "mp3", "vcodec": "none", "abr": 256},
+                {"url": "https://a/video", "acodec": "aac", "vcodec": "h264", "abr": 320},
+            ]
+        },
+    )
+    from vyron.core.queue import Track
+
+    url = asyncio.run(extract.stream_url(Track(id="1", title="t", url="https://soundcloud.com/a/b")))
+    assert url == "https://a/256"
+
+
+def test_registry_exposes_soundcloud_and_bandcamp_as_streams():
+    from vyron.core import sources
+
+    rows = {row["name"]: row for row in sources.status()}
+    assert rows["soundcloud"]["kind"] == "stream"
+    assert rows["bandcamp"]["kind"] == "stream"
+    assert "soundcloud" not in sources.CATALOGUE_SOURCES
+    assert sources.EXTRACT_SOURCES == {"soundcloud", "bandcamp"}

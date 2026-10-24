@@ -3,9 +3,9 @@
 # ---------------------------------------------------------------------------
 # Every place a song can come from, in one list, with one order. Three kinds:
 #
-#   search     can find a song by text        (yt-dlp, YouTube Music, yt-dlp scsearch)
-#   catalogue  can read a foreign link        (Spotify, Deezer, Apple, SoundCloud)
-#   stream     can hand out real audio        (Audius, JioSaavn)
+#   search     can find a song by text        (yt-dlp, YouTube Music)
+#   catalogue  can read a foreign link        (Spotify, Deezer, Apple)
+#   stream     can hand out real audio        (Audius, JioSaavn, SoundCloud, Bandcamp)
 #
 # YouTube (through the yt-dlp client ladder) is primary. The rest are fallbacks
 # in a deliberate order: when the primary returns nothing, the next *stream*
@@ -24,8 +24,12 @@ logger = logging.getLogger(__name__)
 
 # Sources whose `Track.url` *is* the audio: no extraction, no YouTube.
 DIRECT_SOURCES = frozenset({"audius", "jiosaavn"})
+# Sources whose `Track.url` is a page yt-dlp extracts itself. Different from a
+# direct stream (there is an extraction step) and from a catalogue (the audio
+# really comes from that platform, not from a YouTube guess).
+EXTRACT_SOURCES = frozenset({"soundcloud", "bandcamp"})
 # Sources that only describe a song; audio always comes from a stream source.
-CATALOGUE_SOURCES = frozenset({"spotify", "deezer", "apple", "soundcloud"})
+CATALOGUE_SOURCES = frozenset({"spotify", "deezer", "apple"})
 
 
 @dataclass
@@ -148,13 +152,39 @@ def registry(settings=None) -> list[Source]:
     except Exception:  # pragma: no cover
         pass
 
+    try:
+        from vyron.core import extract
+
+        items.append(
+            Source(
+                "soundcloud",
+                "SoundCloud",
+                "stream",
+                enabled=_extra_enabled,
+                search=extract.search_soundcloud,
+                resolve=extract.resolve_soundcloud,
+                detail=extract.describe(),
+            )
+        )
+        items.append(
+            Source(
+                "bandcamp",
+                "Bandcamp",
+                "stream",
+                enabled=_extra_enabled,
+                resolve=extract.resolve_bandcamp,
+                detail="yt-dlp · the artist's own page · no key",
+            )
+        )
+    except Exception:  # pragma: no cover
+        pass
+
     # ── catalogue readers ─────────────────────────────────────────────────
     if _extra_enabled():
         for name, label, detail in (
             ("spotify", "Spotify", "oEmbed + public embed page"),
             ("deezer", "Deezer", "open API (track/album/playlist)"),
             ("apple", "Apple Music", "iTunes lookup API"),
-            ("soundcloud", "SoundCloud", "oEmbed (audio via yt-dlp)"),
         ):
             items.append(Source(name, label, "catalogue", enabled=_extra_enabled, detail=detail))
     return items
@@ -205,7 +235,7 @@ async def fallback_search(query: str, limit: int, *, settings=None) -> list[Trac
 
 
 async def resolve_direct(url: str, *, settings=None) -> Track | None:
-    """Try the direct-stream sources for a link (Audius, JioSaavn)."""
+    """Try every stream source for a link (Audius, JioSaavn, SoundCloud, Bandcamp)."""
     for source in stream_sources(settings):
         if not source.resolve or not source.available():
             continue
@@ -239,6 +269,7 @@ def describe(settings=None) -> str:
 __all__ = [
     "CATALOGUE_SOURCES",
     "DIRECT_SOURCES",
+    "EXTRACT_SOURCES",
     "Source",
     "describe",
     "fallback_search",
