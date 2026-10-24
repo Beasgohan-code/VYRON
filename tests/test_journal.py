@@ -114,3 +114,53 @@ def test_clearing_records_itself_exactly_once(book):
     assert len(events) == 1                      # one entry, not two
     assert "journal cleared" in events[0]["message"]
     assert "by the owner" in events[0]["message"]
+
+
+# ── warnings and errors survive a restart (#5) ──────────────────────────────
+def test_the_journal_mirrors_only_problems_and_reloads_them(tmp_path):
+    import asyncio
+    import dataclasses
+
+    from vyron.config import settings as base
+    from vyron.core.journal import Journal
+    from vyron.database import JsonStorage
+
+    storage = JsonStorage(dataclasses.replace(base, data_dir=tmp_path))
+    first = Journal(path=None)
+    first.persist = True
+    first.info("player", "started")           # not a problem: not mirrored
+    first.warn("search", "resolver cooling down")
+    first.error("database", "mongo unavailable", RuntimeError("no route to host"))
+    assert len(first._persisted) == 2
+
+    # what the debounced flush would write
+    asyncio.run(storage.connect())
+    asyncio.run(storage.set_meta(Journal.PERSIST_META, list(first._persisted)))
+
+    second = Journal(path=None)
+    second.persist = True
+    loaded = asyncio.run(second.restore(storage))
+    assert loaded == 2
+    rows = second.events(limit=20)
+    text = "\n".join(
+        (row.get("message") if isinstance(row, dict) else getattr(row, "message", ""))
+        for row in rows
+    )
+    assert "resolver cooling down" in text and "previous run" in text
+    assert "started" not in text
+    # the restored entries keep being mirrored — exactly once each, plus the
+    # journal's own note about having restored them
+    messages = [row["message"] for row in second._persisted]
+    assert messages.count("resolver cooling down") == 1
+    assert messages.count("resolver cooling down") == 1
+    assert "mongo unavailable" in messages
+    assert len(second._persisted) == 3
+
+
+def test_restore_is_a_no_op_without_storage():
+    import asyncio
+
+    from vyron.core.journal import Journal
+
+    fresh = Journal(path=None)
+    assert asyncio.run(fresh.restore(None)) == 0

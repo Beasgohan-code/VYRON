@@ -46,6 +46,21 @@ def _keep_an_event_loop():
 
 
 @pytest.fixture(autouse=True)
+def _no_journal_mirror():
+    """The journal mirrors warnings into storage on a 2 s debounce.
+
+    Production wants that; a test that patches `asyncio.sleep` does not.
+    The persistence tests opt back in explicitly.
+    """
+    from vyron.core.journal import journal
+
+    previous = journal.persist
+    journal.persist = False
+    yield
+    journal.persist = previous
+
+
+@pytest.fixture(autouse=True)
 def _clean_prefixes():
     """Prefix overrides are process-wide; every test starts from the defaults."""
     from vyron.utils import commands

@@ -102,6 +102,15 @@ class Runtime:
         from vyron.core import acl, sources
 
         await acl.load(self.storage)
+        # A crash loop is invisible while it is happening: the process dies
+        # before anyone opens /logs. Restore the previous run's warnings and
+        # errors into this journal so the next one can be diagnosed.
+        try:
+            from vyron.core.journal import journal as _journal
+
+            await _journal.restore(self.storage)
+        except Exception as exc:  # pragma: no cover - never block a boot
+            logger.debug("journal restore skipped: %s", exc)
         # One voice chat, one streamer: a second instance runs as a standby
         # instead of fighting the first one over the call (see core/lease.py).
         from vyron.core import lease

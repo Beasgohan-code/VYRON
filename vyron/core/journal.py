@@ -31,6 +31,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
+logger = logging.getLogger(__name__)
+
 LEVELS: tuple[str, ...] = ("debug", "info", "ok", "warn", "error")
 _SEVERITY = {"debug": 10, "info": 20, "ok": 20, "warn": 30, "error": 40}
 
@@ -157,6 +159,10 @@ class Journal:
     def __init__(self, path: Path | None = None, capacity: int = _MAX_EVENTS) -> None:
         self.path = path
         self._events: deque[Event] = deque(maxlen=capacity)
+        # Mirror of the warnings/errors, kept across a restart (see `_mirror`).
+        self.persist = True
+        self._persisted: deque[dict[str, Any]] = deque(maxlen=self.PERSIST_MAX)
+        self._persist_task: asyncio.Task | None = None
         self._lock = threading.Lock()
         self._seq = 0
         self._counts: Counter[str] = Counter()
@@ -192,6 +198,7 @@ class Journal:
                 sink(event)
             except Exception:  # a sink must never break the caller
                 pass
+        self._mirror(event)
         with self._lock:
             subscribers = list(self._subs)
         if subscribers:
@@ -216,6 +223,84 @@ class Journal:
         except OSError as exc:  # read-only disk — the ring buffer still works
             if self.installed:
                 logging.getLogger("vyron.core.journal").debug("journal write failed: %s", exc)
+
+    # ── surviving a restart ───────────────────────────────────────────────
+    #: Warnings and errors are mirrored into the shared store, so a boot loop
+    #: (where the process dies before anyone reads /logs) is still visible
+    #: afterwards. Only the tail is kept — this is a diagnosis, not an archive.
+    PERSIST_LEVELS = frozenset({"warn", "error"})
+    PERSIST_MAX = 60
+    PERSIST_META = "journal_errors"
+
+    def _mirror(self, event: Event) -> None:
+        if event.level not in self.PERSIST_LEVELS:
+            return
+        if event.meta.get("restored"):
+            # already in the mirror; re-adding it would double the tail on
+            # every restart until the deque filled with duplicates.
+            return
+        if not self.persist:
+            return
+        with self._lock:
+            self._persisted.append(event.to_dict())
+            while len(self._persisted) > self.PERSIST_MAX:
+                self._persisted.popleft()
+            if self._persist_task is None or self._persist_task.done():
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    return          # no loop (a script or a test): nothing to save
+                self._persist_task = loop.create_task(self._flush_persisted())
+
+    async def _flush_persisted(self) -> None:
+        """Write the mirrored tail back, at most once every few seconds."""
+        await asyncio.sleep(2.0)
+        storage = None
+        try:
+            from vyron.runtime import runtime
+
+            storage = runtime.storage
+        except Exception:  # pragma: no cover - before runtime exists
+            return
+        if storage is None:
+            return
+        with self._lock:
+            payload = list(self._persisted)
+        try:
+            await storage.set_meta(self.PERSIST_META, payload)
+        except Exception as exc:  # pragma: no cover - never break a log call
+            logger.debug("journal tail could not be persisted: %s", exc)
+
+    async def restore(self, storage: Any) -> int:
+        """Load the previous run's warnings and errors into this one."""
+        if storage is None:
+            return 0
+        try:
+            rows = await storage.get_meta(self.PERSIST_META, []) or []
+        except Exception:
+            return 0
+        if not isinstance(rows, list) or not rows:
+            return 0
+        loaded = 0
+        for row in rows[-self.PERSIST_MAX :]:
+            if not isinstance(row, dict):
+                continue
+            level = str(row.get("level") or "warn")
+            if level not in self.PERSIST_LEVELS:
+                continue
+            with self._lock:
+                self._persisted.append(row)   # keep mirroring them forward
+            self.record(
+                level,
+                str(row.get("scope") or "previous"),
+                f"[previous run] {row.get('message') or ''}"[: _MAX_MESSAGE],
+                restored=True,
+                original_ts=row.get("ts"),
+            )
+            loaded += 1
+        if loaded:
+            self.warn("journal", f"restored {loaded} warning(s)/error(s) from the previous run")
+        return loaded
 
     # ── convenience ────────────────────────────────────────────────────────
     def debug(self, scope: str, message: str, **meta: Any) -> Event:
