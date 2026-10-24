@@ -273,7 +273,7 @@ and translated instead of being flattened into "nothing could be extracted":
 | *cannot reach YouTube* | egress/DNS on the host | `PROXY` or a different region |
 
 `/doctor` prints the same sentence, and its first row is the **build**
-(`v1.7.0 · 2026-10-24`): if it still shows an older one, the deploy did not
+(`v1.8.0 · 2026-10-24`): if it still shows an older one, the deploy did not
 land — that is a different problem from a broken track.
 
 ### Every source, and how they back each other up
@@ -508,6 +508,7 @@ routes add metadata, streaming, scopes, expiry and metrics.
 | `GET·POST` | `/v1/search?q=` | search YouTube | `search` |
 | `GET·POST` | `/v1/lyrics?title=` | lyrics + synced lines (LRCLIB) | `read` |
 | `GET` | `/v1/me` | your key, **capabilities**, usage, expiry, quota | — |
+| `POST` | `/v1/token` | short-lived browser token (`Bearer vyt_…`) | `read` |
 | `GET` | `/v1/sources` | every source, fallback order, live health | `read` |
 | `GET` | `/v1/sources/{name}` | one source's detail | `read` |
 | `GET·POST` | `/v1/keys` | list / mint **your own** keys | `read` · `admin` |
@@ -516,7 +517,7 @@ routes add metadata, streaming, scopes, expiry and metrics.
 | `GET·PATCH·DELETE` | `/v1/admin/keys/{id}` | inspect, **edit without rotating**, revoke | `admin` |
 | `POST` | `/v1/admin/keys/{id}/rotate` | swap a key, old one dies instantly | `admin` |
 | `GET` | `/v1/metrics` | traffic, volume, latency (JSON or Prometheus) | `admin` |
-| `GET` | `/v1/health` · `/v1/version` | status, versions | — |
+| `GET` | `/v1/health` · `/v1/ready` | liveness + versions · readiness (503 until boot ends) | — |
 | `GET` | `/v1/docs` · `/v1/openapi.json` | docs page · OpenAPI 3.1 | — |
 | `POST` | `/v1/track/by-video-id` | **legacy** one-shot download | `download` |
 | `POST` | `/v1/track/by-query` | **legacy** download by query | `download` |
@@ -525,6 +526,22 @@ routes add metadata, streaming, scopes, expiry and metrics.
 | `POST` | `/vyron/v1/track/by-video-id` | one-shot audio download | `download` |
 | `POST` | `/vyron/v1/track/by-query` | search, then download the top hit | `download` |
 | `GET` | `/vyron/health` | engine status (format, retries, cookies) | — |
+
+**A browser never holds a key.** A Mini App runs inside a WebView, so a
+long-lived `vyrn_` key in that JavaScript is a secret in a cache, a screenshot
+and whatever the WebView persists. `POST /v1/token` exchanges a key for a
+signed token — fifteen minutes by default, one hour maximum — carrying a subset
+of the caller's scopes. It is sent as `Authorization: Bearer vyt_…`, cannot be
+exchanged for a key, and dies when the deployment's credentials change.
+
+**Retries are free.** Send `Idempotency-Key: <anything stable>` with
+`POST /v1/downloads`; a retried request returns the original job with
+`replayed: true` instead of queueing the same file twice.
+
+**Readiness, not just liveness.** `/v1/health` never fails while the process is
+alive (a restart loop on a slow boot is worse than a slow boot). `/v1/ready`
+answers `503` with `Retry-After` until the engine exists — that is the one for a
+load balancer or an uptime probe.
 
 **Keys that behave.** A key is created, then *edited* — never thrown away to
 change a label. `PATCH` takes any of `label`, `scopes`, `days` (expiry, `0` =
