@@ -187,8 +187,7 @@ def register(client: Client) -> None:
             return
 
         if args and args[0] in {"clear", "reset"}:
-            removed = journal.clear()
-            journal.info("journal", f"journal cleared by owner ({removed} events)")
+            removed = journal.clear(reason="by the owner")
             await rich.send(
                 client,
                 message.chat.id,

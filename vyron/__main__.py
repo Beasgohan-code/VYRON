@@ -310,6 +310,7 @@ async def _async_main() -> int:
 
     try:
         await runtime.build_services()
+        runtime.mark_ready()
     except Exception as exc:
         reason = f"services failed to start ({type(exc).__name__}: {exc})"
         logger.exception(reason)

@@ -465,6 +465,9 @@ def test_v1_reports_not_ready_while_the_bot_boots(tmp_path, monkeypatch):
     monkeypatch.setattr("vyron.api.security.get_music_api", lambda: api)
     monkeypatch.setattr(runtime, "youtube", None)
     monkeypatch.setattr(runtime, "downloader", None)
+    import vyron.api.routes as api_routes
+
+    monkeypatch.setattr(api_routes, "settings", dataclasses.replace(settings, boot_wait=0))
 
     async def scenario(client):
         response = await client.post("/v1/search", json={"query": "x"})
@@ -761,3 +764,44 @@ def test_owner_self_service_keys_are_scoped_to_their_owner(tmp_path, monkeypatch
             assert new_id not in {row["id"] for row in still["keys"]}
 
     asyncio.run(scenario())
+
+
+def test_the_api_waits_for_boot_instead_of_failing_at_once(monkeypatch):
+    """A cold start is not an error: the request waits, then explains itself."""
+    runner = runtime
+    runner._ready = False
+    monkeypatch.setattr(runner, "youtube", None)
+    monkeypatch.setattr(runner, "downloader", None)
+
+    async def scenario():
+        started = time.perf_counter()
+        ok = await runner.wait_ready(0.2)
+        assert ok is False and time.perf_counter() - started >= 0.19
+        runner.mark_ready()
+        assert runner.ready is True
+
+    asyncio.run(scenario())
+    runner._ready = False
+
+
+def test_a_request_during_boot_gets_retry_after(monkeypatch):
+    """The port opens before boot finishes: the answer is a hint, not a crash."""
+    from vyron.web import server as web_server
+
+    quick = dataclasses.replace(settings, boot_wait=0.05, webapp_allow_anon=True)
+    monkeypatch.setattr(web_server, "settings", quick)
+    monkeypatch.setattr(runtime, "youtube", None)
+    monkeypatch.setattr(runtime, "charts", None)
+    runtime._ready = False
+
+    async def scenario():
+        app = build_app(with_webapp=True)
+        async with TestClient(TestServer(app)) as client:
+            response = await client.post("/api/search", json={"query": "x"})
+            assert response.status == 503
+            assert response.headers.get("Retry-After") == "5"
+            body = await response.json()
+            assert body["ready"] is False and "starting" in body["error"]
+
+    asyncio.run(scenario())
+    runtime._ready = False

@@ -103,3 +103,14 @@ def test_card_renders_events(book):
     assert "streaming something" in markup
     assert "mongo down" in markup
     assert "Export .jsonl" in markup
+
+
+def test_clearing_records_itself_exactly_once(book):
+    book.info("player", "play")
+    book.info("player", "skip")
+    removed = book.clear(reason="by the owner")
+    assert removed == 2
+    events = book.events(limit=5)
+    assert len(events) == 1                      # one entry, not two
+    assert "journal cleared" in events[0]["message"]
+    assert "by the owner" in events[0]["message"]

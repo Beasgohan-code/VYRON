@@ -303,11 +303,17 @@ class Journal:
             "file": str(self.path) if self.path else "",
         }
 
-    def clear(self) -> int:
+    def clear(self, *, reason: str = "") -> int:
+        """Empty the ring buffer and record that it happened — once.
+
+        The caller's context lives in the entry itself: logging a second line
+        from the web console just made the same event appear twice.
+        """
         with self._lock:
             removed = len(self._events)
             self._events.clear()
-        self.info("journal", f"journal cleared ({removed} events dropped)")
+        suffix = f" — {reason}" if reason else ""
+        self.info("journal", f"journal cleared ({removed} events dropped){suffix}")
         return removed
 
     def export(self) -> Path | None:

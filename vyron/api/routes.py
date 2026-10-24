@@ -58,7 +58,11 @@ def _site_url(request: web.Request) -> str:
     return base_url(request)[: -len("/v1")]
 
 
-def ensure_ready() -> None:
+async def ensure_ready() -> None:
+    """Wait out a cold start, then fail honestly if the engine never arrives."""
+    if runtime.youtube is not None and runtime.downloader is not None:
+        return
+    await runtime.wait_ready(getattr(settings, "boot_wait", 15.0))
     if runtime.youtube is None or runtime.downloader is None:
         raise ApiError("not_ready")
 
@@ -145,7 +149,7 @@ def content_disposition(title: str, track_id: str, *, inline: bool = False) -> s
 
 async def serve_track(request: web.Request, target: str, *, inline: bool = False) -> web.StreamResponse:
     auth = request[AUTH]
-    ensure_ready()
+    await ensure_ready()
     track = await _resolve(target)
     path = await _download(track)
     size = path.stat().st_size
@@ -264,7 +268,7 @@ async def metrics_route(request: web.Request) -> web.Response:
 # ── tracks ─────────────────────────────────────────────────────────────────
 async def download(request: web.Request) -> web.StreamResponse:
     await authorize(request, "download")
-    ensure_ready()
+    await ensure_ready()
     data = await payload(request)
     video_id = data.get("video_id") or data.get("id")
     query = str(data.get("query") or data.get("q") or "").strip()
@@ -277,14 +281,14 @@ async def download(request: web.Request) -> web.StreamResponse:
 
 async def track_by_video_id(request: web.Request) -> web.StreamResponse:
     await authorize(request, "download")
-    ensure_ready()
+    await ensure_ready()
     data = await payload(request)
     return await serve_track(request, f"https://www.youtube.com/watch?v={video_id_from(data)}")
 
 
 async def track_by_query(request: web.Request) -> web.StreamResponse:
     await authorize(request, "download")
-    ensure_ready()
+    await ensure_ready()
     data = await payload(request)
     query = str(data.get("query") or data.get("q") or "").strip()
     if not query:
@@ -294,7 +298,7 @@ async def track_by_query(request: web.Request) -> web.StreamResponse:
 
 async def stream(request: web.Request) -> web.StreamResponse:
     await authorize(request, "download")
-    ensure_ready()
+    await ensure_ready()
     video_id = request.match_info.get("video_id", "")
     if not VIDEO_RE.match(video_id):
         raise ApiError("invalid_video")
@@ -307,7 +311,7 @@ async def stream(request: web.Request) -> web.StreamResponse:
 
 async def track_info(request: web.Request) -> web.Response:
     auth = await authorize(request, "read")
-    ensure_ready()
+    await ensure_ready()
     video_id = request.match_info.get("video_id", "")
     if not VIDEO_RE.match(video_id):
         raise ApiError("invalid_video")
@@ -323,7 +327,7 @@ async def legacy_info(request: web.Request) -> web.Response:
 # ── search / lyrics ────────────────────────────────────────────────────────
 async def search(request: web.Request) -> web.Response:
     auth = await authorize(request, "search")
-    ensure_ready()
+    await ensure_ready()
     data = await payload(request)
     query = str(data.get("query") or data.get("q") or "").strip()
     if not query:

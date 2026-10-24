@@ -103,6 +103,11 @@ class Settings:
     download_accelerator: str = field(
         default_factory=lambda: (_env("DOWNLOAD_ACCELERATOR", "auto") or "auto").lower()
     )
+    # The HTTP port opens before the bot finishes booting (a host that never
+    # sees the port assumes the deploy failed). A request that lands during that
+    # window waits this long for the engine instead of getting a 503: a free
+    # host waking from sleep needs about ten seconds.
+    boot_wait: float = field(default_factory=lambda: max(0.0, float(_int("BOOT_WAIT_SECONDS", 15))))
     # yt-dlp is CPU-bound: two extractions at a time keeps the event loop (and
     # therefore the Mini App) responsive on a small host.
     extract_concurrency: int = field(default_factory=lambda: max(1, _int("EXTRACT_CONCURRENCY", 2)))

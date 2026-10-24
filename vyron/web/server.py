@@ -305,10 +305,25 @@ async def home(request: web.Request) -> web.Response:
     if denied:
         return denied
     if runtime.charts is None:
+        await _engine()      # a wake-up request should wait, not show an empty home
+    if runtime.charts is None:
         return web.json_response({"ok": True, "ready": False, **_EMPTY_HOME})
 
     payload = await runtime.charts.home()
     return web.json_response({"ok": True, **payload})
+
+
+async def _engine() -> bool:
+    """True once the search engine exists — waiting out a cold start if needed.
+
+    The port opens before boot finishes (a host that never sees the port
+    assumes the deploy failed), so the first request after a wake-up can land
+    while yt-dlp is still coming up. Waiting a few seconds is a better answer
+    than a 503, and the wait is bounded.
+    """
+    if runtime.youtube is not None:
+        return True
+    return await runtime.wait_ready(getattr(settings, "boot_wait", 15.0))
 
 
 async def search(request: web.Request) -> web.Response:
@@ -320,11 +335,16 @@ async def search(request: web.Request) -> web.Response:
     query = str(body.get("query") or request.query.get("q") or "").strip()
     if not query:
         return web.json_response({"ok": True, "results": []})
-    if runtime.youtube is None:
+    if not await _engine() or runtime.youtube is None:
         return web.json_response(
-            {"ok": False, "ready": False, "error": "search is not ready on this deployment",
-             "hint": "install yt-dlp (it is in requirements.txt) and restart"},
+            {
+                "ok": False,
+                "ready": False,
+                "error": "search is still starting",
+                "hint": "the deployment is booting — retry in a few seconds",
+            },
             status=503,
+            headers={"Retry-After": "5"},
         )
     limit = min(20, max(4, int(body.get("limit") or 10)))
     try:
@@ -532,6 +552,8 @@ async def mix(request: web.Request) -> web.Response:
     if denied:
         return denied
     key = request.query.get("key", "")
+    if runtime.charts is None:
+        await _engine()
     if runtime.charts is None:
         return web.json_response({"ok": True, "ready": False, "tracks": []})
     tracks = await runtime.charts.mix(key, limit=25)
@@ -1266,8 +1288,7 @@ async def logs_action(request: web.Request) -> web.Response:
     body = await _read_json(request)
     action_name = str(body.get("action") or "").lower()
     if action_name == "clear":
-        removed = journal.clear()
-        journal.info("journal", f"journal cleared from the web console ({removed} events)")
+        removed = journal.clear(reason="from the web console")
         return web.json_response({"ok": True, "cleared": removed, "stats": journal.stats()})
     if action_name == "export":
         path = journal.export()

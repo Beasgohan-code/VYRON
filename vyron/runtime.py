@@ -5,6 +5,7 @@
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
@@ -39,11 +40,43 @@ class Runtime:
     version: str = "1.3.0"
     build: str = ""
     handlers_loaded: list[str] = field(default_factory=list)
+    # The HTTP port opens before the bot finishes booting, on purpose: a host
+    # that never sees the port assumes the deploy failed. That leaves a window
+    # where a request arrives while yt-dlp and Mongo are still coming up — the
+    # gate below makes those requests *wait* instead of failing with a 503.
+    # A plain flag, polled in short steps: an asyncio.Event would bind itself to
+    # the first loop that touches it, which breaks every test that builds a
+    # fresh loop (and any tooling that restarts the loop).
+    _ready: bool = field(default=False, repr=False)
+    boot_started_at: float = field(default_factory=time.time)
     # non-fatal problems found at boot; surfaced by /health and /doctor so a
     # degraded deployment explains itself instead of just misbehaving
     boot_problems: list[str] = field(default_factory=list)
 
     # ── readiness ──────────────────────────────────────────────────────────
+    # ── boot gate ──────────────────────────────────────────────────────────
+    @property
+    def ready(self) -> bool:
+        return bool(self._ready)
+
+    def mark_ready(self) -> None:
+        """Services are up; anyone waiting on boot may proceed."""
+        if not self._ready:
+            logger.info("boot gate open after %.1fs", time.time() - self.boot_started_at)
+            self._ready = True
+
+    async def wait_ready(self, timeout: float = 20.0) -> bool:
+        """Block until boot finishes, or until *timeout* seconds pass.
+
+        Returns True when the services exist. A cold start on a free host can
+        take a while, and a user who opened the Mini App during it deserves a
+        slower answer rather than an error.
+        """
+        deadline = time.monotonic() + max(0.0, timeout)
+        while not self._ready and time.monotonic() < deadline:
+            await asyncio.sleep(min(0.1, max(0.01, deadline - time.monotonic())))
+        return self.youtube is not None
+
     @property
     def streaming_ready(self) -> bool:
         return self.calls is not None and self.assistant is not None

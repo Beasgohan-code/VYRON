@@ -18,6 +18,10 @@ from vyron.core.journal import journal
 logger = logging.getLogger(__name__)
 
 _SLOW_MS = 4000
+# Endpoints that are long-lived by design: the log tail holds its connection
+# open for as long as the console is on screen, and streamed audio lasts as long
+# as the song. Calling those "slow" buries the requests that really are.
+_STREAMING = ("/api/logs/stream", "/logs/live", "/api/stream", "/v1/tracks/")
 
 
 @web.middleware
@@ -42,7 +46,11 @@ async def record_errors(request: web.Request, handler) -> web.StreamResponse:
             f"{request.method} {request.path_qs[:120]} → {response.status}",
             ms=round(elapsed),
         )
-    elif elapsed > _SLOW_MS and request.path.startswith("/api/"):
+    elif (
+        elapsed > _SLOW_MS
+        and request.path.startswith("/api/")
+        and not request.path.startswith(_STREAMING)
+    ):
         journal.warn(
             "webapp",
             f"slow request {request.method} {request.path} ({elapsed:.0f} ms)",

@@ -21,6 +21,7 @@ from vyron.api.errors import ApiError
 from vyron.api.metrics import METRICS
 from vyron.api.routes import base_url, payload, video_id_from
 from vyron.api.security import headers_for
+from vyron.config import settings
 from vyron.core.downloadjobs import get_download_jobs
 from vyron.core.musicapi import get_music_api
 from vyron.runtime import runtime
@@ -68,7 +69,10 @@ def _disposition(title: str, video_id: str, ext: str, *, inline: bool = False) -
     return f"{kind}; filename=\"{ascii_name}.{ext}\"; filename*=UTF-8''{encoded}"
 
 
-def _ensure_ready() -> None:
+async def _ensure_ready() -> None:
+    if runtime.youtube is not None and runtime.downloader is not None:
+        return
+    await runtime.wait_ready(getattr(settings, "boot_wait", 15.0))
     if runtime.youtube is None or runtime.downloader is None:
         raise ApiError("not_ready")
 
@@ -96,7 +100,7 @@ async def _resolve_track(data: dict):
 # ── endpoints ──────────────────────────────────────────────────────────────
 async def submit(request: web.Request) -> web.StreamResponse:
     auth = await _authorize(request)
-    _ensure_ready()
+    await _ensure_ready()
     data = await payload(request)
     kind = str(data.get("format") or data.get("kind") or "audio").strip().lower()
     if kind in {"mp3", "m4a", "music", "song"}:
@@ -195,7 +199,7 @@ async def file(request: web.Request) -> web.StreamResponse:
 async def by_url(request: web.Request) -> web.StreamResponse:
     """`GET /v1/downloads/by-video-id/{id}` — one call, no JSON body."""
     auth = await _authorize(request)
-    _ensure_ready()
+    await _ensure_ready()
     video_id = request.match_info.get("video_id", "")
     track = await _resolve_target(video_id)
     job = get_download_jobs().submit(

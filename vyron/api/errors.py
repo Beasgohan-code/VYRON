@@ -50,7 +50,11 @@ class ApiError(Exception):
         self.status = status or default_status
         self.message = message or default_message
         self.hint = hint or ""
-        self.headers = headers or {}
+        self.headers = dict(headers or {})
+        if self.status == 503 and "Retry-After" not in self.headers:
+            # 503 here means "booting", which is temporary: tell the client how
+            # long to wait instead of letting it retry in a tight loop.
+            self.headers["Retry-After"] = "5"
         super().__init__(self.message)
 
 
