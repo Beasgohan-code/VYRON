@@ -582,13 +582,22 @@ async def edit_inline(media_message, markup: str, *, markup_keyboard=None):
 
 
 async def react(message, glyph: str) -> None:
-    """Best-effort custom reaction on a user's message (Bot API 7+)."""
-    try:
-        from pyrogram.types import ReactionTypeEmoji
+    """Best-effort reaction on a user's message.
 
-        await message.react([ReactionTypeEmoji(emoji=glyph)])
-    except Exception:
-        pass
+    Kurigram exposes the low-level ``send_reaction`` (a plain emoji), not the
+    ``ReactionTypeEmoji`` wrapper the old call assumed, so the previous code
+    raised ImportError into a bare ``except`` and every reaction silently
+    vanished. Reactions are decoration: they still never break a command.
+    """
+    try:
+        chat = getattr(message, "chat", None)
+        if chat is None or not getattr(message, "id", None):
+            return
+        await message._client.send_reaction(
+            chat_id=chat.id, message_id=message.id, emoji=glyph
+        )
+    except Exception as exc:  # pragma: no cover - network/permission
+        logger.debug("reaction failed: %s", exc)
 
 
 __all__ = [

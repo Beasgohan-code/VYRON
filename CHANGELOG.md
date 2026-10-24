@@ -7,6 +7,32 @@ Two version numbers move independently:
 
 ## Bot
 
+### 1.9.2 — 2026-10-24
+
+* **Every reply is a card.** A one-line `B.note` answer was the last thing that
+  did not look like VYRON. Welcome, playlists, favourites, queue moves, volume,
+  loop, shuffle, autoplay, effects, playlist export/import, channel linking,
+  moderation, owner tools and the transient "working…" placeholders now share
+  one shape: `━ masthead ━`, `◈ fields`, context, buttons, footer. The order is
+  the order a person reads on a phone — greeting, status, what it does, how to
+  start, then the buttons.
+* **The welcome card is rewritten** around that order, with a real uptime
+  clock (`3d 9h 0m 34s`), reach, version, a feature list and a collapsed
+  three-step setup guide.
+* **One vocabulary for settings.** `/volume`, `/loop`, `/shuffle`, `/autoplay`
+  and `/effects` show the value, what it means, and the buttons that change it,
+  instead of a bold line that disappears up the chat.
+* **Small caps are display only.** `to_plain_text` folds them back to ASCII,
+  so toasts, logs and the plain lane read normally; labels inside cards align
+  under `◈` instead of guessing table column widths.
+* **Fixed: reactions never fired.** Kurigram has no `ReactionTypeEmoji`; the
+  `ImportError` was swallowed by a bare `except`, so 👍/❤️ were silently lost on
+  every command. `send_reaction` is called directly now.
+* **Fixed: `/sudoers` never showed names.** `client.get_users` is awaitable,
+  not an async iterator, so the loop body never ran.
+* **Fixed: `/pview` read an undefined variable** when a track was removed, and
+  its empty state rendered a headerless table.
+
 ### 1.9.1 — 2026-10-24
 
 * **A walled server still plays music.** `Failed to extract any player response`

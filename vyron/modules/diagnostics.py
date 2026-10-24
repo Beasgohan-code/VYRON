@@ -31,8 +31,12 @@ def register(client: Client) -> None:
         names: dict[int, str] = {}
         if ids:
             try:
-                async for user in client.get_users(ids):
-                    names[user.id] = display_name(user)
+                # get_users takes a list and returns a list — it is awaitable,
+                # not an async iterator (the old `async for` never ran).
+                found = await client.get_users(ids)
+                for user in found if isinstance(found, (list, tuple)) else [found]:
+                    if user is not None:
+                        names[user.id] = display_name(user)
             except Exception:  # pragma: no cover - network
                 pass
         lines = []
