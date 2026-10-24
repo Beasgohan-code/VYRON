@@ -14,6 +14,13 @@
 #               https://open.spotify.com/embed/{kind}/{id}           (public page)
 #   SoundCloud  https://soundcloud.com/oembed?format=json&url=…      (oEmbed)
 #   YT Music    music.youtube.com/watch?v=… — a YouTube id already, passed through
+#   Odesli      https://api.song.link/v1-alpha.1/links?url=…         (open API)
+#
+# Odesli (song.link) is the *matcher*: for a Spotify/Deezer/Apple link it
+# answers with the same recording on every other platform, including a real
+# YouTube video id. That turns "guess the title on YouTube" into "play the
+# entity the catalogue itself points at", which is the difference between the
+# right remix and a karaoke version with a similar name.
 #
 # Everything degrades to ``None``: an unreachable catalogue must never stop a
 # track from playing, it only means we fall back to the plain YouTube search.
@@ -25,6 +32,9 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
+
+import time
+from urllib.parse import quote
 
 import aiohttp
 
@@ -433,6 +443,50 @@ async def lookup(url: str) -> MetaTrack | MetaCollection | None:
     return None
 
 
+_YT_ID = re.compile(r"(?:v=|youtu\.be/|/shorts/|/embed/|/live/)([\w-]{11})")
+_ODESLI = "https://api.song.link/v1-alpha.1/links?url="
+_MATCH_CACHE: dict[str, tuple[float, str]] = {}
+_MATCH_TTL = 6 * 3600
+
+
+def youtube_id_from(url: str) -> str:
+    match = _YT_ID.search(url or "")
+    return match.group(1) if match else ""
+
+
+async def match(url: str) -> str:
+    """The YouTube video id for a catalogue link, via Odesli. "" when unknown.
+
+    Best-effort by design: song.link is a public convenience API, so a slow or
+    missing answer must only cost us the smarter match, never the track.
+    """
+    if not url:
+        return ""
+    cached = _MATCH_CACHE.get(url)
+    if cached and cached[0] > time.time():
+        return cached[1]
+    payload = await _json(_ODESLI + quote(url, safe=""))
+    found = ""
+    if isinstance(payload, dict):
+        links = payload.get("linksByPlatform") or {}
+        for platform in ("youtube", "youtubeMusic"):
+            entry = links.get(platform) or {}
+            found = youtube_id_from(str(entry.get("url") or ""))
+            if found:
+                break
+        if not found:
+            # some responses carry the id only in the entity itself
+            for entity in (payload.get("entitiesByUniqueId") or {}).values():
+                if "youtube" in str((entity or {}).get("platforms") or "").lower():
+                    found = youtube_id_from(str(entity.get("id") or ""))
+                    if found:
+                        break
+    if found:
+        _MATCH_CACHE[url] = (time.time() + _MATCH_TTL, found)
+        logger.info("odesli matched %s → %s", url[:60], found)
+    return found
+
+
 async def lookup_many(urls: list[str], *, limit: int = 50) -> list[MetaTrack]:
     """Read several catalogue links at once (unused slots stay empty)."""
     results = await asyncio.gather(*(lookup(url) for url in urls), return_exceptions=True)
@@ -449,6 +503,8 @@ async def lookup_many(urls: list[str], *, limit: int = 50) -> list[MetaTrack]:
 
 __all__ = [
     "SERVICES",
+    "match",
+    "youtube_id_from",
     "MetaCollection",
     "MetaTrack",
     "detect",

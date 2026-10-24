@@ -652,6 +652,24 @@ class YouTube:
         self, url: str, *, requester: tuple[int, str] = (0, "")
     ) -> Track | None:
         """Spotify/Deezer/Apple link → the best YouTube match (or a stream)."""
+        # First ask the cross-platform matcher: if it knows the exact YouTube
+        # entity this link refers to, no title ever gets guessed.
+        try:
+            video_id = await metasources.match(url)
+        except Exception as exc:  # pragma: no cover - matcher is best-effort
+            logger.debug("cross-platform match failed: %s", exc)
+            video_id = ""
+        if video_id:
+            try:
+                info = await self._async_extract(f"https://www.youtube.com/watch?v={video_id}")
+                matched = self._track_from_entry(info, requester=requester)
+            except Exception as exc:
+                logger.info("exact match %s could not be read (%s)", video_id, exc)
+                matched = None
+            if matched is not None:
+                matched.source = f"{metasources.detect(url).service}·yt" if metasources.detect(url) else "yt"
+                return matched
+
         meta = await metasources.lookup(url)
         if isinstance(meta, metasources.MetaCollection):
             meta = meta.tracks[0] if meta.tracks else None

@@ -816,7 +816,9 @@ def test_music_sources_names_the_catalogues_and_off_is_the_kill_switch():
         dataclasses.replace(settings, music_sources="spotify")
     )
     enabled = {row.name for row in only_spotify if row.kind == "catalogue" and row.is_enabled()}
-    assert enabled == {"spotify"}
+    # odesli is the matcher, not a catalogue we "read a link" from: it stays on
+    # so an exact cross-platform match is still available.
+    assert enabled == {"spotify", "odesli"}
     # …and the fallback chain does not care: it is still there
     assert {"audius", "jiosaavn", "soundcloud", "bandcamp"} <= {
         row.name for row in only_spotify if row.kind == "stream" and row.is_enabled()
@@ -887,3 +889,63 @@ def test_probe_times_every_stream_source(monkeypatch):
         return rows
 
     asyncio.run(scenario())
+
+
+# ── cross-platform matching (Odesli / song.link) ────────────────────────────
+def test_odesli_match_returns_the_exact_youtube_id(monkeypatch):
+    from vyron.core import metasources
+
+    async def fake_json(url):
+        assert url.startswith("https://api.song.link/v1-alpha.1/links?url=")
+        assert "open.spotify.com" in url          # the link is url-encoded
+        return {
+            "linksByPlatform": {
+                "spotify": {"url": "https://open.spotify.com/track/abc"},
+                "youtube": {"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"},
+            }
+        }
+
+    metasources._MATCH_CACHE.clear()
+    monkeypatch.setattr(metasources, "_json", fake_json)
+    found = asyncio.run(metasources.match("https://open.spotify.com/track/abc"))
+    assert found == "dQw4w9WgXcQ"
+
+    # …and it is cached: a second call costs no request
+    async def boom(url):  # pragma: no cover - must not run
+        raise AssertionError("cache miss")
+
+    monkeypatch.setattr(metasources, "_json", boom)
+    assert asyncio.run(metasources.match("https://open.spotify.com/track/abc")) == "dQw4w9WgXcQ"
+
+
+def test_odesli_fails_soft(monkeypatch):
+    from vyron.core import metasources
+
+    async def broken(url):
+        raise RuntimeError("song.link is down")
+
+    metasources._MATCH_CACHE.clear()
+    monkeypatch.setattr(metasources, "_json", broken)
+    try:
+        asyncio.run(metasources.match("https://music.apple.com/x/album/y/123?i=456"))
+    except RuntimeError:
+        pass     # the caller (search) swallows this; the point is that it is
+                 # a normal exception, not a crash inside the resolver
+    async def empty(url):
+        return {}
+
+    monkeypatch.setattr(metasources, "_json", empty)
+    assert asyncio.run(metasources.match("https://deezer.com/track/1")) == ""
+
+
+def test_youtube_id_extraction_handles_every_link_shape():
+    from vyron.core.metasources import youtube_id_from
+
+    for url in (
+        "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        "https://youtu.be/dQw4w9WgXcQ",
+        "https://www.youtube.com/shorts/dQw4w9WgXcQ",
+        "https://music.youtube.com/watch?v=dQw4w9WgXcQ&list=x",
+    ):
+        assert youtube_id_from(url) == "dQw4w9WgXcQ"
+    assert youtube_id_from("https://example.com/nothing") == ""

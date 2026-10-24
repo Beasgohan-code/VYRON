@@ -237,6 +237,16 @@ def registry(settings=None) -> list[Source]:
         pass
 
     # ── catalogue readers ─────────────────────────────────────────────────
+    if _extras_on(settings):
+        items.append(
+            Source(
+                "odesli",
+                "song.link",
+                "catalogue",
+                enabled=lambda: _extras_on(settings),
+                detail="cross-platform matcher · exact YouTube id, no guessing",
+            )
+        )
     for name, label, detail in (
         ("spotify", "Spotify", "oEmbed + public embed page"),
         ("deezer", "Deezer", "open API (track/album/playlist)"),
