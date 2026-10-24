@@ -84,6 +84,55 @@ class DirectStream:
         return f"{round(self.bitrate / 1000)}k" if self.bitrate else "audio"
 
 
+@dataclass
+class VideoMeta:
+    """Just enough about a video to build a Track: title, artist, length, art."""
+
+    title: str
+    uploader: str = ""
+    duration: int = 0
+    thumbnail: str | None = None
+
+
+def parse_meta(kind: str, payload: dict) -> VideoMeta | None:
+    """Title/artist/length from an Invidious or Piped video document."""
+    if not isinstance(payload, dict):
+        return None
+    title = str(payload.get("title") or "").strip()
+    if not title:
+        return None
+    uploader = str(
+        payload.get("author")
+        or payload.get("uploader")
+        or payload.get("authorId")
+        or ""
+    ).strip()
+    length = payload.get("lengthSeconds")
+    if length is None:
+        length = payload.get("duration")
+    try:
+        duration = int(length or 0)
+    except (TypeError, ValueError):
+        duration = 0
+    thumbnail = None
+    thumbs = payload.get("videoThumbnails") or []
+    if isinstance(thumbs, list) and thumbs:
+        best = max(
+            (item for item in thumbs if isinstance(item, dict) and item.get("url")),
+            key=lambda item: int(item.get("width") or 0),
+            default=None,
+        )
+        if best:
+            thumbnail = best["url"]
+    if not thumbnail:
+        candidate = payload.get("thumbnail")
+        if isinstance(candidate, str) and candidate.startswith("http"):
+            thumbnail = candidate
+        elif isinstance(candidate, dict) and candidate.get("url"):
+            thumbnail = str(candidate["url"])
+    return VideoMeta(title=title, uploader=uploader, duration=duration, thumbnail=thumbnail)
+
+
 def _ext_from(url: str, mime: str, *, video: bool) -> str:
     if "webm" in mime:
         return "webm"
@@ -427,6 +476,46 @@ class PublicStreams:
         if tasks:
             results = list(await asyncio.gather(*tasks))
         return results
+
+    async def meta(self, video_id: str) -> VideoMeta | None:
+        """Read a video's title from a mirror — no yt-dlp, no player page.
+
+        This is what makes a shared link usable while YouTube is refusing the
+        server: the id is all we have, and the title is what the substitution
+        tier needs to find the same song somewhere that plays.
+        """
+        target = (video_id or "").strip()
+        if not re.fullmatch(r"[\w-]{6,24}", target):
+            from vyron.core.search import youtube_id
+
+            target = youtube_id(target) or ""
+        if not target:
+            return None
+        requests: list[asyncio.Task] = []
+        for host in self.invidious:
+            if HEALTH.available(f"invidious:{host}"):
+                requests.append(
+                    asyncio.create_task(self._meta_one(f"https://{host}/api/v1/videos/{target}"))
+                )
+        for host in self.piped:
+            if HEALTH.available(f"piped:{host}"):
+                requests.append(asyncio.create_task(self._meta_one(f"https://{host}/streams/{target}")))
+        if not requests:
+            return None
+        try:
+            for finished in asyncio.as_completed(requests):
+                meta = await finished
+                if meta is not None:
+                    return meta
+        finally:
+            for task in requests:
+                if not task.done():
+                    task.cancel()
+        return None
+
+    async def _meta_one(self, url: str) -> VideoMeta | None:
+        payload = await self._json(url)
+        return parse_meta("meta", payload) if payload else None
 
     async def audio(self, video_id: str) -> DirectStream | None:
         return await self.resolve(video_id, height=0)

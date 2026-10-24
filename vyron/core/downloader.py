@@ -431,6 +431,22 @@ class Downloader:
             except Exception as exc:
                 errors.append(f"mirror: {exc}")
                 logger.warning("direct download failed for %s: %s", track.id, exc)
+            # The same song from a catalogue that serves its own audio (JioSaavn,
+            # Audius…). A listener who asked for "Kesariya" wants the song, not
+            # the exact upload — and a 403 from YouTube is not their problem.
+            if not video:
+                try:
+                    from vyron.core import alternate
+
+                    found = await alternate.find(track, settings=self.settings)
+                    if found is not None:
+                        logger.info(
+                            "downloading %r from %s instead (%s)", track.title, found.source, found.id
+                        )
+                        return await self._download_stream(found, on_progress=on_progress)
+                except Exception as exc:
+                    errors.append(f"substitute: {exc}")
+                    logger.warning("substitution download failed for %s: %s", track.id, exc)
             raise DownloadError(" · ".join(errors))
 
     async def _download_stream(

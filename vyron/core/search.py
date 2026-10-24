@@ -21,7 +21,7 @@ from typing import Any
 import yt_dlp
 
 from vyron.config import Settings
-from vyron.core import metasources, sources, ytmusic
+from vyron.core import alternate, metasources, sources, ytmusic
 from vyron.core.resolvers import HEALTH
 from vyron.core.queue import Track
 from vyron.ui.progress import parse_duration, truncate
@@ -212,6 +212,10 @@ class StreamInfo:
     ext: str = ""
     mime: str = "audio/mp4"
     title: str = ""
+    # Which engine actually serves these bytes. Empty means YouTube, or "the
+    # answer predates this field"; a substitution names its catalogue so the app
+    # and the logs can say where the song came from.
+    source: str = ""
 
 
 def looks_like_url(text: str) -> bool:
@@ -221,6 +225,43 @@ def looks_like_url(text: str) -> bool:
 def youtube_id(text: str) -> str | None:
     match = _YT_ID_RE.search(text or "")
     return match.group(1) if match else None
+
+
+# Bracketed noise that adds nothing to a search: "(Official Video)", "[4K]".
+_NOISE_RE = re.compile(r"[([{][^)\]}]*[)\]}]")
+_PUNCT_RE = re.compile(r"[^\w\s]+", re.UNICODE)
+
+
+def _fold(text: str) -> str:
+    """Strip accents, so "Kesariyā" and "Kesariya" are the same word."""
+    import unicodedata
+
+    return "".join(
+        char for char in unicodedata.normalize("NFKD", text) if not unicodedata.combining(char)
+    )
+
+
+def relax_query(query: str) -> str:
+    """A second, looser spelling of *query* — used only when the first pass is empty.
+
+    People type songs the way they say them: "kesariyaa", "believerr",
+    "Kesariyā", "Tum Hi Ho - official video". None of those are typos YouTube
+    can forgive, and every one of them is a dead end on the first attempt. This
+    does the three harmless fixes — drop accents, drop bracketed credits, collapse
+    doubled letters — and leaves everything else (including a real word list)
+    untouched, because mangling a valid query is worse than not relaxing it.
+    """
+    text = _fold(_NOISE_RE.sub(" ", query or ""))
+    text = _PUNCT_RE.sub(" ", text)
+    words = []
+    for word in text.split():
+        # A held final letter is the common typo ("Kesariyaa", "believerr",
+        # "helloo"). Squeezing any doubled letter instead would turn "good"
+        # into "god", so the rule stays on the end of the word.
+        squeezed = re.sub(r"([^\W\d_])\1+$", r"\1", word) if len(word) >= 5 else word
+        words.append(squeezed)
+    relaxed = " ".join(words).strip()
+    return relaxed if relaxed and relaxed.lower() != (query or "").strip().lower() else ""
 
 
 def _materialise_cookies(settings: Any) -> str:
@@ -268,6 +309,13 @@ class YouTube:
         # the player client that last produced a playable URL (None = yt-dlp default)
         self._client_hint: str | None = None
         self._warned_impersonate = False
+        # When YouTube refuses the *server* (not one video), no client ladder
+        # will help: "Failed to extract any player response" from two different
+        # clients in a row means the IP is walled. Remember that for a while so
+        # playback goes straight to the substitution tier instead of burning
+        # twenty seconds per tap proving the same thing again.
+        self._wall_until = 0.0
+        self._wall_logged = False
 
     # ── yt-dlp plumbing ────────────────────────────────────────────────────
     def _opts(self, **extra: Any) -> dict[str, Any]:
@@ -449,14 +497,35 @@ class YouTube:
         query: str,
         limit: int | None = None,
         requester: tuple[int, str] = (0, ""),
+        *,
+        relaxed: bool = False,
     ) -> list[Track]:
-        """Search YouTube and return up to *limit* playable tracks."""
+        """Search YouTube and return up to *limit* playable tracks.
+
+        When nothing comes back, one relaxed retry runs (accents, bracketed
+        credits, a held final letter). *relaxed* marks that retry so a genuine
+        miss still raises instead of looping.
+        """
         query = (query or "").strip()
         if not query:
             return []
         count = limit or self.settings.search_results
         # Over-fetch so dedupe/filtering still leaves a full page of results.
         fetch = count if count <= 2 else min(40, count * 2)
+
+        # Walled: every YouTube path (ytmusic included) will stall for twenty
+        # seconds and return nothing. The catalogues that serve their own audio
+        # answer in one second, so they go first while the wall lasts.
+        if not relaxed and self.walled():
+            fast = await alternate.search_all(query, count, settings=self.settings)
+            if len(fast) >= max(2, count // 2):
+                logger.info(
+                    "YouTube wall active — %d result(s) for %r came from %s",
+                    len(fast),
+                    query,
+                    alternate.describe(self.settings),
+                )
+                return self.rank(query, fast)[:count]
 
         # Tier 0: YouTube Music, when the optional package is installed and the
         # operator has not turned it off. It returns songs (artist + album)
@@ -483,6 +552,13 @@ class YouTube:
             for track in await sources.fallback_search(query, count, settings=self.settings):
                 track.requested_by, track.requested_name = requester
                 tracks.append(track)
+        if not tracks and not relaxed:
+            second = relax_query(query)
+            if second:
+                logger.info("nothing for %r — retrying as %r", query, second)
+                again = await self.search(second, limit=limit, requester=requester, relaxed=True)
+                if again:
+                    return again
         if not tracks:
             raise MediaError("No results found for that query.")
         return self.rank(query, tracks)[:count]
@@ -514,7 +590,10 @@ class YouTube:
         """
         wanted = self._words(query)
         seen_ids: set[str] = set()
-        scored: list[tuple[float, int, Track]] = []
+        # (score, youtube order, track, dedupe key, artist) — the artist travels
+        # with the row: it used to be read from the loop variable, so the dedupe
+        # pass compared every track against the *last* result's artist.
+        scored: list[tuple[float, int, Track, str, str]] = []
 
         for position, track in enumerate(tracks):
             key = f"{track.source}:{track.id}"
@@ -535,13 +614,14 @@ class YouTube:
                     score += 0.8
 
             # Playable-length preference: skip 20s Shorts, demote 2h "loops".
-            if 40 <= track.duration <= 3600:
+            seconds = int(track.duration or 0)
+            if 40 <= seconds <= 3600:
                 score += 0.9
-            elif track.duration and track.duration < 40:
+            elif 0 < seconds < 40:
                 score -= 1.6
-            elif track.duration > 5400:
+            elif seconds > 5400:
                 score -= 0.7
-            if not track.duration:
+            if not seconds:
                 score -= 0.3
 
             title_low = track.title.lower()
@@ -575,14 +655,14 @@ class YouTube:
 
             # Tiny nudge so a clean tie keeps YouTube's ordering.
             score -= position * 0.01
-            scored.append((score, position, track, song_key))
+            scored.append((score, position, track, song_key, artist))
 
         # Sort first, *then* drop duplicates: the listener wants the best copy
         # of a song, not whichever upload YouTube happened to list first.
         scored.sort(key=lambda item: (-item[0], item[1]))
         kept: list[Track] = []
         seen_versions: dict[str, list[tuple[str, int]]] = {}
-        for _score, _position, track, song_key in scored:
+        for _score, _position, track, song_key, artist in scored:
             if song_key:
                 # Two uploads of the same title are the same song when they are
                 # by the same artist or run for the same length. A cover keeps a
@@ -634,19 +714,70 @@ class YouTube:
                 return found
 
         if looks_like_url(query):
-            info = await self._async_extract(query)
+            tried: Exception | None = None
+            try:
+                info = await self._async_extract(query)
+            except Exception as exc:  # a walled IP raises before returning
+                info = {}
+                tried = exc
+                self._note_wall(str(exc))
             if info.get("_type") == "playlist" and info.get("entries"):
                 entries = [e for e in info["entries"] if e]
                 if not entries:
                     raise MediaError("That playlist is empty or private.")
                 info = entries[0]
             track = self._track_from_entry(info, requester=requester)
-            if not track:
-                raise MediaError("That link did not resolve to a playable track.")
-            return track
+            if track:
+                return track
+            # A bare link and no metadata: the mirror knows the title, and the
+            # title is all the substitution tier needs to find the same song on
+            # a catalogue that will actually play it.
+            stub = await self._track_from_public_meta(
+                youtube_id(query), requester=requester
+            )
+            if stub is not None:
+                return stub
+            if tried is not None:
+                raise MediaError(_explain(str(tried), target=query)) from tried
+            raise MediaError("That link did not resolve to a playable track.")
 
         results = await self.search(query, limit=1, requester=requester)
         return results[0]
+
+    async def _track_from_public_meta(
+        self, video_id: str | None, *, requester: tuple[int, str] = (0, "")
+    ) -> Track | None:
+        """A YouTube id → a Track, using a mirror for the title.
+
+        Used when yt-dlp cannot read the video at all (YT-DLP's own wall): the
+        id still identifies the song, and everything downstream only needs the
+        title, artist and length to play the same song from elsewhere.
+        """
+        if not video_id:
+            return None
+        if not getattr(self.settings, "stream_fallback", True):
+            return None
+        try:
+            from vyron.core.public_streams import get_public_streams
+
+            meta = await get_public_streams(self.settings).meta(video_id)
+        except Exception as exc:  # pragma: no cover - never fatal
+            logger.info("mirror metadata failed for %s: %s", video_id, exc)
+            return None
+        if meta is None:
+            return None
+        logger.info("metadata for %s came from a mirror: %r", video_id, meta.title)
+        return Track(
+            id=video_id,
+            title=meta.title,
+            duration=meta.duration,
+            url=f"https://www.youtube.com/watch?v={video_id}",
+            uploader=meta.uploader,
+            thumbnail=meta.thumbnail,
+            source="youtube",
+            requested_by=requester[0],
+            requested_name=requester[1],
+        )
 
     async def _from_catalogue(
         self, url: str, *, requester: tuple[int, str] = (0, "")
@@ -787,6 +918,14 @@ class YouTube:
         if cached and not refresh and cached.expires_at > time.time():
             return cached
 
+        # A JioSaavn/Audius track *is* an audio file: there is nothing to
+        # extract, and running yt-dlp over it only adds a timeout.
+        if track.source in sources.DIRECT_SOURCES and track.url and not video:
+            direct = alternate.info_for(track)
+            if direct is not None:
+                self._stream_cache[key] = direct
+                return direct
+
         if not refresh:
             blocked_until = self._failures.get(key, 0.0)
             if blocked_until > time.time():
@@ -829,6 +968,14 @@ class YouTube:
         else:
             selector = "bestaudio[ext=m4a]/bestaudio[acodec!=none]/best"
 
+        # Walled: skip the ladder entirely (it cannot succeed) and go straight
+        # to the copy of the song that will actually play.
+        if self.walled():
+            substituted = await self._substitute(track, video=video, fresh=refresh)
+            if substituted is not None:
+                self._stream_cache[key] = substituted
+                return substituted
+
         last_error: Exception | None = None
         same_error = 0
         for client in self._client_ladder():
@@ -845,13 +992,16 @@ class YouTube:
                 # six-client, 24-second stall into a two-client, 4-second one.
                 same_error = same_error + 1 if last_error is not None and str(last_error) == message else 1
                 last_error = exc
+                self._note_wall(message)
                 logger.info("resolve via %s failed for %s: %s", client, track.id, exc)
                 if same_error >= 2:
                     logger.info("resolve for %s is deterministic, stopping the ladder", track.id)
                     break
                 continue
             HEALTH.record(source, True, ms=(time.perf_counter() - started) * 1000)
+            self.clear_wall()  # YouTube answered: stop preferring the catalogues
             self._remember_client(client)
+            result.source = result.source or "youtube"
             self._stream_cache[key] = result
             self._failures.pop(key, None)
             self._failure_reasons.pop(key, None)
@@ -865,6 +1015,14 @@ class YouTube:
         if fallback:
             self._stream_cache[key] = fallback
             return fallback
+
+        # Last tier, and the one that fixes a walled IP: the same song from a
+        # catalogue that serves its own audio. The listener asked for a song,
+        # not for YouTube specifically.
+        substituted = await self._substitute(track, video=video)
+        if substituted is not None:
+            self._stream_cache[key] = substituted
+            return substituted
 
         self._stream_cache.pop(key, None)
         raw = str(last_error) if last_error else ""
@@ -901,6 +1059,7 @@ class YouTube:
             ext=direct.ext,
             mime=direct.mime or ("video/mp4" if video else "audio/mp4"),
             title=track.title,
+            source=direct.source,
         )
 
     # ── stream plumbing ────────────────────────────────────────────────────
@@ -935,6 +1094,71 @@ class YouTube:
         if not client:
             return {}
         return {"extractor_args": {"youtube": {"player_client": [client]}}}
+
+    # ── the IP wall ────────────────────────────────────────────────────────
+    # What YouTube says when the *server* is the problem. Not per-video: two
+    # different ids in the production log produce the identical sentence.
+    WALL_SIGNS = (
+        "failed to extract any player response",
+        "sign in to confirm you",
+        "not a bot",
+        "confirm you're not a bot",
+        "confirm your age",
+        "http error 403",
+        "this content isn't available, try again later",
+        "the uploader has not made this video available",
+    )
+
+    def _note_wall(self, message: str) -> None:
+        """Remember that YouTube is refusing this server, not just this video."""
+        text = (message or "").lower()
+        if not any(sign in text for sign in self.WALL_SIGNS):
+            return
+        window = max(30, int(getattr(self.settings, "youtube_wall_window", 900)))
+        self._wall_until = time.time() + window
+        if not self._wall_logged:
+            self._wall_logged = True
+            logger.warning(
+                "YouTube is refusing this server (%s) — serving %s for the next %ds",
+                (message or "")[:90],
+                alternate.describe(self.settings),
+                window,
+            )
+
+    def stream_source(self, track: Track) -> str:
+        """Which engine the last answer for *track* came from ("" if unknown)."""
+        for key in (f"{track.id}:a", f"{track.id}:v"):
+            info = self._stream_cache.get(key)
+            if info is not None and info.expires_at > time.time():
+                return info.source
+        return ""
+
+    def walled(self) -> bool:
+        """True while the substitution tier should be tried first."""
+        return getattr(self, "_wall_until", 0.0) > time.time()
+
+    def wall_seconds_left(self) -> int:
+        return max(0, int(self._wall_until - time.time()))
+
+    def clear_wall(self) -> None:
+        self._wall_until = 0.0
+        self._wall_logged = False
+
+    async def _substitute(
+        self, track: Track, *, video: bool = False, fresh: bool = False
+    ) -> StreamInfo | None:
+        """The same song from a catalogue that hands out real audio.
+
+        Video is deliberately not substituted: an audio file under a video
+        request would be a silent, black video stream.
+        """
+        if video:
+            return None
+        try:
+            return await alternate.stream_info(track, settings=self.settings, fresh=fresh)
+        except Exception as exc:  # pragma: no cover - never break a resolve
+            logger.info("substitution failed for %s: %s", track.id, exc)
+            return None
 
     def _client_ladder(self) -> list[str | None]:
         """Player clients to try, best-known-first for this deployment.

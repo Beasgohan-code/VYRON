@@ -378,6 +378,12 @@ async def audio_info(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": "unknown track"}, status=404)
     cached = runtime.downloader.cached(track) if runtime.downloader else None
     ready = runtime.youtube is not None or runtime.downloader is not None
+    # Where the bytes will actually come from: a resolver already answered for
+    # this track, a cached file exists, or it is still up to the resolver. So
+    # the app can say "playing from JioSaavn" instead of implying YouTube.
+    served_by = track.source
+    if not cached and runtime.youtube is not None:
+        served_by = runtime.youtube.stream_source(track) or served_by
     payload = {
         "ok": True,
         "id": track.id,
@@ -386,6 +392,7 @@ async def audio_info(request: web.Request) -> web.Response:
         "duration": track.duration,
         "thumbnail": track.thumbnail,
         "source": track.source,
+        "served_by": served_by,
         "cached": bool(cached),
         "playable": bool(cached) or ready,
         "mime": "audio/mpeg" if cached else "audio/mp4",

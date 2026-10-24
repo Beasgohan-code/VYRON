@@ -233,6 +233,22 @@ def register(client: Client) -> None:
         else:
             rows.append(_row(f"{E('download')} mirror tier", None, "STREAM_FALLBACK=off (yt-dlp only)"))
 
+        # The tier that decides whether a walled IP plays anything at all.
+        from vyron.core import alternate
+
+        order = alternate.source_order(settings)
+        wall = ""
+        youtube = runtime.youtube
+        if youtube is not None and getattr(youtube, "walled", lambda: False)():
+            wall = f" · YouTube is refusing this IP for another {youtube.wall_seconds_left()}s"
+        rows.append(
+            _row(
+                f"{E('download')} substitution",
+                bool(order) or None,
+                (alternate.describe(settings) + wall) if order else "ALTERNATE_SOURCES=off",
+            )
+        )
+
         rows.append(_impersonate_row())
         from vyron.core import accelerator
 

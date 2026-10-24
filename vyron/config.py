@@ -100,6 +100,18 @@ class Settings:
     music_sources: str = field(
         default_factory=lambda: (_env("MUSIC_SOURCES", "spotify,deezer,apple") or "").lower()
     )
+    # When YouTube refuses the server itself ("Failed to extract any player
+    # response" from every client), no extractor fix helps. VYRON then plays the
+    # same song from a catalogue that hands out real audio. Order matters: the
+    # first engine is asked first. `off` disables the substitution entirely.
+    alternate_sources: str = field(
+        default_factory=lambda: (_env("ALTERNATE_SOURCES", "jiosaavn,audius,soundcloud") or "").lower()
+    )
+    # How long "YouTube is refusing this server" is trusted. While it lasts,
+    # playback and search go straight to the catalogues instead of spending
+    # twenty seconds per request re-proving it. A successful YouTube resolve
+    # clears it early.
+    youtube_wall_window: int = field(default_factory=lambda: max(30, _int("YOUTUBE_WALL_WINDOW", 900)))
     # YouTube Music search (ytmusicapi) is a better *search* than ytsearch for
     # music: songs with artist + album instead of "Official Video" uploads.
     ytmusic_search: bool = field(default_factory=lambda: _flag("YTMUSIC_SEARCH", True))

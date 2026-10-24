@@ -140,9 +140,12 @@ class Charts:
 
             # An editorial chart beats a guess, and it arrives with artist,
             # album and cover art already attached. Only falls through when
-            # ytmusicapi is missing or YouTube Music says no.
-            tracks = await self._chart_tracks(limit)
-            if not tracks:
+            # ytmusicapi is missing or YouTube Music says no — and skipped
+            # entirely while YouTube is refusing this server, because both
+            # tiers would just time out.
+            walled = bool(getattr(self.youtube, "walled", lambda: False)())
+            tracks = [] if walled else await self._chart_tracks(limit)
+            if not tracks and not walled:
                 for url in TRENDING_URLS:
                     try:
                         _, found = await self.youtube.playlist(url, limit=limit)
