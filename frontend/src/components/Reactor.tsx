@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useReducedMotionFlag } from "../lib/anim";
+import { loadThree, visualsWorthLoading, whenIdle } from "../lib/lazy-three";
 import { webglAvailable } from "../lib/webgl";
 
 interface ReactorProps {
@@ -32,7 +33,7 @@ export function Reactor({ className = "", analyser, playing = false, size = "her
   useEffect(() => {
     const node = host.current;
     if (!node) return;
-    if (!webglAvailable()) {
+    if (!webglAvailable() || !visualsWorthLoading()) {
       setSupported(false);
       return;
     }
@@ -41,8 +42,9 @@ export function Reactor({ className = "", analyser, playing = false, size = "her
     let frame = 0;
     let cleanup: (() => void) | undefined;
 
-    void (async () => {
-      const THREE = await import("../lib/three-runtime");
+    // Wait for the first paint: three.js is a backdrop, not a dependency.
+    const cancelIdle = whenIdle(() => void (async () => {
+      const THREE = await loadThree();
       if (disposed || !host.current) return;
 
       const parent = host.current;
@@ -309,10 +311,11 @@ export function Reactor({ className = "", analyser, playing = false, size = "her
         renderer.dispose();
         canvas.remove();
       };
-    })();
+    })());
 
     return () => {
       disposed = true;
+      cancelIdle();
       cleanup?.();
     };
   }, [size, reduced]);

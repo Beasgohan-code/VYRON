@@ -140,13 +140,16 @@ def test_app_shell_is_served():
     """
     from vyron.web.server import WEB_DIR
 
-    page = WEB_DIR / "dist" / "index.html"
+    page = WEB_DIR / "index.html"   # WEB_DIR *is* dist/ once it has been built
     if not page.is_file():
         pytest.skip("webapp/dist not built — run `npm run build` in frontend/")
     html = page.read_text(encoding="utf-8")
     assert "telegram-web-app.js" in html
     assert "/app/static/assets/" in html
     assert "root" in html
+    # installable + no 465 kB visual on the critical path
+    assert "manifest.webmanifest" in html
+    assert "three-runtime" not in html
 
 
 # ── discovery / rooms / playlists ───────────────────────────────────────────
@@ -774,3 +777,45 @@ def test_web_playback_mirrors_the_poster_to_the_listener(monkeypatch):
     delivered.clear()
     asyncio.run(server._mirror_now_playing(user, 424242))
     assert delivered == []
+
+
+# ── the Mini App is installable and works offline (#14, #16) ─────────────────
+def test_service_worker_is_served_with_scope_over_app():
+    """A worker under /app/static/ could not control /app/ without the header."""
+    from vyron.web.server import WEB_DIR
+
+    if not (WEB_DIR / "sw.js").is_file():
+        pytest.skip("webapp/dist not built — run `npm run build` in frontend/")
+
+    async def scenario(client):
+        response = await client.get("/app/sw.js")
+        assert response.status == 200
+        assert "javascript" in response.headers["Content-Type"]
+        assert response.headers["Service-Worker-Allowed"] == "/app/"
+        # a pinned worker would keep serving an old shell after a deploy
+        assert "no-cache" in response.headers["Cache-Control"]
+        body = await response.text()
+        assert "addEventListener(\"fetch\"" in body
+        # state-carrying routes must never be served from the cache
+        for prefix in ("/api/", "/v1/", "/audio/"):
+            assert prefix in body
+
+    asyncio.run(_with_client(scenario))
+
+
+def test_manifest_declares_a_real_app():
+    import json
+    from vyron.web.server import WEB_DIR
+
+    manifest = WEB_DIR / "manifest.webmanifest"
+    if not manifest.is_file():
+        pytest.skip("webapp/dist not built — run `npm run build` in frontend/")
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    assert data["start_url"] == "/app/" and data["scope"] == "/app/"
+    assert data["display"] in {"standalone", "fullscreen", "minimal-ui"}
+    sizes = {icon["sizes"] for icon in data["icons"]}
+    assert {"192x192", "512x512"} <= sizes
+    assert any(icon.get("purpose") == "maskable" for icon in data["icons"])
+    for icon in data["icons"]:
+        path = WEB_DIR / icon["src"].removeprefix("/app/static/")
+        assert path.is_file(), f"manifest points at a missing icon: {icon['src']}"

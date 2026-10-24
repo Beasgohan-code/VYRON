@@ -5,6 +5,7 @@ import { Dock } from "./components/Dock";
 import { Rail, Tabs } from "./components/Nav";
 import { Sheet } from "./components/Sheet";
 import { setOwnerToken } from "./lib/api";
+import { useConnection, useUpdateReady } from "./lib/pwa";
 import { useApp } from "./lib/store";
 import { Home } from "./views/Home";
 import { Library } from "./views/Library";
@@ -28,6 +29,8 @@ const TITLES: Record<string, string> = {
 export default function App() {
   const { view, setView, access, toastMessage, toastTone, audio, state, refreshState } = useApp();
   const [retrying, setRetrying] = useState(false);
+  const { online } = useConnection();
+  const update = useUpdateReady();
 
   /* keyboard: "/" jumps to search, space toggles playback */
   useEffect(() => {
@@ -95,6 +98,24 @@ export default function App() {
             <span className={`status-dot ${state?.streaming ? "on" : ""}`} title={state?.streaming ? "voice chat ready" : "voice engine offline"} />
           </div>
         </header>
+
+        {!online && (
+          <div className="notice warn" role="status">
+            <WifiOff size={15} />
+            <span>
+              You are offline. Playback stays as it is, and the last page is kept on this device.
+            </span>
+          </div>
+        )}
+
+        {update.ready && (
+          <div className="notice" role="status">
+            <span>A newer VYRON is ready.</span>
+            <button type="button" className="btn btn-ghost sm" onClick={update.reload}>
+              Reload
+            </button>
+          </div>
+        )}
 
         {access === "offline" && (
           <div className="notice error">

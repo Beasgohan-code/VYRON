@@ -364,7 +364,7 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
         title: track.title,
         artist: track.uploader || "VYRON",
         album: "VYRON",
-        artwork: track.thumbnail ? [{ src: track.thumbnail, sizes: "512x512" }] : [],
+        artwork: track.thumbnail ? [{ src: track.thumbnail, sizes: "512x512", type: "image/jpeg" }] : [],
       });
       media.setActionHandler("play", () => {
         void el().play().catch(() => undefined);
@@ -386,6 +386,31 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
       /* older Telegram webviews */
     }
   }, [advance, el, track]);
+
+  /* Lock-screen scrubber: without this the OS shows a play button and no bar. */
+  useEffect(() => {
+    const media = navigator.mediaSession;
+    if (!media || typeof media.setPositionState !== "function") return;
+    const audio = el();
+    const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
+    if (!track || !duration) {
+      try {
+        media.setPositionState();
+      } catch {
+        /* unsupported */
+      }
+      return;
+    }
+    try {
+      media.setPositionState({
+        duration,
+        position: Math.min(Math.max(0, audio.currentTime || 0), duration),
+        playbackRate: audio.playbackRate || 1,
+      });
+    } catch {
+      /* webview without a scrubber */
+    }
+  }, [el, track, position, playing]);
 
   /* ── public actions ──────────────────────────────────────────────────── */
   const play = useCallback(

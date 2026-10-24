@@ -194,6 +194,25 @@ async def index(_: web.Request) -> web.StreamResponse:
     return response
 
 
+async def service_worker(_: web.Request) -> web.StreamResponse:
+    """The offline shell, served from its own path so it can own `/app/`.
+
+    A service worker may only control pages inside its own directory unless the
+    server says otherwise — hence the `Service-Worker-Allowed` header. It is
+    also the one file that must never be cached by a *proxy*: a pinned worker
+    would keep serving an old shell after a deploy.
+    """
+    worker = WEB_DIR / "sw.js"
+    if not worker.is_file():
+        return web.Response(status=404, text="service worker not built")
+    response = web.FileResponse(worker)
+    response.headers["Content-Type"] = "text/javascript; charset=utf-8"
+    response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    response.headers["Service-Worker-Allowed"] = "/app/"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
 # ── state ───────────────────────────────────────────────────────────────────
 async def state(request: web.Request) -> web.Response:
     user = await _identify(request)
@@ -1325,6 +1344,7 @@ def register(app: web.Application) -> None:
     app.router.add_get("/app/", index)
     if WEB_DIR.is_dir():
         app.router.add_static("/app/static", WEB_DIR, show_index=False)
+    app.router.add_get("/app/sw.js", service_worker)
     # SPA deep links (/app/anything) render the shell; the app routes in memory.
     app.router.add_get("/app/{tail:(?!static/).+}", index)
     app.router.add_get("/api/info", info)
