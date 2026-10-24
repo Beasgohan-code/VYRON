@@ -626,7 +626,9 @@ def register(client: Client) -> None:
                 client,
                 chat.id,
                 track,
-                video=entry.video,
+                # a video result stays video even when the picker was opened
+                # from /song (entry.video) — otherwise the track decides.
+                video=entry.video or track.is_video,
                 status_id=cq.message.id,
             )
             if outcome != "error":

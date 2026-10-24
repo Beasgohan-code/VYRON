@@ -21,8 +21,7 @@ from vyron.ui.theme import E
 from vyron.utils.helpers import (
     command_args,
     display_name,
-    is_chat_admin,
-    is_owner,
+    media_suffix,
     track_from_message,
 )
 from vyron.utils.net import fetch_bytes
@@ -34,7 +33,9 @@ USAGE = (
     f"{E('info')} <b>How to use</b>\n"
     f"<blockquote><code>/play believer</code>\n"
     f"<code>/play https://youtu.be/…</code>\n"
-    f"<code>/song …</code> — send the MP3</blockquote>"
+    f"reply to any audio / video / file with <code>/play</code>\n"
+    f"<code>/song …</code> — get the file instead</blockquote>\n"
+    f"<footer>{E('spark')} audio or video is detected automatically</footer>"
 )
 
 
@@ -74,14 +75,15 @@ async def _edit(client: Client, chat_id: int, message_id: int | None, markup: st
 
 def register(client: Client) -> None:
     # ── /play ──────────────────────────────────────────────────────────────
-    # Audio only: video playback was removed on purpose. A voice chat is a
-    # radio, not a screen, and every `/vplay` path doubled the surface of the
-    # thing people actually use.
+    # One command, three inputs (text, link, replied file) and no format
+    # questions: the track carries `is_video` and the player streams whatever
+    # it is. There is deliberately no `/playforce` — an admin who wants to cut
+    # in can `/skip` first.
     @client.on_message(cmd(["play"]))
     async def _play_cmd(_: Client, message: Message) -> None:
         if not runtime.player:
             return
-        video = False
+        video = False  # replaced by the detected kind below
         chat_id = message.chat.id
         query = command_args(message)
         reply = message.reply_to_message
@@ -109,14 +111,18 @@ def register(client: Client) -> None:
                 status = await _thinking(client, message, "Downloading from Telegram…")
                 try:
                     media = reply.audio or reply.voice or reply.video or reply.document
-                    target = Path(runtime.settings.downloads_dir) / f"tg-{media_track.id}{_suffix(media)}"
+                    target = Path(runtime.settings.downloads_dir) / f"tg-{media_track.id}{media_suffix(media)}"
                     path = await client.download_media(reply, file_name=str(target))
                     if not path:
                         raise MediaError("The file could not be downloaded.")
                     media_track.url = str(path)
                     media_track.source = "telegram"
                     media_track.requested_by, media_track.requested_name = requester
-                    await runtime.player.play_track(chat_id, media_track, video=video)
+                    # A replied video plays as video, a voice note as audio —
+                    # the kind came from `track_from_message`, not a command.
+                    await runtime.player.play_track(
+                        chat_id, media_track, video=media_track.is_video
+                    )
                     await _edit(client, chat_id, status.id if status else None,
                                 cards.started_card(media_track))
                 except Exception as exc:
@@ -144,7 +150,7 @@ def register(client: Client) -> None:
                     client,
                     chat_id,
                     track,
-                    video=video,
+                    video=track.is_video,
                     status_id=status.id if status else None,
                     reply_to=message.id,
                 )
@@ -194,87 +200,9 @@ def register(client: Client) -> None:
             keyboards.search_results(tracks),
         )
 
-    # ── /playforce ─────────────────────────────────────────────────────────
-    @client.on_message(cmd(["playforce"]))
-    async def _playforce_cmd(_: Client, message: Message) -> None:
-        """Skip the queue and start this request now.
-
-        Plain /play never interrupts what is playing — that is the right
-        default, but a DJ needs a way to cut in. Admins and the owner only.
-        """
-        if not runtime.player:
-            return
-        video = False
-        chat_id = message.chat.id
-        query = command_args(message)
-        if not query:
-            await rich.send(
-                client,
-                chat_id,
-                cards.warn_card(
-                    "<b>Give me something to play</b>\n"
-                    "<blockquote><code>/playforce believer</code> or a link</blockquote>"
-                ),
-                reply_to=message.id,
-            )
-            return
-
-        user = message.from_user
-        allowed = is_owner(user.id if user else 0) or (
-            message.chat.type.name == "PRIVATE"
-            or await is_chat_admin(client, chat_id, user.id if user else 0)
-        )
-        if not allowed:
-            await rich.send(
-                client,
-                chat_id,
-                cards.warn_card("<b>Admins only</b>\n<blockquote>Ask an admin to force a track.</blockquote>"),
-                reply_to=message.id,
-            )
-            return
-
-        requester = (user.id if user else 0, display_name(user))
-        status = await _thinking(client, message, "Clearing the queue…")
-        try:
-            if looks_like_url(query):
-                track = await runtime.youtube.resolve(query, requester=requester)
-            else:
-                results = await runtime.youtube.search(query, requester=requester)
-                if not results:
-                    raise MediaError("No results for that.")
-                track = results[0]
-            if _too_long(track):
-                await _edit(client, chat_id, status.id if status else None, _too_long_text(track))
-                return
-            await runtime.player.force_play(chat_id, track, video=video)
-        except MediaError as exc:
-            await _edit(
-                client,
-                chat_id,
-                status.id if status else None,
-                cards.error_card(f"<b>Nothing playable there</b>\n<blockquote>{truncate(str(exc), 160)}</blockquote>"),
-            )
-            return
-        except StreamError as exc:
-            await _edit(
-                client,
-                chat_id,
-                status.id if status else None,
-                cards.error_card(f"<b>Could not start</b>\n<blockquote>{truncate(str(exc), 160)}</blockquote>"),
-            )
-            return
-        await _edit(
-            client,
-            chat_id,
-            status.id if status else None,
-            cards.started_card(track)
-            + f"\n<footer>{E('bolt')} queue cleared by an admin</footer>",
-        )
-
     # ── /song (the file, one command) ──────────────────────────────────────
     @client.on_message(cmd(["song"]))
     async def _download_cmd(_: Client, message: Message) -> None:
-        want_video = False
         query = command_args(message)
         chat_id = message.chat.id
         if not query:
@@ -304,7 +232,7 @@ def register(client: Client) -> None:
                 query,
                 tracks,
                 mode="download",
-                video=False,
+                video=tracks[0].is_video if len(tracks) == 1 else False,
             )
 
         if len(tracks) == 1:
@@ -312,7 +240,6 @@ def register(client: Client) -> None:
                 client,
                 chat_id,
                 tracks[0],
-                want_video,
                 status_id=status.id if status else None,
                 reply_to=message.id,
             )
@@ -411,15 +338,15 @@ async def begin(
     chat_id: int,
     track: Track,
     *,
-    video: bool = False,
+    video: bool | None = None,
     status_id: int | None = None,
     reply_to: int | None = None,
 ) -> str:
     """Play *track* into the voice chat.
 
     Streaming is the product: a missing voice engine or a dead link is reported
-    as such instead of quietly turning /play into a file upload. ``/song`` and
-    ``/video`` remain the explicit ways to get a file.
+    as such instead of quietly turning /play into a file upload. ``/song`` is
+    the explicit way to get a file.
 
     Returns ``"streamed"``, ``"queued"`` or ``"error"`` (the error card is
     already on screen when this returns).
@@ -434,10 +361,13 @@ async def begin(
                 "<blockquote>Playback needs the assistant account. Add "
                 "<code>STRING_SESSION</code> (generate one with "
                 "<code>python -m vyron.tools.session</code>) and restart. "
-                "Use <code>/song</code> or <code>/video</code> if you want a file.</blockquote>"
+                "Use <code>/song</code> if you want a file.</blockquote>"
             ),
         )
         return "error"
+    # Auto-detect: a video source streams video, everything else audio.
+    if video is None:
+        video = bool(track.is_video)
     try:
         position = await _player().enqueue(chat_id, track, video=video, play_now=True)
     except StreamError as exc:
@@ -448,54 +378,70 @@ async def begin(
             status_id,
             cards.error_card(
                 f"<b>Could not stream that</b>\n<blockquote>{truncate(str(exc), 170)}</blockquote>"
-                "\n<footer>the same track as a file: <code>/song</code> · <code>/video</code></footer>"
+                "\n<footer>the same track as a file: <code>/song</code></footer>"
             ),
         )
         return "error"
     return "streamed" if position == 1 else "queued"
 
 
-def _suffix(media) -> str:
-    name = getattr(media, "file_name", "") or ""
-    if "." in name:
-        return "." + name.rsplit(".", 1)[-1]
-    return "." + (getattr(media, "mime_type", "") or "audio/mpeg").split("/")[-1][:5]
-
-
 async def deliver(
     client: Client,
     chat_id: int,
     track: Track,
-    want_video: bool,
+    want_video: bool | None = None,
     *,
     status_id: int | None = None,
     reply_to: int | None = None,
     hint: str | None = None,
 ) -> None:
-    """Download a track and send it as a real Telegram file."""
-    # Audio only: video was removed from the bot, so there is one file path.
-    want_video = False
-    markup = cards.download_card(track, "audio")
+    """Download a track and send it as a real Telegram file.
+
+    The container is detected, not asked for: audio first (that is what
+    ``/song`` means), and when the source has no audio-only stream at all — a
+    video-only link, a replied video — the video file is sent instead. An
+    explicit ``want_video`` still wins, because the inline buttons offer the
+    choice.
+    """
+    if want_video is None:
+        want_video = False
+    markup = cards.download_card(track, "video" if want_video else "audio")
     if hint:
         markup = B.note(hint) + markup
     await _edit(client, chat_id, status_id, markup)
 
-    try:
-        path = (
-            await runtime.downloader.video(track)
-            if want_video
-            else await runtime.downloader.audio(track)
-        )
-    except Exception as exc:
-        await _edit(
-            client,
-            chat_id,
-            status_id,
-            cards.error_card(
-                f"<b>Download failed</b>\n<blockquote>{truncate(str(exc), 170)}</blockquote>"
-            ),
-        )
-        return
+    path = None
+    if not want_video:
+        try:
+            path = await runtime.downloader.audio(track)
+        except Exception as exc:
+            # A video-only source: the honest answer is the video, not an error.
+            if not (track.is_video or track.url):
+                await _edit(
+                    client,
+                    chat_id,
+                    status_id,
+                    cards.error_card(
+                        f"<b>Download failed</b>\n<blockquote>{truncate(str(exc), 170)}</blockquote>"
+                    ),
+                )
+                return
+            logger.info("audio download failed for %s, trying video: %s", track.id, exc)
+    if path is None:
+        try:
+            path = await runtime.downloader.video(track)
+            want_video = True
+            await _edit(client, chat_id, status_id, cards.download_card(track, "video"))
+        except Exception as exc:
+            await _edit(
+                client,
+                chat_id,
+                status_id,
+                cards.error_card(
+                    f"<b>Download failed</b>\n<blockquote>{truncate(str(exc), 170)}</blockquote>"
+                ),
+            )
+            return
 
     thumb = await fetch_bytes(track.thumbnail)
     caption = (

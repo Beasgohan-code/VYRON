@@ -186,6 +186,14 @@ async def reply_card(message: Message, markup: str, *, keyboard: InlineKeyboardM
 
 
 # ── media → track ───────────────────────────────────────────────────────────
+def media_suffix(media) -> str:
+    """A file extension for a Telegram media object (``.mp3``, ``.mp4``…)."""
+    name = getattr(media, "file_name", "") or ""
+    if "." in name:
+        return "." + name.rsplit(".", 1)[-1]
+    return "." + (getattr(media, "mime_type", "") or "audio/mpeg").split("/")[-1][:5]
+
+
 def track_from_message(message: Message) -> Track | None:
     """Build a Track from a replied-to audio / voice / video file."""
     target = message.reply_to_message or message
@@ -193,6 +201,10 @@ def track_from_message(message: Message) -> Track | None:
     if not media:
         return None
     title = getattr(media, "title", None) or getattr(media, "file_name", None) or "Telegram audio"
+    # Auto-detect what we were handed: a video is streamed as video, anything
+    # else (audio, voice note, document) as audio. No separate command.
+    mime = (getattr(media, "mime_type", "") or "").lower()
+    is_video = bool(target.video) or mime.startswith("video/")
     performer = getattr(media, "performer", None) or ""
     file_id = getattr(media, "file_id", "") or ""
     duration = int(getattr(media, "duration", 0) or 0)
@@ -205,6 +217,7 @@ def track_from_message(message: Message) -> Track | None:
         source="telegram",
         requested_by=target.from_user.id if target.from_user else 0,
         requested_name=display_name(target.from_user) if target.from_user else "",
+        is_video=is_video,
     )
 
 

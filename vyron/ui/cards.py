@@ -189,7 +189,6 @@ _HELP: dict[str, tuple[str, list[tuple[str, str]]]] = {
             ("/volume 1-200", "set assistant volume"),
             ("/loop off|one|all", "cycle the repeat mode"),
             ("/shuffle", "shuffle what is queued"),
-            ("/playforce", "clear the queue and play now"),
             ("/stop", "end the session and leave"),
             ("/np", "refresh the now-playing card"),
         ],

@@ -123,12 +123,25 @@ Health check → <http://localhost:8080/health> · Mini App → <http://localhos
 
 ### Playback
 
+Three request commands, and the media kind is detected rather than asked for:
+
+| You send | VYRON does |
+|---|---|
+| `/play believer` | searches, streams the pick into the voice chat |
+| `/play <link>` | resolves the link (YouTube, YT-Music, SoundCloud, Bandcamp, any yt-dlp site) and streams it |
+| `/play` as a reply to an audio / voice note | downloads the file and streams it |
+| `/play` as a reply to a **video** | streams the video — same command, no `/vplay` |
+| `/cplay …` | exactly the same auto-detection, into the **linked channel's** voice chat |
+| `/song <song \| link>` | sends the file: audio (MP3/M4A) when the source has audio, the video file when it does not |
+
+There is no `/vplay`, `/vsong`, `/playforce` or `/cplayforce`: video is a
+property of the track (yt-dlp reports it, or the replied media is a video), not
+a separate command, and cutting in is `/skip` + `/play`.
+
 | Command | What it does |
 |---|---|
-| `/play <song \| link>` | search & stream audio (or play a link instantly) |
-| `/vplay <song \| link>` | stream video |
-| `/song <song \| link>` | download the MP3 (same engine as `/api/download`) |
-| `/vsong <song \| link>` | download the MP4 |
+| `/play <song \| link \| reply>` | stream in the voice chat — audio or video, auto-detected |
+| `/song <song \| link>` | download the file (same engine as `/api/download`) |
 | `/playlist <url>` | queue up to 50 tracks from a playlist / mix |
 | `/search <text>` | browse results without playing |
 | `/pause` · `/resume` | hold / continue |
@@ -257,7 +270,7 @@ and translated instead of being flattened into "nothing could be extracted":
 | *cannot reach YouTube* | egress/DNS on the host | `PROXY` or a different region |
 
 `/doctor` prints the same sentence, and its first row is the **build**
-(`v1.3.0 · 2026-10-24`): if it still shows an older one, the deploy did not
+(`v1.4.0 · 2026-10-24`): if it still shows an older one, the deploy did not
 land — that is a different problem from a broken track.
 
 ### Two interfaces, and a fallback that always works
@@ -283,9 +296,9 @@ Telegram `file_id` after the first send, so later starts cost nothing.
 ### Tools
 
 `/lyrics` · `/fav` · `/favorites` · `/history` · `/settings` · `/247` · `/stats` · `/ping` · `/id`
-`/song` · `/vsong` · `/repo` · `/playforce` · `/language` · `/logger` · `/voice` · `/thumbnail`
+`/song` · `/repo` · `/language` · `/logger` · `/voice` · `/thumbnail`
 
-`/playforce` clears the queue and cuts in immediately (admins, or the owner),
+`/song` sends the file instead of streaming it;
 `/language` switches this chat between English, हिन्दी, മലയാളം and ਪੰਜਾਬੀ, and
 `/logger` mirrors warnings and errors into `LOGGER_ID`, `/voice` shows the live
 state of the streaming engine (assistant account, active calls, quality), and
@@ -361,8 +374,7 @@ A group can stream into its **linked channel**, or into one you pin explicitly.
 |---|---|
 | `/addchannel @name` | link a channel: it must exist, the bot must be admin there, and you must be one too |
 | `/delchannel` | unlink, stop playback there, and drop the reverse index |
-| `/cplay <song|link>` | queue into the channel's voice chat |
-| `/cplayforce` · `/cvplayforce` | cut in immediately (audio / video) |
+| `/cplay <song|link>` | queue into the channel's voice chat (audio *or* video, auto-detected) |
 | `/cpause` · `/cresume` · `/cskip` · `/cclear` | channel transport |
 | `/cautoplay` | toggle autoplay for the channel |
 | `/cthumbnail` (reply to a photo) · `/cthumbnail off` | the channel's poster artwork |
@@ -932,7 +944,7 @@ owner-only `/sysstats` card.
 
 | Symptom | Fix |
 |---|---|
-| `Start a voice chat in this group first` | The group has no active VC — start one (or `/vplay` after starting). |
+| `Start a voice chat in this group first` | The group has no active VC — start one, then `/play` again. |
 | `/play` says **voice engine is off** | `STRING_SESSION` is missing or failed to start — check the boot log, regenerate with `python -m vyron.tools.session`, restart. `/voice` shows the live engine state. |
 | Assistant joins but is silent | The **assistant** needs *manage voice chats*; give the bot admin too. |
 | `Could not resolve that track` | run **`/sources`** first — it names the tier that failed and why. Then: confirm `curl_cffi` is installed (`/doctor` → impersonation), let `YTDLP_AUTOUPDATE` fetch a newer extractor, keep `STREAM_FALLBACK=on`, and self-host Cobalt (`COBALT_URLS`) if the public mirrors are rate-limited. Cookies (`COOKIES_FILE`) are only needed for age/region-locked videos. |

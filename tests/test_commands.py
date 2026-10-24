@@ -142,7 +142,12 @@ def test_removed_commands_stay_removed():
     from vyron.__main__ import COMMANDS
 
     registered = set(_commands())
-    for gone in ("speedtest", "whoami", "emojis", "dj", "random", "daemons", "replay", "timer"):
+    for gone in (
+        "speedtest", "whoami", "emojis", "dj", "random", "daemons", "replay", "timer",
+        # one /play and one /cplay: force variants were removed in favour of
+        # auto-detection, so these must never come back.
+        "playforce", "cplayforce", "vplay", "vsong", "vplayforce", "cvplayforce",
+    ):
         assert gone not in registered, f"/{gone} is back"
         assert gone not in {name for name, _ in COMMANDS}, f"/{gone} is back in the menu"
 
@@ -168,7 +173,7 @@ def test_channel_controls_are_registered():
     """The channel-side control set ported from ShizuMusic stays complete."""
     names = set(_commands())
     expected = {
-        "cplay", "cplayforce", "cstop", "cpause", "cresume", "cskip",
+        "cplay", "cstop", "cpause", "cresume", "cskip",
         "cclear", "cseek", "cvolume", "ceffecton", "ceffectoff", "ceffects",
         "cautoplay", "cthumbnail", "cplayset", "addchannel", "delchannel",
     }

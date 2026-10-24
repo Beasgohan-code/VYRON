@@ -421,7 +421,18 @@ class YouTube:
             url=entry.get("webpage_url") or entry.get("url") or f"https://youtu.be/{vid}",
             uploader=str(entry.get("uploader") or entry.get("channel") or ""),
             thumbnail=thumb,
-            is_video=bool(entry.get("is_video", False)),
+            # Auto-detect the media kind: yt-dlp flags it explicitly for some
+            # extractors, otherwise a real video codec means it *is* a video.
+            # Flat search entries carry neither, so they default to audio —
+            # which is what a music bot wants from a search result.
+            is_video=bool(
+                entry.get("is_video", False)
+                or (
+                    str(entry.get("vcodec") or "none") not in {"none", "None"}
+                    and not entry.get("audio_only")
+                )
+                or bool(entry.get("width"))
+            ),
             is_live=bool(entry.get("is_live")) or entry.get("live_status") == "is_live",
             source=str(entry.get("extractor_key") or entry.get("ie_key") or "youtube").lower(),
             requested_by=requester[0],

@@ -465,14 +465,6 @@ class Player:
             self.schedule_save()
         return position
 
-    async def force_play(self, chat_id: int, track: Track, *, video: bool = False) -> Track:
-        """Clear the queue and start *track* immediately (``/playforce``)."""
-        state = self.queues.get(chat_id)
-        state.queue.clear()
-        state.prefetched = None
-        await self.play_track(chat_id, track, video=video)
-        return track
-
     # ── transport ──────────────────────────────────────────────────────────
     async def pause(self, chat_id: int) -> bool:
         state = self.queues.get(chat_id)

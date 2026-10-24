@@ -19,7 +19,17 @@ from vyron.ui import rich
 from vyron.ui.progress import truncate
 from vyron.ui.theme import E
 from vyron.ui.progress import human_time
-from vyron.utils.helpers import command_args, display_name, is_chat_admin, is_owner, parse_seek
+from pathlib import Path
+
+from vyron.utils.helpers import (
+    command_args,
+    display_name,
+    is_chat_admin,
+    is_owner,
+    media_suffix,
+    parse_seek,
+    track_from_message,
+)
 from vyron.utils.commands import cmd
 
 logger = logging.getLogger(__name__)
@@ -88,17 +98,25 @@ async def _target_chat(client: Client, message: Message) -> int | None:
 def register(client: Client) -> None:
     @client.on_message(cmd(["cplay"]))
     async def _cplay(_: Client, message: Message) -> None:
+        """Stream into the linked channel's voice chat — text, link or reply.
+
+        Same auto-detection as `/play`: a replied video streams video, a voice
+        note or audio file streams audio, a link is resolved and classified.
+        """
         if not runtime.player:
             return
         query = command_args(message)
-        if not query:
+        reply = message.reply_to_message
+        if not query and not track_from_message(message):
             await rich.send(
                 client,
                 message.chat.id,
                 B.note(
                     f"{E('globe')} Usage: <code>/cplay song name or link</code>\n"
+                    "…or reply to an audio / video file with <code>/cplay</code>.\n"
                     "The linked channel's voice chat is used."
                 ),
+                reply_to=message.id,
             )
             return
 
@@ -117,15 +135,58 @@ def register(client: Client) -> None:
             )
             return
 
+        requester = (
+            message.from_user.id if message.from_user else 0,
+            display_name(message.from_user),
+        )
+
+        # A replied file never needs resolving: download it and stream it.
+        if reply:
+            media_track = track_from_message(message)
+            if media_track:
+                status = await rich.send(
+                    client,
+                    message.chat.id,
+                    f"{E('clock')} <b>Downloading from Telegram…</b>",
+                    reply_to=message.id,
+                )
+                try:
+                    media = reply.audio or reply.voice or reply.video or reply.document
+                    suffix = media_suffix(media)
+                    target_path = Path(runtime.settings.downloads_dir) / f"tg-{media_track.id}{suffix}"
+                    path = await client.download_media(reply, file_name=str(target_path))
+                    if not path:
+                        raise MediaError("The file could not be downloaded.")
+                    media_track.url = str(path)
+                    media_track.requested_by, media_track.requested_name = requester
+                    await runtime.player.play_track(
+                        target, media_track, video=media_track.is_video
+                    )
+                except Exception as exc:
+                    await rich.edit(
+                        client,
+                        message.chat.id,
+                        status.id if status else 0,
+                        B.note(f"{E('cross')} {rich.esc(truncate(str(exc), 140))}"),
+                    )
+                    return
+                if status:
+                    await rich.edit(
+                        client,
+                        message.chat.id,
+                        status.id,
+                        B.note(
+                            f"{E('live')} <b>Channel stream started</b> · "
+                            f"{rich.esc(truncate(media_track.title, 50))}"
+                        ),
+                    )
+                return
+
         status = await rich.send(
             client,
             message.chat.id,
             f"{E('clock')} <b>Resolving for the channel…</b>",
             reply_to=message.id,
-        )
-        requester = (
-            message.from_user.id if message.from_user else 0,
-            display_name(message.from_user),
         )
         try:
             if looks_like_url(query):
@@ -133,7 +194,7 @@ def register(client: Client) -> None:
             else:
                 results = await runtime.youtube.search(query, limit=1, requester=requester)
                 track = results[0]
-            await runtime.player.play_track(target, track, video=False)
+            await runtime.player.play_track(target, track, video=track.is_video)
             markup = (
                 f"{E('live')} <b>Channel stream started</b>\n"
                 f"<blockquote>{E('note')} {rich.esc(truncate(track.title, 54))}\n"
@@ -425,51 +486,6 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
         return False
-
-    @client.on_message(cmd(["cplayforce"]))
-    async def _cplayforce(_: Client, message: Message) -> None:
-        if not runtime.player:
-            return
-        video = False
-        target = await _channel_target(message)
-        if target is None or not await _admin_or_warn(message):
-            return
-        query = command_args(message).strip()
-        if not query:
-            await rich.send(
-                client,
-                message.chat.id,
-                B.note(f"{E('info')} Usage: <code>/cplayforce believer</code>"),
-                reply_to=message.id,
-            )
-            return
-        user = message.from_user
-        requester = (user.id if user else 0, display_name(user))
-        try:
-            if looks_like_url(query):
-                track = await runtime.youtube.resolve(query, requester=requester)
-            else:
-                results = await runtime.youtube.search(query, limit=1, requester=requester)
-                if not results:
-                    raise MediaError("No results for that.")
-                track = results[0]
-            await runtime.player.force_play(target, track, video=video)
-        except MediaError as exc:
-            await rich.send(
-                client,
-                message.chat.id,
-                B.note(f"{E('cross')} {rich.esc(truncate(str(exc), 140))}"),
-                reply_to=message.id,
-            )
-            return
-        await rich.send(
-            client,
-            message.chat.id,
-            B.note(
-                f"{E('bolt')} <b>Forced in the channel</b> · {rich.esc(truncate(track.title, 54))}"
-            ),
-            reply_to=message.id,
-        )
 
     @client.on_message(cmd(["cpause", "cresume", "cskip", "cclear", "cautoplay"]))
     async def _cctl(_: Client, message: Message) -> None:

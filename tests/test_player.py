@@ -199,20 +199,6 @@ def test_enqueue_rejects_duplicates():
     assert run(player.enqueue(10, track("one"))) == -1
 
 
-def test_force_play_clears_the_queue():
-    player, calls, _, _ = make_player()
-    run(player.play_track(10, track("one")))
-    run(player.enqueue(10, track("two")))
-    run(player.enqueue(10, track("three")))
-
-    run(player.force_play(10, track("forced")))
-
-    state = player.queues.get(10)
-    assert state.current is not None and state.current.id == "forced"
-    assert state.queue == []
-    assert calls.played[-1] == "https://cdn/forced.m4a"
-
-
 # ── seek ────────────────────────────────────────────────────────────────────
 def test_seek_restarts_without_counting_a_second_play():
     player, calls, _, storage = make_player()
