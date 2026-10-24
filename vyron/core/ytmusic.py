@@ -152,8 +152,87 @@ async def album(browse_id: str, limit: int = 50) -> tuple[str, list[dict]]:
     return await asyncio.to_thread(_album_sync, browse_id, limit)
 
 
+def _chart_playlists_sync(country: str) -> list[dict]:
+    client = _get_client()
+    if client is None:
+        return []
+    try:
+        data = client.get_charts(country=country) or {}
+    except Exception as exc:  # pragma: no cover - network dependent
+        logger.info("ytmusic charts failed for %s: %s", country, exc)
+        return []
+    found: list[dict] = []
+    # US charts add a Genres section, IN charts Languages — both are playlists
+    # of the same kind, so one shelf holds them all.
+    for section in ("videos", "genres", "languages", "trending"):
+        for item in data.get(section) or []:
+            if not isinstance(item, dict) or not item.get("playlistId"):
+                continue
+            found.append(
+                {
+                    "title": str(item.get("title") or "Chart"),
+                    "playlist_id": str(item["playlistId"]),
+                    "thumbnail": _best_thumb(item.get("thumbnails")),
+                    "kind": section,
+                }
+            )
+    return found
+
+
+async def chart_playlists(country: str = "ZZ") -> list[dict]:
+    """The country's official YouTube Music charts (``ZZ`` is global).
+
+    Anonymous calls still return the chart *playlists*; only the ranked
+    per-artist numbers need a premium login, which we never ask for.
+    """
+    if not available():
+        return []
+    return await asyncio.to_thread(_chart_playlists_sync, country)
+
+
+def _chart_tracks_sync(country: str, limit: int) -> list[dict]:
+    client = _get_client()
+    if client is None:
+        return []
+    playlists = _chart_playlists_sync(country)
+    if not playlists:
+        return []
+    # Prefer the all-genres "Top 50/100" list; a genre chart is a fine fallback.
+    playlists.sort(key=lambda item: (item["kind"] != "videos", "top" not in item["title"].lower()))
+    for chart in playlists[:3]:
+        try:
+            playlist = client.get_playlist(chart["playlist_id"], limit=max(1, min(50, limit)))
+        except Exception as exc:  # pragma: no cover - network dependent
+            logger.info("ytmusic chart playlist failed: %s", exc)
+            continue
+        tracks: list[dict] = []
+        for item in (playlist or {}).get("tracks") or []:
+            parsed = parse_entry(item)
+            if parsed:
+                parsed["chart"] = chart["title"]
+                tracks.append(parsed)
+        if tracks:
+            return tracks
+    return []
+
+
+async def chart_tracks(country: str = "ZZ", limit: int = 25) -> list[dict]:
+    """Tracks from the country's top chart — an editorial list, not a guess."""
+    if not available():
+        return []
+    return await asyncio.to_thread(_chart_tracks_sync, country, limit)
+
+
 def describe() -> str:
     return "ytmusicapi ready" if available() else "ytmusicapi not installed (yt-dlp search only)"
 
 
-__all__ = ["album", "available", "describe", "parse_entry", "search"]
+__all__ = [
+    "album",
+    "available",
+    "chart_playlists",
+    "chart_tracks",
+    "describe",
+    "parse_entry",
+    "search",
+]

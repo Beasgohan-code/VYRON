@@ -952,6 +952,7 @@ The interesting optional ones:
 | `STREAM_FAILURE_TTL` | `60` | how long a track that just failed answers instantly instead of retrying |
 | `EXTRACT_CONCURRENCY` | `2` | yt-dlp extractions allowed at once (the rest queue, so web requests stay fast) |
 | `IMPERSONATE` | `chrome` | browser fingerprint to imitate via `curl_cffi`; `off` disables |
+| `CHARTS_COUNTRY` | `ZZ` | country code for the Home screen charts — `ZZ` global, `IN`, `US`, `GB`… |
 | `DOWNLOAD_ACCELERATOR` | `auto` | transfer ladder: `auto` (aria2 → curl → aiohttp), `aria2`, `curl`, `none` |
 | `COMMAND_PREFIXES` | `/!.?#%$&~` | characters that may start a command; comma/space separated, `/` always on, `off` for slash-only, an empty entry enables prefix-less |
 | `YTDLP_AUTOUPDATE` | `on` | check PyPI on boot/daily and upgrade yt-dlp in place |

@@ -95,7 +95,7 @@ class Runtime:
         from vyron.database import make_storage
 
         self.youtube = YouTube(self.settings)
-        self.charts = Charts(self.youtube)
+        self.charts = Charts(self.youtube, country=self.settings.charts_country)
         self.downloader = Downloader(self.settings)
         self.lyrics = LyricsClient()
         self.storage = await make_storage(self.settings)

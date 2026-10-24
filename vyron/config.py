@@ -82,6 +82,10 @@ class Settings:
     # No cookies? Impersonating a real browser is the next best thing: it fixes
     # the TLS/JA3 fingerprint YouTube uses to spot a datacenter IP.
     impersonate: str = field(default_factory=lambda: _env("IMPERSONATE", "chrome"))
+    # Charts are per-country: ZZ is the global list, IN the India Top 50.
+    charts_country: str = field(
+        default_factory=lambda: (_env("CHARTS_COUNTRY", "ZZ") or "ZZ").strip().upper()[:2]
+    )
     # Which characters may start a command. `/` is always included; an empty
     # entry enables prefix-less commands (`play x`) — opt-in only.
     command_prefixes: str = field(default_factory=lambda: _env("COMMAND_PREFIXES"))

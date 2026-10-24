@@ -89,8 +89,9 @@ class Shelf:
 class Charts:
     """TTL-cached discovery service."""
 
-    def __init__(self, youtube: YouTube, *, ttl: int = 1800) -> None:
+    def __init__(self, youtube: YouTube, *, ttl: int = 1800, country: str = "ZZ") -> None:
         self.youtube = youtube
+        self.country = (country or "ZZ").upper()[:2]
         self.ttl = ttl
         self.home_ttl = 180  # seconds a built Home payload stays fresh
         self.shelf_timeout = 12  # a shelf that is slower than this is skipped
@@ -137,15 +138,19 @@ class Charts:
             if cached:
                 return cached[:limit]
 
-            tracks: list[Track] = []
-            for url in TRENDING_URLS:
-                try:
-                    _, found = await self.youtube.playlist(url, limit=limit)
-                    if found:
-                        tracks = found
-                        break
-                except Exception as exc:
-                    logger.debug("trending url failed: %s", exc)
+            # An editorial chart beats a guess, and it arrives with artist,
+            # album and cover art already attached. Only falls through when
+            # ytmusicapi is missing or YouTube Music says no.
+            tracks = await self._chart_tracks(limit)
+            if not tracks:
+                for url in TRENDING_URLS:
+                    try:
+                        _, found = await self.youtube.playlist(url, limit=limit)
+                        if found:
+                            tracks = found
+                            break
+                    except Exception as exc:
+                        logger.debug("trending url failed: %s", exc)
 
             if not tracks:
                 # graceful fallback: popular searches across genres
@@ -159,6 +164,35 @@ class Charts:
                             tracks.append(track)
 
             return self._store("trending", tracks)[:limit]
+
+    async def _chart_tracks(self, limit: int) -> list[Track]:
+        from vyron.core import ytmusic
+
+        if not ytmusic.available():
+            return []
+        try:
+            raw = await ytmusic.chart_tracks(self.country, limit=limit)
+        except Exception as exc:  # pragma: no cover - network dependent
+            logger.debug("ytmusic chart failed: %s", exc)
+            return []
+        tracks: list[Track] = []
+        for entry in raw:
+            try:
+                tracks.append(
+                    Track(
+                        id=str(entry["id"]),
+                        title=str(entry.get("title") or "Unknown title"),
+                        uploader=str(entry.get("uploader") or ""),
+                        duration=int(entry.get("duration") or 0),
+                        url=f"https://www.youtube.com/watch?v={entry['id']}",
+                        thumbnail=entry.get("thumbnail"),
+                    )
+                )
+            except Exception:  # pragma: no cover - malformed row
+                continue
+        if tracks:
+            logger.info("trending from the %s chart (%d tracks)", self.country, len(tracks))
+        return tracks[:limit]
 
     async def mix(self, key: str, limit: int = 10) -> list[Track]:
         spec = MIXES.get(key)
