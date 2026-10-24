@@ -32,6 +32,47 @@ def available() -> bool:
     return True
 
 
+def _session():
+    """A requests session sized for this bot, not for one request at a time.
+
+    ytmusicapi builds a default ``requests.Session``, whose urllib3 pool holds
+    ten connections. Search, charts and autoplay all talk to music.youtube.com
+    at once, so production logged "Connection pool is full, discarding
+    connection" twice per boot — requests were being thrown away and rebuilt.
+    A bigger pool (and a real retry policy) fixes the churn at the source.
+    """
+    import functools
+
+    try:
+        import requests
+        from requests.adapters import HTTPAdapter
+    except Exception:  # pragma: no cover - ytmusicapi ships with requests
+        return None
+
+    session = requests.Session()
+    retries = None
+    try:
+        from urllib3.util.retry import Retry
+
+        retries = Retry(
+            total=2,
+            connect=2,
+            read=2,
+            backoff_factor=0.4,
+            status_forcelist=(429, 500, 502, 503, 504),
+            allowed_methods=frozenset({"GET", "POST"}),
+        )
+    except Exception:  # pragma: no cover - urllib3 without Retry
+        retries = None
+    adapter = HTTPAdapter(pool_connections=16, pool_maxsize=64, max_retries=retries)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    # A walled host does not answer, it hangs: fail fast instead of holding a
+    # pool slot for the default 30 s.
+    session.request = functools.partial(session.request, timeout=(5, 20))
+    return session
+
+
 def _get_client():
     global _client, _unavailable
     if _client is not None:
@@ -39,7 +80,8 @@ def _get_client():
     try:
         from ytmusicapi import YTMusic
 
-        _client = YTMusic()
+        session = _session()
+        _client = YTMusic(requests_session=session) if session else YTMusic()
         return _client
     except Exception as exc:  # pragma: no cover - import/network dependent
         logger.info("ytmusicapi unavailable: %s", exc)

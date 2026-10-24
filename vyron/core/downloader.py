@@ -86,6 +86,34 @@ class Downloader:
         self.settings.ensure_dirs()
         self._locks: dict[str, asyncio.Lock] = {}
 
+    # ── what the resolver already knows ────────────────────────────────────
+    def _youtube_walled(self) -> bool:
+        """True while the stream resolver knows YouTube is refusing this host.
+
+        Production showed the cost of not asking: a walled server still walked
+        four yt-dlp clients (16 s each, 49 s in total) before falling back to
+        the mirror that actually had the song. The wall is the *same* fact for
+        both engines, so the downloader reads it instead of re-proving it.
+        """
+        try:
+            from vyron.runtime import runtime
+
+            engine = getattr(runtime, "youtube", None)
+            return bool(engine is not None and engine.walled())
+        except Exception:  # pragma: no cover - runtime not up yet
+            return False
+
+    def _note_wall(self, message: str) -> None:
+        """Tell the resolver what this attempt just learned about YouTube."""
+        try:
+            from vyron.runtime import runtime
+
+            engine = getattr(runtime, "youtube", None)
+            if engine is not None:
+                engine._note_wall(message)
+        except Exception:  # pragma: no cover - runtime not up yet
+            pass
+
     # ── paths ──────────────────────────────────────────────────────────────
     def audio_path(self, track: Track) -> Path:
         return self.settings.downloads_dir / f"{track.source}-{track.id}.mp3"
@@ -230,6 +258,7 @@ class Downloader:
         work.mkdir(parents=True, exist_ok=True)
         last_error: Exception | None = None
 
+        same_error = 0
         for name, extra in self._attempts():
             work.mkdir(parents=True, exist_ok=True)
             for leftover in work.glob("*"):
@@ -292,8 +321,19 @@ class Downloader:
                 _atomic_move(source, target)
                 return target
             except Exception as exc:
+                message = str(exc)
+                # Two identical sentences mean the *server* is the problem, not
+                # the player client: another two attempts only cost 32 more
+                # seconds before the same answer.
+                same_error = same_error + 1 if last_error is not None and str(last_error) == message else 1
                 last_error = exc
                 logger.info("download via %s failed for %s: %s", name, track.id, exc)
+                self._note_wall(message)
+                if same_error >= 2:
+                    logger.info(
+                        "download for %s is deterministic, stopping the client ladder", track.id
+                    )
+                    break
             finally:
                 shutil.rmtree(work, ignore_errors=True)
 
@@ -522,13 +562,20 @@ class Downloader:
                 # accelerator writing bytes into the cache.
                 return await self._download_stream(track, on_progress=on_progress)
             errors: list[str] = []
-            try:
-                return await asyncio.to_thread(
-                    self._download_ytdlp, track, video=video, on_progress=on_progress
+            if self._youtube_walled():
+                errors.append("yt-dlp: skipped — YouTube is refusing this server")
+                logger.info(
+                    "skipping the yt-dlp ladder for %s — YouTube is walled, using a mirror",
+                    track.id,
                 )
-            except Exception as exc:
-                errors.append(f"yt-dlp: {exc}")
-                logger.warning("yt-dlp download failed for %s: %s", track.id, exc)
+            else:
+                try:
+                    return await asyncio.to_thread(
+                        self._download_ytdlp, track, video=video, on_progress=on_progress
+                    )
+                except Exception as exc:
+                    errors.append(f"yt-dlp: {exc}")
+                    logger.warning("yt-dlp download failed for %s: %s", track.id, exc)
             try:
                 return await self._download_direct(
                     track, video=video, on_progress=on_progress

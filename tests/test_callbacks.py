@@ -6,6 +6,7 @@ a stubbed Telegram client and check the state that changed.
 from __future__ import annotations
 
 import asyncio
+import types
 
 import pytest
 from pyrogram.enums import ChatType
@@ -249,3 +250,38 @@ def test_artwork_can_be_removed_from_the_panel(wired):
 
     assert asyncio.run(chatcfg.get(424242, "thumbnail", "")) == ""
     assert runtime.storage is not None
+
+
+def test_the_video_button_replays_the_track_with_its_picture(wired, monkeypatch):
+    """/play starts audio on purpose; one tap should bring the picture back."""
+    from vyron.core.player import ChatState
+    from vyron.core.queue import Track
+    from vyron.runtime import runtime
+
+    client, _tokens, edited = wired
+    state = ChatState(
+        chat_id=424242,
+        current=Track(id="yt1", title="Believer", duration=200, source="youtube"),
+        playing=True,
+    )
+    state.elapsed = lambda: 42.0
+
+    played: list[dict] = []
+
+    class Player:
+        def __init__(self):
+            self.queues = types.SimpleNamespace(get=lambda _chat: state)
+
+        async def play_track(self, _chat, track, **kwargs):
+            played.append({"track": track, **kwargs})
+            state.is_video = bool(kwargs.get("video"))
+            return "streamed"
+
+    monkeypatch.setattr(runtime, "player", Player(), raising=False)
+
+    _dispatch(client, "v:video")
+
+    assert played and played[0]["video"] is True
+    assert played[0]["seek"] == 42  # continues, does not restart
+    # the card that replaced it is the started card again
+    assert "ɴᴏᴡ ꜱᴛʀᴇᴀᴍɪɴɢ" in edited[-1] or "now streaming" in edited[-1].lower()

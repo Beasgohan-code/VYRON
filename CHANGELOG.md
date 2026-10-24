@@ -44,6 +44,19 @@ Two version numbers move independently:
   app's video download gained a third engine: the same song from a catalogue,
   the poster as the picture, muxed to a 720p MP4.
 * **MP3 downloads are 320 kbps** (the AAC inside a generated video is 256).
+* **No more minute-long stalls on a walled host.** The downloader asks the
+  resolver whether YouTube is refusing this server; when it is, the four-client
+  yt-dlp ladder (49 s in production, all four refused) is skipped and the
+  download goes straight to a mirror. Two *identical* refusals now end the
+  ladder early instead of walking the rest of it.
+* **"Connection pool is full" is gone.** ytmusicapi built a default session
+  whose urllib3 pool holds ten connections, and search/charts/autoplay talk to
+  music.youtube.com at once. It now gets a 64-connection pool with retries and
+  a 5/20 s timeout.
+* **`/play` video.** The started card carries a "Play as video" button for
+  YouTube tracks: it re-streams the same track from where it is (not from 0:00)
+  with its picture. If the server has no video for it, the answer is a toast,
+  not a broken stream.
 
 ### 1.9.1 — 2026-10-24
 

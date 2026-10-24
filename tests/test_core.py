@@ -281,3 +281,15 @@ def test_counter_bumps_coalesce_but_a_save_is_immediate(tmp_path):
         assert json.loads((tmp_path / "vyron.json").read_text())["counters"]["plays"] == 25
 
     asyncio.run(scenario())
+
+
+def test_the_ytmusic_session_can_hold_every_concurrent_request():
+    """Production logged "Connection pool is full" twice per boot."""
+    from vyron.core import ytmusic
+
+    session = ytmusic._session()
+    if session is None:  # requests missing — nothing to size
+        return
+    adapter = session.get_adapter("https://music.youtube.com")
+    assert adapter._pool_maxsize >= 32
+    assert adapter._pool_connections >= 8

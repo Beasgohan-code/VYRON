@@ -614,7 +614,23 @@ def queued_card(track: Track, position: int) -> str:
 
 
 def started_card(track: Track, *, note: str = "") -> str:
-    """`/play` → it started right away. ``note`` explains a downgrade."""
+    """`/play` → it started right away. ``note`` explains a downgrade.
+
+    A YouTube track can play with its picture too, so the card offers that in
+    one tap instead of asking people to retype the command.
+    """
+    can_show_video = (
+        str(getattr(track, "source", "") or "").lower() in {"youtube", "ytmusic"}
+        and not track.is_video
+    )
+    last_row = (
+        B.row(
+            B.btn(f"{E('video')} Play as video", data="v:video"),
+            B.btn(f"{E('close')} Close", data="v:close"),
+        )
+        if can_show_video
+        else B.row(B.btn(f"{E('close')} Close", data="v:close"))
+    )
     return (
         B.banner("now streaming", glyph="play")
         + B.context("The assistant joined the voice chat and started this track.")
@@ -630,8 +646,9 @@ def started_card(track: Track, *, note: str = "") -> str:
                 B.btn(f"{E('queue')} Queue", data="v:queue"),
                 B.btn(f"{E('now')} Now playing", data="v:np"),
             ),
+            last_row,
         )
-        + B.footer(f"{E('spark')} {BRAND} {BULLET} /song sends the MP3 here")
+        + B.footer(f"{E('spark')} {BRAND} {BULLET} /song sends the file here")
     )
 
 

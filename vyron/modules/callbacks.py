@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 _CONTROL_ACTIONS = {
     "pause", "resume", "skip", "stop", "loop", "shuffle", "queue",
-    "clearqueue", "vol", "set", "pick", "get", "dl", "lock", "fx",
+    "clearqueue", "vol", "set", "pick", "get", "dl", "lock", "fx", "video",
 }
 
 
@@ -608,6 +608,39 @@ def register(client: Client) -> None:
                 await cq.answer(f"{mark} {catalog.t('ctl.seek', time=fmt_duration(target))}")
             else:
                 await cq.answer("Could not seek")
+            return
+
+        if action == "video":
+            # /play picks audio on purpose (it is a music bot), so the card
+            # offers the other half of the choice: this same track, with its
+            # picture — from where it is now, not from the start.
+            current = state.current
+            if current is None:
+                await cq.answer("Nothing is playing", show_alert=True)
+                return
+            resume_at = int(max(0, state.elapsed()))
+            try:
+                await player.play_track(chat.id, current, video=True, seek=resume_at)
+            except Exception as exc:
+                logger.info("video switch failed for %s: %s", current.id, exc)
+                await cq.answer(
+                    "No video for this one on this server — the song keeps playing.",
+                    show_alert=True,
+                )
+                return
+            if getattr(state, "is_video", False):
+                await cq.answer("Video on")
+                await _show(
+                    client,
+                    cq,
+                    cards.started_card(current),
+                    keyboards.now_playing(state),
+                )
+            else:
+                await cq.answer(
+                    "This server has no video for it — playing the song instead.",
+                    show_alert=True,
+                )
             return
 
         if action == "loop":

@@ -192,3 +192,13 @@ def test_to_caption_drops_button_rows():
     )
     caption = rich.to_caption(markup)
     assert "Player" not in caption and "Body" in caption
+
+
+def test_the_started_card_offers_video_only_when_it_makes_sense():
+    from vyron.core.queue import Track
+
+    youtube = cards.started_card(Track(id="x", title="Believer", source="youtube"))
+    assert 'data="v:video"' in youtube
+
+    saavn = cards.started_card(Track(id="y", title="Believer", source="jiosaavn"))
+    assert 'data="v:video"' not in saavn

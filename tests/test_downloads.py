@@ -140,7 +140,9 @@ def test_downloader_walks_the_client_ladder_then_succeeds(tmp_path, monkeypatch)
         def download(self, urls):
             index = len(attempts)
             if index < 3:
-                raise RuntimeError("signature rejected (403)")
+                # Different clients fail differently — that is what tells the
+                # ladder the problem is the client, not the server.
+                raise RuntimeError(f"client {index} rejected the signature (403)")
             from pathlib import Path
 
             Path(self.opts["outtmpl"].replace("%(ext)s", "m4a")).write_bytes(b"ID3" + b"0" * 64)
@@ -158,6 +160,61 @@ def test_downloader_walks_the_client_ladder_then_succeeds(tmp_path, monkeypatch)
     assert path.stat().st_size > 0 and path.suffix == ".m4a"
     # the temp work directory never survives a call
     assert not list(dl.settings.downloads_dir.glob(".work-*"))
+
+
+def test_identical_refusals_stop_the_client_ladder(tmp_path, monkeypatch):
+    """Production: four clients, 49 s, the same sentence four times."""
+    from vyron.core import downloader as module
+
+    attempts: list[int] = []
+
+    class WallYDL:
+        def __init__(self, opts):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def download(self, urls):
+            attempts.append(len(attempts) + 1)
+            raise RuntimeError(
+                "ERROR: [youtube] abc: Failed to extract any player response"
+            )
+
+    monkeypatch.setattr(module.yt_dlp, "YoutubeDL", WallYDL)
+    dl = _downloader(tmp_path)
+    track = Track(id="abcdefghijk", title="Walled", duration=60, uploader="x")
+
+    with pytest.raises(module.DownloadError):
+        dl._download_ytdlp(track, video=False)
+
+    assert len(attempts) == 2  # not the whole ladder
+
+
+def test_a_walled_server_skips_the_yt_dlp_ladder(tmp_path, monkeypatch):
+    """If the resolver already knows, the download must not re-prove it."""
+    dl = _downloader(tmp_path)
+    track = Track(id="abcdefghijk", title="Walled", duration=60, uploader="x")
+
+    monkeypatch.setattr(dl, "_youtube_walled", lambda: True)
+    monkeypatch.setattr(
+        dl, "_download_ytdlp", lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("yt-dlp must not run while walled")
+        )
+    )
+
+    async def mirror(_track, *, video=False, on_progress=None):
+        path = dl.settings.downloads_dir / "mirror.m4a"
+        path.write_bytes(b"ID3" + b"0" * 32)
+        return path
+
+    monkeypatch.setattr(dl, "_download_direct", mirror)
+
+    path = asyncio.run(dl.audio(track))
+    assert path.read_bytes().startswith(b"ID3")
 
 
 def test_downloader_falls_back_to_a_mirror(tmp_path, monkeypatch):
