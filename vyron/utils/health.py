@@ -97,6 +97,10 @@ async def _health(_request: web.Request) -> web.Response:
                 "installed": [tool.name for tool in accelerator.available() if tool.present],
             },
             "prefixes": prefixes,
+            "version": runtime.version,
+            "build": runtime.build,
+            "instance": _lease_status(),
+            "database": _database(),
             "apis": {
                 "music": settings.music_api,
                 "download": settings.vyron_api,

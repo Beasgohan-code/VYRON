@@ -136,3 +136,26 @@ def test_health_reports_the_download_ladder_and_prefixes():
     assert payload["downloads"]["accelerator"] in {"aria2", "curl", "aiohttp"}
     assert isinstance(payload["downloads"]["installed"], list)
     assert "/" in payload["prefixes"]
+
+
+def test_health_reports_the_instance_role_and_the_backend():
+    """/health is what an operator reads first: which process, which database."""
+    import asyncio
+
+    from aiohttp.test_utils import TestClient, TestServer
+
+    from vyron.utils.health import build_app
+
+    async def scenario():
+        app = build_app(with_webapp=False)
+        async with TestClient(TestServer(app)) as client:
+            payload = await (await client.get("/health")).json()
+        assert isinstance(payload["instance"], dict)
+        assert payload["instance"]["primary"] is True
+        assert payload["instance"]["lease_seconds"] > 0
+        assert isinstance(payload["database"], dict)
+        assert payload["database"]["backend"] in {"json", "mongo", "none"}
+        # the two numbers a bug report needs
+        assert payload["version"] and payload["build"]
+
+    asyncio.run(scenario())
