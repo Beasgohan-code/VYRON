@@ -151,8 +151,10 @@ def test_the_settings_panel_reports_this_chat_not_the_defaults(monkeypatch):
     assert cfg["lang"] == "hi"
 
     text = cards.settings_card(cfg, "Room")
-    assert "Volume" in text and "45%" in text
-    assert "Artwork" in text and "Custom" in text
+    from vyron.ui.theme import small_caps
+
+    assert small_caps("volume") in text and "45%" in text
+    assert small_caps("artwork") in text and "Custom" in text
     assert "\u0939\u093f\u0928\u094d\u0926\u0940" in text or "Hindi" in text
 
 

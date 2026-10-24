@@ -35,7 +35,13 @@ def test_tables_details_lists():
     assert B.kv([("Vol", "<b>100%</b>")]).count("<td>") == 2
     assert B.details("More", "body", open=True).startswith("<details open>")
     assert B.bullets(["a", "b"]).count("<li>") == 2
-    assert B.divider() == "<hr/>"
+    # Block-level pieces end with a newline so cards can be concatenated
+    # without two lines welding together in the plain-text fallback.
+    assert B.divider() == "<hr/>\n"
+    assert B.bullets(["a"]).endswith("</ul>\n")
+    assert B.note("x").endswith("</blockquote>\n")
+    assert B.details("s", "b").endswith("</details>\n")
+    assert B.table(None, [("a",)]).endswith("</table>\n")
 
 
 def test_fallback_conversion_of_buttons():
@@ -184,3 +190,44 @@ def test_owner_access_is_surfaced_without_leaking_it_into_the_ui():
     start = cards.start_card("A", {})
     assert "vown_" not in start
     assert "/app" not in start
+
+
+# ── the shared card language ────────────────────────────────────────────────
+def test_a_card_is_a_masthead_fields_and_sections():
+    """Every screen in the bot is these four primitives in this order."""
+    top = B.banner("vyron · player")
+    lines = top.splitlines()
+    assert lines[0] == lines[2] == B.rule()
+    assert "ᴘʟᴀʏᴇʀ" in lines[1] and lines[1].startswith(B.E("brand"))
+    assert top.endswith("\n")  # so the next block starts on its own line
+
+    fields = B.fields([("check", "status", "Online"), ("clock", "uptime", "3d 8h")])
+    assert fields.splitlines()[0] == "◈ ✅ <b>ꜱᴛᴀᴛᴜꜱ</b>: Online"
+    assert "<b>ᴜᴘᴛɪᴍᴇ</b>: 3d 8h" in fields
+
+    section = B.section_title("what i can do")
+    assert section.strip() == "✦ <b>ᴡʜᴀᴛ ɪ ᴄᴀɴ ᴅᴏ</b> ✦"
+    assert B.items([("download", "save", "MP3 320")]).strip().endswith("MP3 320")
+
+
+def test_fields_skip_the_glyph_cleanly():
+    assert B.fields([("", "mode", "auto")]).strip() == "◈ <b>ᴍᴏᴅᴇ</b>: auto"
+
+
+def test_stat_pairs_is_the_field_block_not_a_table():
+    pairs = B.stat_pairs([("clock", "Uptime", "3d")])
+    assert "<table" not in pairs and pairs.startswith("◈")
+
+
+def test_no_card_ever_ends_without_an_action():
+    """A card with nothing to tap is a dead end on a phone."""
+    from vyron.ui import cards
+
+    for markup in (
+        cards.start_card("Bob", {"chats": 1}),
+        cards.help_card("main"),
+        cards.settings_card({"volume": 40}),
+        cards.about_card(),
+        cards.ping_card(90.0, 60.0),
+    ):
+        assert "<tg-button" in markup

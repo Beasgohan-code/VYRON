@@ -44,20 +44,22 @@ def heading(text: str, level: int = 2) -> str:
 
 
 def note(text: str, *, expandable: bool = False) -> str:
+    # Block-level elements end with a newline: every card is a concatenation of
+    # these pieces, and the plain-text fallback has no HTML to break lines.
     attr = " expandable" if expandable else ""
-    return f"<blockquote{attr}>{text}</blockquote>"
+    return f"<blockquote{attr}>{text}</blockquote>\n"
 
 
 def quote(text: str) -> str:
-    return f"<aside>{text}</aside>"
+    return f"<aside>{text}</aside>\n"
 
 
 def divider() -> str:
-    return "<hr/>"
+    return "<hr/>\n"
 
 
 def footer(text: str) -> str:
-    return f"<footer>{text}</footer>"
+    return f"<footer>{text}</footer>\n"
 
 
 def spacer() -> str:
@@ -67,7 +69,7 @@ def spacer() -> str:
 def bullets(items: Iterable[str], *, ordered: bool = False) -> str:
     tag = "ol" if ordered else "ul"
     body = "".join(f"<li>{item}</li>" for item in items if item is not None)
-    return f"<{tag}>{body}</{tag}>"
+    return f"<{tag}>{body}</{tag}>\n"
 
 
 def table(headers: Sequence[str] | None, rows: Iterable[Sequence[str]], *, border: int = 1) -> str:
@@ -77,7 +79,7 @@ def table(headers: Sequence[str] | None, rows: Iterable[Sequence[str]], *, borde
     for row in rows:
         parts.append("<tr>" + "".join(f"<td>{cell}</td>" for cell in row) + "</tr>")
     parts.append("</table>")
-    return "".join(parts)
+    return "".join(parts) + "\n"
 
 
 def kv(pairs: Iterable[tuple[str, str]], *, border: int = 1) -> str:
@@ -86,7 +88,7 @@ def kv(pairs: Iterable[tuple[str, str]], *, border: int = 1) -> str:
 
 def details(summary: str, body: str, *, open: bool = False) -> str:
     attr = " open" if open else ""
-    return f"<details{attr}><summary>{summary}</summary>{body}</details>"
+    return f"<details{attr}><summary>{summary}</summary>{body}</details>\n"
 
 
 def image(src: str | None) -> str:
@@ -157,8 +159,13 @@ def badge(text: str, glyph: str = "spark") -> str:
 
 
 def stat_pairs(pairs: Sequence[tuple[str, str, str]]) -> str:
-    """``(glyph, label, value)`` → a tidy key/value table."""
-    return kv([(f"{E(glyph)} {label}", f"<b>{value}</b>") for glyph, label, value in pairs])
+    """``(glyph, label, value)`` → the aligned field block.
+
+    Every status screen in the bot is a list of these, so they are one
+    primitive: `◈ ⏱ ᴜᴘᴛɪᴍᴇ: 3d 8h` — not a table, which on a narrow phone
+    wraps a long value into a second row of a phantom column.
+    """
+    return fields(pairs)
 
 
 def powered_line(version: str = "") -> str:
@@ -188,6 +195,74 @@ PILL_TONES = {
     "info": "🔵",
     "owner": "👑",
 }
+
+
+#: The hairline every masthead and section break is drawn with. A single
+#: character repeated, so it renders identically on every client — no images,
+#: no alignment surprises, and it survives being copied into a plain chat.
+RULE_CHAR = "━"
+RULE_WIDTH = 18
+FIELD_MARK = "◈"
+SECTION_MARK = "✦"
+
+
+def rule(width: int = RULE_WIDTH, char: str = RULE_CHAR) -> str:
+    return char * max(3, int(width))
+
+
+def banner(title: str, *, glyph: str = "brand", meta: str = "", width: int = RULE_WIDTH) -> str:
+    """The top of a card: hairline, glyph + SMALL-CAPS title, hairline.
+
+        ━━━━━━━━━━━━━━
+        🎧 ᴠʏʀᴏɴ · ᴘʟᴀʏᴇʀ
+        ━━━━━━━━━━━━━━
+
+    This is the one element that makes every screen recognisably the same
+    product, so it is a primitive rather than something each card retypes.
+    """
+    from vyron.ui.theme import small_caps
+
+    line = f"{E(glyph)} <b>{small_caps(title)}</b>"
+    if meta:
+        line += f"  {meta}"
+    # Trailing newline: these pieces are concatenated, and a bare text line
+    # glued to the next block is how "v1.9.0✦ what i can do" happens.
+    return f"{rule(width)}\n{line}\n{rule(width)}\n"
+
+
+def fields(rows: Sequence[tuple[str, str, str]]) -> str:
+    """``◈ 🟢 ꜱᴛᴀᴛᴜꜱ: Online`` — one line per fact, aligned by the mark.
+
+    Reads better than a table on a phone: no column widths to guess, no
+    wrapping surprises, and the glyph does the scanning for you.
+    """
+    from vyron.ui.theme import small_caps
+
+    lines: list[str] = []
+    for glyph, label, value in rows:
+        prefix = f"{E(glyph)} " if glyph else ""
+        lines.append(f"{FIELD_MARK} {prefix}<b>{small_caps(label)}</b>: {value}")
+    return "\n".join(lines) + "\n" if lines else ""
+
+
+def items(rows: Sequence[tuple[str, str, str]]) -> str:
+    """``◈ 📥 ꜱᴀᴠᴇ — what it does`` — the feature list under a section title."""
+    from vyron.ui.theme import small_caps
+
+    lines: list[str] = []
+    for glyph, name, text in rows:
+        prefix = f"{E(glyph)} " if glyph else ""
+        label = f"<b>{small_caps(name)}</b>"
+        lines.append(f"{FIELD_MARK} {prefix}{label} — {text}" if text else f"{FIELD_MARK} {prefix}{label}")
+    return "\n".join(lines) + "\n" if lines else ""
+
+
+def section_title(label: str, *, glyph: str | None = None) -> str:
+    """``✦ ᴡʜᴀᴛ ɪ ᴄᴀɴ ᴅᴏ ✦`` — a centred-feeling break inside a card."""
+    from vyron.ui.theme import small_caps
+
+    prefix = f"{E(glyph)} " if glyph else ""
+    return f"\n{SECTION_MARK} {prefix}<b>{small_caps(label)}</b> {SECTION_MARK}\n"
 
 
 def head(title: str, *, glyph: str = "spark", meta: str = "", level: int = 2) -> str:
@@ -266,7 +341,16 @@ install_hooks()
 
 
 __all__ = [
+    "FIELD_MARK",
     "RICHGRAM",
+    "RULE_CHAR",
+    "RULE_WIDTH",
+    "SECTION_MARK",
+    "banner",
+    "fields",
+    "items",
+    "rule",
+    "section_title",
     "STYLES",
     "actions",
     "badge",
