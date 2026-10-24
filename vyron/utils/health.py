@@ -27,8 +27,19 @@ async def _index(_request: web.Request) -> web.Response:
             "problems": list(runtime.boot_problems),
             "active_players": len(runtime.player.active_chats()) if runtime.player else 0,
             "storage": runtime.storage.backend if runtime.storage else "none",
+            "instance": _lease_status(),
         }
     )
+
+
+def _lease_status() -> dict:
+    """Whether this process owns the voice chat, and who does if not."""
+    try:
+        from vyron.core import lease
+
+        return lease.status()
+    except Exception:  # pragma: no cover - never break a health probe
+        return {}
 
 
 def _resolver_summary() -> dict:

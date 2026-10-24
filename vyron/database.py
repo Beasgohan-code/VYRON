@@ -109,6 +109,13 @@ class JsonStorage(Storage):
             "meta": {},
         }
         self._lock = asyncio.Lock()
+        # Counters (uses, history rows) change on every single request. Writing
+        # the whole file each time is a lot of I/O for numbers nobody reads
+        # between two requests, so those writes are coalesced: the data is in
+        # memory immediately and lands on disk at most once per second.
+        self._flush_task: asyncio.Task | None = None
+        self._flush_at: float = 0.0
+        self._pending = False
 
     async def connect(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -126,11 +133,59 @@ class JsonStorage(Storage):
         tmp = self.path.with_suffix(".tmp")
         tmp.write_text(json.dumps(self._data, ensure_ascii=False), encoding="utf-8")
         tmp.replace(self.path)
+        self._pending = False
+
+    def _flush_soon(self, delay: float = 1.0) -> None:
+        """Mark the state dirty and write it back once, shortly.
+
+        A crash inside the delay loses counters, never content: anything a user
+        would notice (a key, a playlist, chat settings) still calls `_flush()`.
+        """
+        self._pending = True
+        self._flush_at = time.time() + delay
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:  # no loop (sync tooling): write now
+            return
+        task = self._flush_task
+        if task is not None and not task.done():
+            return
+        self._flush_task = loop.create_task(self._delayed_flush())
+
+    async def _delayed_flush(self) -> None:
+        try:
+            while self._pending:
+                wait = max(0.0, self._flush_at - time.time())
+                await asyncio.sleep(wait or 0.01)
+                if not self._pending:
+                    return
+                async with self._lock:
+                    await self._flush()
+        except asyncio.CancelledError:
+            raise
+
+    async def flush_pending(self) -> None:
+        """Write anything still waiting — called on shutdown and by /dbstats."""
+        if self._pending:
+            async with self._lock:
+                await self._flush()
 
     async def save_chat_settings(self, chat_id: int, data: dict[str, Any]) -> None:
         async with self._lock:
             self._data["chats"][str(chat_id)] = data
             await self._flush()
+
+    async def close(self) -> None:
+        task = self._flush_task
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+        if self._pending:
+            async with self._lock:
+                await self._flush()
 
     async def chat_settings(self, chat_id: int) -> dict[str, Any]:
         return dict(self._data["chats"].get(str(chat_id), {}))
@@ -260,7 +315,7 @@ class JsonStorage(Storage):
             record["uses"] = int(record.get("uses") or 0) + int(uses)
             record["bytes"] = int(record.get("bytes") or 0) + max(0, int(size))
             record["last_used_at"] = stamp or time.time()
-            await self._flush()
+            self._flush_soon()
 
     async def prune(self, days: int = 30) -> dict[str, int]:
         cutoff = time.time() - max(0, int(days)) * 86400
@@ -287,6 +342,7 @@ class JsonStorage(Storage):
     async def bump(self, key: str, amount: int = 1) -> None:
         async with self._lock:
             self._data["counters"][key] = int(self._data["counters"].get(key, 0)) + amount
+            self._flush_soon()
 
     async def counters(self) -> dict[str, int]:
         return dict(self._data["counters"])

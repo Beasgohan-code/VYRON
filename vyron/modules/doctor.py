@@ -26,6 +26,7 @@ from pyrogram.types import Message
 
 from vyron import __build__, __version__
 from vyron.config import settings
+from vyron.core import lease
 from vyron.runtime import runtime
 from vyron.ui import blocks as B
 from vyron.ui import rich
@@ -290,6 +291,15 @@ def register(client: Client) -> None:
 
         storage_ok, storage_note = await _probe_storage()
         rows.append(_row(f"{E('cloud')} storage", storage_ok, storage_note))
+
+        lease_status = lease.status()
+        rows.append(
+            _row(
+                f"{E('live')} instance",
+                lease_status["primary"],
+                "primary" if lease_status["primary"] else f"standby ({lease_status['holder']})",
+            )
+        )
 
         from vyron.web.server import WEB_DIR
 

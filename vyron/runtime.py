@@ -102,6 +102,11 @@ class Runtime:
         from vyron.core import acl, sources
 
         await acl.load(self.storage)
+        # One voice chat, one streamer: a second instance runs as a standby
+        # instead of fighting the first one over the call (see core/lease.py).
+        from vyron.core import lease
+
+        await lease.claim(self.storage)
         # Source health survives a deploy, so /doctor can say "Audius has been
         # failing since Tuesday" instead of "no failures since boot".
         await sources.load(self.storage)
@@ -116,7 +121,19 @@ class Runtime:
         )
         logger.info("services ready (storage=%s, streaming=%s)", self.storage.backend, self.streaming_ready)
 
+    @property
+    def primary(self) -> bool:
+        from vyron.core import lease
+
+        return lease.is_primary()
+
     async def shutdown(self) -> None:
+        try:
+            from vyron.core import lease
+
+            await lease.release()
+        except Exception:  # pragma: no cover
+            pass
         try:
             from vyron.core import sources
 

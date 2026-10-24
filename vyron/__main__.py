@@ -16,7 +16,7 @@ from vyron import __build__, __version__, banner_text, setup_logging
 from vyron.clients import build_assistant, build_bot, session_problem
 from vyron.config import settings
 from vyron.modules import register_all
-from vyron.core import keepalive, maintenance, watchdog
+from vyron.core import keepalive, lease, maintenance, watchdog
 from vyron.core.journal import attach, journal
 from vyron.runtime import runtime
 from vyron.ui import cards, rich
@@ -353,7 +353,7 @@ async def _async_main() -> int:
         restored = await runtime.player.restore_queues()
         if restored:
             logger.info("restored %d queue(s)", restored)
-        if calls is not None:
+        if calls is not None and runtime.primary:
             resumed = await runtime.player.resume_always_on()
             if resumed:
                 logger.info("resumed %d 24/7 chat(s)", resumed)
@@ -401,6 +401,7 @@ async def _async_main() -> int:
 
     ytdlp_update.start()
     maintenance.start()
+    lease.start()
     watchdog.start()
     keepalive.start()
     await _notify_owner(bot)
@@ -433,6 +434,7 @@ async def _async_main() -> int:
         logger.info("shutting down…")
         journal.shutdown("signal")
         await maintenance.stop()
+        await lease.stop()
         await watchdog.stop()
         await keepalive.stop()
         await runtime.shutdown()

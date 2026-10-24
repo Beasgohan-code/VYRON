@@ -186,3 +186,97 @@ def test_command_args():
     assert command_args(message) == "believer"
     message = SimpleNamespace(text=None, caption="/song faded")
     assert command_args(message) == "faded"
+
+
+# ── single-instance lease ───────────────────────────────────────────────────
+def _lease_fresh():
+    from vyron.core import lease
+
+    lease._state.update(primary=True, holder=lease.instance_id(), since=0.0)
+    return lease
+
+
+def test_lease_makes_the_second_copy_a_standby(tmp_path):
+    import asyncio
+    import dataclasses
+
+    from vyron.config import settings as base
+    from vyron.database import JsonStorage
+
+    storage = JsonStorage(dataclasses.replace(base, data_dir=tmp_path))
+    lease = _lease_fresh()
+    assert asyncio.run(lease.claim(storage)) is True
+    assert lease.is_primary()
+
+    # a different process id sees a fresh lease: it must stand down
+    first = lease.instance_id()
+    lease._ME = "ins_other"
+    try:
+        assert asyncio.run(lease.claim(storage)) is False
+        assert not lease.is_primary()
+        assert lease.status()["holder"] == first
+    finally:
+        lease._ME = first
+        lease._state.update(primary=True, holder=first)
+
+
+def test_lease_is_taken_over_once_it_goes_stale(tmp_path):
+    import asyncio
+    import dataclasses
+
+    from vyron.config import settings as base
+    from vyron.core import lease as lease_module
+    from vyron.database import JsonStorage
+
+    storage = JsonStorage(dataclasses.replace(base, data_dir=tmp_path))
+    asyncio.run(storage.set_meta("instance", {"id": "ins_gone", "beat": 0.0}))
+    assert asyncio.run(lease_module.claim(storage)) is True
+
+
+def test_standby_refuses_to_stream():
+    import asyncio
+
+    async def scenario():
+        from vyron.core import lease
+        from vyron.core.player import Player
+
+        assert Player._may_stream() is True
+        lease._state.update(primary=False, holder="ins_other")
+        try:
+            assert Player._may_stream() is False
+        finally:
+            lease._state.update(primary=True, holder=lease.instance_id())
+
+    asyncio.run(scenario())
+
+
+# ── counter writes are coalesced, content writes are not ────────────────────
+def test_counter_bumps_coalesce_but_a_save_is_immediate(tmp_path):
+    import asyncio
+    import dataclasses
+    import json
+
+    from vyron.config import settings as base
+    from vyron.database import JsonStorage
+
+    storage = JsonStorage(dataclasses.replace(base, data_dir=tmp_path))
+
+    async def scenario():
+        await storage.connect()
+        await storage.save_playlist(1, {"id": "p1", "name": "kept", "tracks": []})
+        # a real save is on disk before the call returns
+        on_disk = json.loads((tmp_path / "vyron.json").read_text())
+        assert on_disk["playlists"]["1"][0]["name"] == "kept"
+
+        before = (tmp_path / "vyron.json").stat().st_mtime_ns
+        for _ in range(25):
+            await storage.bump("plays")
+        assert storage._pending is True          # queued, not written 25 times
+        assert (tmp_path / "vyron.json").stat().st_mtime_ns == before
+        assert (await storage.counters())["plays"] == 25
+
+        await storage.flush_pending()            # what shutdown calls
+        assert storage._pending is False
+        assert json.loads((tmp_path / "vyron.json").read_text())["counters"]["plays"] == 25
+
+    asyncio.run(scenario())

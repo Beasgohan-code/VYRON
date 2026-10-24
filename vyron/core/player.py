@@ -498,6 +498,21 @@ class Player:
             except Exception as exc:
                 logger.debug("history write failed: %s", exc)
 
+    @staticmethod
+    def _may_stream() -> bool:
+        """False on a standby instance — a voice chat gets one streamer.
+
+        Two copies of the bot joined to the same call do not take turns; they
+        interrupt each other. Refusing here is the difference between a degraded
+        deployment and a broken one.
+        """
+        try:
+            from vyron.runtime import runtime
+
+            return runtime.primary
+        except Exception:  # pragma: no cover - before runtime exists
+            return True
+
     async def play_track(
         self,
         chat_id: int,
@@ -514,6 +529,11 @@ class Player:
         posting a new one, and ``count_play=False`` leaves the stats and the
         history alone — both matter when a seek restarts the same stream.
         """
+        if not self._may_stream():
+            raise StreamError(
+                "This instance is a standby — another copy of the bot owns the "
+                "voice chat. Scale the service to one instance."
+            )
         async with self.lock(chat_id):
             await self._start_stream(
                 chat_id, track, video=video, seek=seek, count_play=count_play
