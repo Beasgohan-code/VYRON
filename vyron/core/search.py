@@ -476,9 +476,10 @@ class YouTube:
                 if track:
                     tracks.append(track)
         if not tracks:
-            # YouTube said no. Ask the other *streaming* catalogues in the
-            # registry's order (Audius → JioSaavn) before giving up: those hand
-            # out real audio, so the request can still succeed.
+            # YouTube said no. Ask the other streaming sources in the
+            # registry's order (Audius → JioSaavn → SoundCloud → Bandcamp)
+            # before giving up: those hand out real audio, so the request can
+            # still succeed.
             for track in await sources.fallback_search(query, count, settings=self.settings):
                 track.requested_by, track.requested_name = requester
                 tracks.append(track)
@@ -563,9 +564,10 @@ class YouTube:
         if not query:
             raise MediaError("Give me a song name, a link or reply to an audio file.")
 
-        # Direct-stream catalogues first (Audius, JioSaavn): their API hands out
-        # the audio itself, so these links play without YouTube being involved.
-        if self._catalogue_enabled() and looks_like_url(query):
+        # Direct-stream sources first (Audius, JioSaavn, SoundCloud, Bandcamp):
+        # they hand out the audio themselves, so these links play without YouTube
+        # being involved. The registry decides which of them are on.
+        if looks_like_url(query):
             direct = await sources.resolve_direct(query, settings=self.settings)
             if direct is not None:
                 direct.requested_by, direct.requested_name = requester
@@ -599,7 +601,7 @@ class YouTube:
     async def _from_catalogue(
         self, url: str, *, requester: tuple[int, str] = (0, "")
     ) -> Track | None:
-        """Spotify/Deezer/Apple/SoundCloud link → the best YouTube match."""
+        """Spotify/Deezer/Apple link → the best YouTube match (or a stream)."""
         meta = await metasources.lookup(url)
         if isinstance(meta, metasources.MetaCollection):
             meta = meta.tracks[0] if meta.tracks else None

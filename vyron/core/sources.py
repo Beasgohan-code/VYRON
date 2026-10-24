@@ -77,9 +77,22 @@ class Source:
         }
 
 
-def _flag(name: str, settings) -> bool:
-    raw = (getattr(settings, name, "") or "").strip().lower()
-    return raw not in {"off", "none", "0", "false", "no"}
+_OFF = {"off", "none", "0", "false", "no", ""}
+
+
+def _enabled_list(settings) -> list[str]:
+    raw = (getattr(settings, "music_sources", "") or "").strip().lower()
+    return [chunk.strip() for chunk in raw.replace(";", ",").split(",") if chunk.strip()]
+
+
+def _extras_on(settings) -> bool:
+    """The master switch: `MUSIC_SOURCES=off` really does mean YouTube only."""
+    return bool((getattr(settings, "music_sources", "") or "").strip().lower() not in _OFF)
+
+
+def _catalogue_on(name: str, settings) -> bool:
+    """A catalogue answers only if it is named in `MUSIC_SOURCES`."""
+    return _extras_on(settings) and name in _enabled_list(settings)
 
 
 def registry(settings=None) -> list[Source]:
@@ -90,7 +103,7 @@ def registry(settings=None) -> list[Source]:
     items: list[Source] = []
 
     def _extra_enabled() -> bool:
-        return _flag("music_sources", settings)
+        return _extras_on(settings)
 
     # ── search ────────────────────────────────────────────────────────────
     try:
@@ -180,13 +193,20 @@ def registry(settings=None) -> list[Source]:
         pass
 
     # ── catalogue readers ─────────────────────────────────────────────────
-    if _extra_enabled():
-        for name, label, detail in (
-            ("spotify", "Spotify", "oEmbed + public embed page"),
-            ("deezer", "Deezer", "open API (track/album/playlist)"),
-            ("apple", "Apple Music", "iTunes lookup API"),
-        ):
-            items.append(Source(name, label, "catalogue", enabled=_extra_enabled, detail=detail))
+    for name, label, detail in (
+        ("spotify", "Spotify", "oEmbed + public embed page"),
+        ("deezer", "Deezer", "open API (track/album/playlist)"),
+        ("apple", "Apple Music", "iTunes lookup API"),
+    ):
+        items.append(
+            Source(
+                name,
+                label,
+                "catalogue",
+                enabled=lambda name=name: _catalogue_on(name, settings),
+                detail=detail,
+            )
+        )
     return items
 
 
