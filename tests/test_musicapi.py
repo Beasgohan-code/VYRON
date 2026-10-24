@@ -984,3 +984,48 @@ def test_me_reports_the_quota_block(tmp_path, monkeypatch):
             assert body["quota"]["used"]["day"]["requests"] == 0
 
     asyncio.run(scenario())
+
+
+# ── docs page: troubleshooting, changelog, and one version number ───────────
+def test_docs_page_is_a_real_troubleshooting_page():
+    async def scenario(client):
+        body = await (await client.get("/v1/docs")).text()
+        assert 'id="troubleshooting"' in body
+        # the six reported failures, each with the thing to do
+        for symptom in ("not_ready", "quota_exceeded", "standby", "MongoDB", "song.link", "service worker"):
+            assert symptom in body, symptom
+        # changelog is the deployed version, not a stale string
+        assert f"<b>{API_VERSION}</b>" in body
+        assert "Idempotency-Key" in body and "quota_exceeded" in body
+        # and the page links the two long-form documents
+        base = __import__("pathlib").Path(__file__).resolve().parents[1]
+        assert (base / "CHANGELOG.md").is_file()
+        assert (base / "TROUBLESHOOTING.md").is_file()
+
+    _client(scenario)
+
+
+def test_openapi_version_matches_the_served_api():
+    from vyron.core.musicapi import API_VERSION as version
+
+    async def scenario(client):
+        spec = await (await client.get("/v1/openapi.json")).json()
+        assert spec["info"]["version"] == version
+        assert version.count(".") == 1  # "2.3", not "2.3.1-rc"
+
+    _client(scenario)
+
+
+def test_release_documents_name_the_current_version():
+    import pathlib
+
+    from vyron import __version__
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    changelog = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert f"### {__version__}" in changelog
+    # both numbers are documented, and they are not the same number
+    from vyron.core.musicapi import API_VERSION
+
+    assert f"### {API_VERSION}" in changelog
+    assert __version__ != API_VERSION

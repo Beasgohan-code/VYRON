@@ -106,6 +106,7 @@ SECTIONS = [
     ("errors", "Errors"),
     ("limits", "Rate limits"),
     ("metrics", "Metrics"),
+    ("troubleshooting", "Troubleshooting"),
     ("changelog", "Changelog"),
 ]
 
@@ -134,6 +135,52 @@ ENDPOINTS = [
     ("GET", "/v1/metrics", "JSON metrics (or Prometheus text)", "admin"),
 ]
 
+#: symptom → cause → the one thing to do. Written from real reports, not theory.
+TROUBLES = [
+    (
+        "503 on every request for a minute after deploy",
+        "not_ready — the boot gate. The bot is connected but the voice engine and "
+        "downloader are still starting.",
+        "Retry after <code>Retry-After</code>. Nothing is broken: <code>/health</code> "
+        "answers 200 the whole time, only <code>/ready</code> waits.",
+    ),
+    (
+        "429 <code>quota_exceeded</code>",
+        "This key hit its daily or monthly cap (requests or bytes). The error names "
+        "the field.",
+        "Raise the cap with <code>PATCH /v1/admin/keys/{id}</code> — no key rotation, "
+        "no downtime. <code>0</code> or omission means uncapped.",
+    ),
+    (
+        "Downloads work, playback says “standby”",
+        "Two instances of the bot are running. Only one of them may stream to a "
+        "voice chat.",
+        "Scale the Render/Koyeb service to one instance. <code>/doctor</code> and "
+        "<code>/health</code> both report which process owns the call.",
+    ),
+    (
+        "MongoDB falls back to JSON",
+        "<code>MONGO_URL</code> was unreachable from the host (Atlas → Network "
+        "Access), or the string is missing its scheme.",
+        "Allow <code>0.0.0.0/0</code> in Atlas Network Access and redeploy. The bot "
+        "keeps serving on JSON meanwhile — nothing is lost, and the first successful "
+        "connection imports the JSON data once.",
+    ),
+    (
+        "A Spotify/Deezer link plays the wrong remix",
+        "The catalogue page was unreadable, so the title was searched instead of "
+        "matched.",
+        "Nothing to do — song.link matching is tried first and cached six hours. If "
+        "it is down, the plain search is the fallback.",
+    ),
+    (
+        "Mini App shows a blank screen after a deploy",
+        "A service worker is holding the previous build.",
+        "Reload once (the app offers a chip); the worker is versioned and swaps on "
+        "the next visit.",
+    ),
+]
+
 ERRORS = [
     ("400", "bad_request · invalid_video · missing_query", "fix the request body/query"),
     ("401", "missing_key", "send X-API-Key"),
@@ -145,6 +192,12 @@ ERRORS = [
 ]
 
 CHANGELOG = [
+    ("2.3", "GET /v1/ready is a real readiness probe (503 + Retry-After until the engine is up), "
+           "while /v1/health and /v1/ready never disagree. Per-key daily/monthly quotas on "
+           "requests and bytes answer 429 <code>quota_exceeded</code>. POST /v1/token mints a "
+           "short-lived browser token; POST /v1/downloads accepts an Idempotency-Key."),
+    ("2.2", "GET /v1/sources?probe=1 measures each source instead of guessing, source health "
+           "survives a restart, and /v1/metrics exports it as Prometheus gauges."),
     ("2.1", "GET /v1/sources and /v1/sources/{name} — the fallback chain and each source's health. "
            "GET /v1/me now reports capabilities, expiry and usage. Key detail + non-destructive "
            "PATCH (label, scopes, expiry, per-key rate limit) replace revoke-and-reissue."),
@@ -186,6 +239,13 @@ def _error_rows() -> str:
         f'<tr><td><span class="badge"><b>{code}</b></span></td><td><code>{escape(kinds)}</code></td>'
         f"<td>{escape(fix)}</td></tr>"
         for code, kinds, fix in ERRORS
+    )
+
+
+def _trouble_rows() -> str:
+    return "".join(
+        f"<tr><td><b>{symptom}</b></td><td>{cause}</td><td>{fix}</td></tr>"
+        for symptom, cause, fix in TROUBLES
     )
 
 
@@ -319,6 +379,14 @@ PAGE = Template("""<!doctype html>
     volume, latency percentiles and per-route hits. Add <code>?format=prometheus</code> to scrape it:</p>
     $prometheus_sample
 
+    <h2 id="troubleshooting">Troubleshooting</h2>
+    <p>The six things that actually go wrong, and what each one means. Nothing here
+    needs a redeploy except the two that say so.</p>
+    <table><thead><tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr></thead><tbody>$trouble_rows</tbody></table>
+    <div class="note">Owner-only diagnosis lives in the bot: <code>/doctor</code> (one card,
+    every subsystem), <code>/dbstats</code> (storage, sizes, last sweep) and
+    <code>/logs</code> (the live journal).</div>
+
     <h2 id="changelog">Changelog</h2>
     <table><thead><tr><th>Version</th><th>Changes</th></tr></thead><tbody>$changelog_rows</tbody></table>
 
@@ -437,6 +505,7 @@ async def render(request: web.Request) -> web.Response:
         endpoint_rows=_endpoint_rows(base),
         scope_rows=_scope_rows(),
         error_rows=_error_rows(),
+        trouble_rows=_trouble_rows(),
         changelog_rows=_changelog_rows(),
         curl_download=curl_download,
         vyron_curl=vyron_curl,

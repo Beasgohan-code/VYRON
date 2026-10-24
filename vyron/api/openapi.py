@@ -6,7 +6,7 @@ from __future__ import annotations
 from aiohttp import web
 
 from vyron.config import settings
-from vyron.core.musicapi import SCOPES
+from vyron.core.musicapi import API_VERSION, SCOPES
 
 
 def _base(request: web.Request) -> str:
@@ -102,7 +102,7 @@ def spec(request: web.Request) -> dict:
         "openapi": "3.1.0",
         "info": {
             "title": "VYRON Music API",
-            "version": "2.1",
+            "version": API_VERSION,
             "summary": "Downloads, streaming, search, metadata, lyrics and keys for Telegram music bots.",
             "description": (
                 "A production-grade music API served by the VYRON bot on the "

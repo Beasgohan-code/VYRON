@@ -41,7 +41,7 @@ QUOTA_SAVE_EVERY = 30.0     # seconds between writes for one key's counters
 # Wire version of the /v1 surface. Bumped for additive changes that a client
 # can act on (new routes, new fields); the bot's own version lives in
 # vyron/__init__.py. Sent back as X-API-Version on every response.
-API_VERSION = "2.1"
+API_VERSION = "2.3"
 
 KEY_MARKER = "vyrn_"
 KEY_BODY_BYTES = 30  # token_urlsafe(30) → 40 url-safe characters
