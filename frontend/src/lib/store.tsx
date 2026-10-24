@@ -144,10 +144,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     writeLocal("vyron:accent", next);
   }, []);
 
-  const setNormalise = useCallback((value: boolean) => {
-    setNormaliseState(value);
-    writeLocal("vyron:normalise", value ? "1" : "0");
-  }, []);
+
 
   /* ── feedback ───────────────────────────────────────────────────────── */
   const toast = useCallback((message: string, tone: "info" | "error" | "success" = "info") => {
@@ -277,6 +274,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   /* ── in-app playback ─────────────────────────────────────────────────── */
   const audio = useAudioEngine(toast);
+
+  /* The engine owns the compressor, `/you` owns the preference: one call keeps
+     the two in step, instead of a flag that only painted a switch. */
+  const setNormalise = useCallback(
+    (value: boolean) => {
+      setNormaliseState(value);
+      writeLocal("vyron:normalise", value ? "1" : "0");
+      audio.setNormalise(value);
+    },
+    [audio]
+  );
 
   const play = useCallback(
     async (value: string | Track | undefined, mode: "play" | "play_now" = "play") => {

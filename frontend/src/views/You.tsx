@@ -1,4 +1,4 @@
-import { Crown, Download, Link2, Moon, Palette, ShieldCheck, Sparkles, Sun, Zap } from "lucide-react";
+import { Crown, Download, Gauge, History, Link2, Moon, Palette, ShieldCheck, Sparkles, Sun, X, Zap } from "lucide-react";
 import { useApp } from "../lib/store";
 import { fmtDuration } from "../lib/format";
 import type { AccentName, ThemeName } from "../lib/store";
@@ -137,6 +137,58 @@ export function You() {
             >
               <span />
             </button>
+          </div>
+        </div>
+      </section>
+
+      <section className="stage-block">
+        <header className="section-head">
+          <h2>
+            <Gauge size={15} /> Playback
+          </h2>
+          <span className="fine">this device</span>
+        </header>
+        <div className="list-card">
+          <div className="pref">
+            <span>
+              Speed
+              <i className="fine">podcasts and long mixes</i>
+            </span>
+            <div className="chips tight">
+              {[0.75, 1, 1.25, 1.5, 2].map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={`chip tiny ${Math.abs(audio.rate - value) < 0.01 ? "active" : ""}`}
+                  onClick={() => audio.setRate(value)}
+                  aria-pressed={Math.abs(audio.rate - value) < 0.01}
+                >
+                  {value}×
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="pref">
+            <span>
+              <History size={14} /> Saved session
+              <i className="fine">
+                {audio.saved
+                  ? `${audio.saved.queue[audio.saved.index]?.title ?? "track"} · restores paused`
+                  : "nothing saved on this device"}
+              </i>
+            </span>
+            {audio.saved ? (
+              <div className="row gap">
+                <button type="button" className="btn btn-ghost sm" onClick={audio.resumeSession}>
+                  Resume
+                </button>
+                <button type="button" className="btn btn-ghost sm" onClick={audio.dismissSession}>
+                  <X size={13} /> Forget
+                </button>
+              </div>
+            ) : (
+              <span className="fine">—</span>
+            )}
           </div>
         </div>
       </section>

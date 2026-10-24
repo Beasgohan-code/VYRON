@@ -36,6 +36,9 @@ export interface AudioEngine {
   seekBy: (delta: number) => void;
   setVolume: (value: number) => void;
   setRate: (value: number) => void;
+  /** Even out loud and quiet tracks with a compressor. Off by default. */
+  setNormalise: (value: boolean) => void;
+  normalising: boolean;
   toggleMute: () => void;
   cycleRepeat: () => void;
   toggleShuffle: () => void;
@@ -104,6 +107,7 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
   const element = useRef<HTMLAudioElement | null>(null);
   const contextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
+  const compressorRef = useRef<DynamicsCompressorNode | null>(null);
   const [track, setTrack] = useState<Track | null>(null);
   const [queue, setQueue] = useState<Track[]>([]);
   const [playing, setPlaying] = useState(false);
@@ -121,6 +125,7 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
   const [shuffle, setShuffle] = useState(() => read("vyron:shuffle", "0") === "1");
   const [expanded, setExpanded] = useState(false);
   const [buffered, setBuffered] = useState(0);
+  const [normalising, setNormalising] = useState(() => read("vyron:normalise", "0") === "1");
   const initialSession = readSession();
   const [saved, setSaved] = useState<SavedSession | null>(initialSession);
   const savedRef = useRef<SavedSession | null>(initialSession);
@@ -131,6 +136,9 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
   const loadSeq = useRef(0);
 
   /* keep the latest values available to the <audio> event handlers */
+  const normalisingRef = useRef(normalising);
+  normalisingRef.current = normalising;
+
   const latest = useRef({ queue, track, repeat, shuffle, volume, muted, rate, position, duration });
   latest.current = { queue, track, repeat, shuffle, volume, muted, rate, position, duration };
 
@@ -139,15 +147,22 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
       const audio = new Audio();
       audio.preload = "auto";
       audio.setAttribute("playsinline", "");
+      // Telegram's iOS webview will not reliably start a detached element:
+      // it has to be in the document, and it has to be silent-looking. This is
+      // the difference between "the app plays music" and "the app makes no
+      // sound on an iPhone".
+      audio.style.display = "none";
+      audio.setAttribute("aria-hidden", "true");
       audio.volume = volume;
       audio.muted = muted;
       audio.playbackRate = rate;
+      document.body.appendChild(audio);
       element.current = audio;
     }
     return element.current;
   }, [volume, muted, rate]);
 
-  /* ── audio analyser (lazy: only the 3D visualiser asks for it) ────────── */
+  /* ── audio graph: lazy, and only when something actually needs it ─────── */
   const analyser = useCallback((): AnalyserNode | null => {
     if (analyserRef.current) return analyserRef.current;
     try {
@@ -159,7 +174,18 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
       const node = context.createAnalyser();
       node.fftSize = 128;
       node.smoothingTimeConstant = 0.82;
-      source.connect(node);
+      // The compressor sits in the path whether or not it is doing anything:
+      // inserting it later would mean rebuilding the whole graph mid-track.
+      const compressor = context.createDynamicsCompressor();
+      const bypass = !normalisingRef.current;
+      compressor.threshold.value = bypass ? 0 : -24;
+      compressor.knee.value = bypass ? 0 : 30;
+      compressor.ratio.value = bypass ? 1 : 4;
+      compressor.attack.value = 0.003;
+      compressor.release.value = 0.25;
+      compressorRef.current = compressor;
+      source.connect(compressor);
+      compressor.connect(node);
       node.connect(context.destination);
       // A suspended context would silence playback, so nudge it on every play.
       const wake = () => {
@@ -678,6 +704,21 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
     if (audio) audio.playbackRate = next;
   }, []);
 
+  const setNormalise = useCallback(
+    (value: boolean) => {
+      setNormalising(value);
+      write("vyron:normalise", value ? "1" : "0");
+      // Turning it on needs the graph to exist; the click is a user gesture, so
+      // this is the one moment a browser will let an AudioContext start.
+      const node = compressorRef.current ?? (analyser() ? compressorRef.current : null);
+      if (!node) return;
+      node.threshold.value = value ? -24 : 0;
+      node.knee.value = value ? 30 : 0;
+      node.ratio.value = value ? 4 : 1;
+    },
+    [analyser]
+  );
+
   const cycleRepeat = useCallback(() => {
     setRepeat((mode) => (mode === "off" ? "all" : mode === "all" ? "one" : "off"));
   }, []);
@@ -707,6 +748,8 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
       seekBy,
       setVolume,
       setRate,
+      setNormalise,
+      normalising,
       toggleMute: () => setMuted((value) => !value),
       cycleRepeat,
       toggleShuffle: () => setShuffle((value) => !value),
@@ -725,7 +768,8 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
     [
       track, queue, playing, loading, error, position, duration, volume, muted, rate, buffered,
       repeat, shuffle, expanded, saved, play, toggle, advance, prev, seek, seekBy, setVolume,
-      setRate, cycleRepeat, enqueue, removeAt, move, jumpTo, clear, resumeSession, dismissSession,
+      setRate, setNormalise, normalising, cycleRepeat, enqueue, removeAt, move, jumpTo, clear,
+      resumeSession, dismissSession,
       retryTrack, analyser,
     ]
   );

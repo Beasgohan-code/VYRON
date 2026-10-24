@@ -314,6 +314,8 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
 }
 
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chips.tight { gap: 5px; }
+.row.gap { display: flex; gap: 6px; align-items: center; }
 .chips.scroll { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
 .chips.scroll::-webkit-scrollbar { display: none; }
 
