@@ -609,19 +609,39 @@ class Downloader:
                     logger.warning("video fallback failed for %s: %s", track.id, exc)
             raise DownloadError(" · ".join(errors))
 
+    @staticmethod
+    def _stream_suffix(track: Track) -> str:
+        """The real container of a direct URL, so the file is not mislabelled."""
+        from urllib.parse import urlsplit
+
+        path = urlsplit(str(track.url or "")).path.lower()
+        suffix = path.rsplit(".", 1)[-1] if "." in path else ""
+        if suffix in {"mp3", "m4a", "aac", "opus", "ogg", "webm", "flac", "wav"}:
+            return "m4a" if suffix == "aac" else suffix
+        return "mp3"
+
     async def _download_stream(
         self, track: Track, *, on_progress: ProgressHook | None = None
     ) -> Path:
-        """Fetch a track whose `url` *is* the audio (Audius, direct files)."""
+        """Fetch a track whose `url` *is* the audio (Audius, JioSaavn, files).
+
+        The bytes are written with the container the server actually sent, then
+        transcoded to MP3 at ``MP3_KBPS`` when ffmpeg is available. Naming an
+        AAC stream ``.mp3`` (the old behaviour) produced files that strict
+        players refused and that Telegram labelled with the wrong codec.
+        """
         from vyron.core import accelerator
 
-        target = self.settings.downloads_dir / f"{track.source}-{track.id}.mp3"
-        target.parent.mkdir(parents=True, exist_ok=True)
-        partial = target.with_suffix(target.suffix + ".part")
+        suffix = self._stream_suffix(track)
+        stem = f"{track.source}-{track.id}"
+        work = self.settings.downloads_dir / f".stream-{track.id}"
+        work.mkdir(parents=True, exist_ok=True)
+        raw = work / f"source.{suffix}"
+        partial = raw.with_suffix(raw.suffix + ".part")
 
         def _progress(done: int, total: int) -> None:
             if on_progress and total:
-                on_progress(min(1.0, done / total), "download")
+                on_progress(min(0.9, done / total), "download")
 
         try:
             await accelerator.fetch(
@@ -631,10 +651,39 @@ class Downloader:
                 on_progress=_progress,
                 order=self.accelerator_order(),
             )
-            partial.replace(target)
+            partial.replace(raw)
+            if on_progress:
+                on_progress(0.92, "converting")
+
+            binary = ffmpeg_path()
+            if binary and suffix != "mp3":
+                final = self.audio_path(track)
+                args = [
+                    binary, "-y", "-loglevel", "error", "-i", str(raw), "-vn",
+                    "-c:a", "libmp3lame", "-b:a", f"{MP3_KBPS}k", str(final),
+                ]
+                result = await asyncio.to_thread(
+                    subprocess.run, args, capture_output=True, timeout=900
+                )
+                if result.returncode == 0 and final.is_file() and final.stat().st_size > 0:
+                    if on_progress:
+                        on_progress(1.0, "done")
+                    return final
+                logger.info(
+                    "transcode to mp3 failed for %s: %s",
+                    track.id,
+                    (result.stderr or b"")[:200],
+                )
+            # No ffmpeg, or it refused: keep the file it actually is.
+            target = self.settings.downloads_dir / f"{stem}.{suffix}"
+            _atomic_move(raw, target)
+        except DownloadError:
+            raise
         except Exception as exc:
             partial.unlink(missing_ok=True)
             raise DownloadError(f"could not fetch the stream ({exc})") from exc
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
         if on_progress:
             on_progress(1.0, "done")
         return target

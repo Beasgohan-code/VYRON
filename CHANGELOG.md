@@ -57,6 +57,10 @@ Two version numbers move independently:
   YouTube tracks: it re-streams the same track from where it is (not from 0:00)
   with its picture. If the server has no video for it, the answer is a toast,
   not a broken stream.
+* **Downloads keep the container they actually are.** A JioSaavn/Audius stream
+  is written with its real extension and transcoded to MP3 at 320 kbps when
+  ffmpeg is present — the old code renamed every AAC stream to `.mp3`, which
+  strict players refused.
 
 ### 1.9.1 — 2026-10-24
 

@@ -512,3 +512,63 @@ def test_a_video_request_falls_back_before_it_gives_up(tmp_path, monkeypatch):
     path = asyncio.run(dl.video(track))
 
     assert path.suffix == ".mp4" and path.stat().st_size > 0
+
+
+# ── a direct stream keeps the container it actually is ─────────────────────
+def test_a_direct_m4a_is_not_labelled_mp3(tmp_path, monkeypatch):
+    from vyron.core import accelerator, downloader as module
+
+    dl = _downloader(tmp_path)
+    monkeypatch.setattr(module, "ffmpeg_path", lambda: "")
+
+    async def fake_fetch(url, target, **kwargs):
+        target.write_bytes(b"\x00\x00\x00\x20ftypM4A " + b"0" * 64)
+
+    monkeypatch.setattr(accelerator, "fetch", fake_fetch)
+    track = Track(
+        id="saavn1", title="Kesariya", duration=268, source="jiosaavn",
+        url="https://cdn.example/kesariya.m4a",
+    )
+
+    path = asyncio.run(dl._download_stream(track))
+
+    assert path.suffix == ".m4a"
+    assert dl.cached(track) is not None  # still found by the cache
+    assert not list(dl.settings.downloads_dir.glob(".stream-*"))
+
+
+def test_a_direct_m4a_is_transcoded_to_320k_mp3_when_ffmpeg_can(tmp_path, monkeypatch):
+    from vyron.core import accelerator, downloader as module
+
+    dl = _downloader(tmp_path)
+    monkeypatch.setattr(module, "ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+
+    async def fake_fetch(url, target, **kwargs):
+        target.write_bytes(b"\x00\x00\x00\x20ftypM4A " + b"0" * 64)
+
+    built: list[list[str]] = []
+
+    def fake_run(args, **kwargs):
+        built.append(list(args))
+        from pathlib import Path
+
+        Path(args[-1]).write_bytes(b"ID3" + b"0" * 128)
+
+        class Result:
+            returncode = 0
+            stderr = b""
+
+        return Result()
+
+    monkeypatch.setattr(accelerator, "fetch", fake_fetch)
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    track = Track(
+        id="saavn2", title="Kesariya", duration=268, source="jiosaavn",
+        url="https://cdn.example/kesariya.m4a",
+    )
+
+    path = asyncio.run(dl._download_stream(track))
+
+    assert path.suffix == ".mp3" and path.stat().st_size > 0
+    assert f"{module.MP3_KBPS}k" in built[0]
+    assert "libmp3lame" in built[0]
