@@ -163,7 +163,30 @@ def build_queries(seed_title: str, *, mood: str = "", language: str = "", artist
     return queries
 
 
-def pick(candidates: Iterable[Track], *, played: Iterable[Track] = (), seed_title: str = "") -> Track | None:
+def _soft_shuffle(items: list[Track], group: int = 3) -> list[Track]:
+    """Shuffle inside small blocks — related-first order, never the same chain.
+
+    Straight `random.choice` over the whole pool turns autoplay into a lottery;
+    taking the top result every time walks the same chain forever. Shuffling in
+    threes keeps the search's relevance ranking and drops the predictability
+    (the idea comes from ShizuMusic's autoplay buffer).
+    """
+    out: list[Track] = []
+    for start in range(0, len(items), max(1, group)):
+        chunk = items[start : start + max(1, group)]
+        random.shuffle(chunk)
+        out.extend(chunk)
+    return out
+
+
+def pick(
+    candidates: Iterable[Track],
+    *,
+    played: Iterable[Track] = (),
+    seed_title: str = "",
+    seed_artist: str = "",
+    group: int = 3,
+) -> Track | None:
     """The first candidate that is not the same song as anything played."""
     known = list(played)
     seed = normalise(seed_title) if seed_title else ""
@@ -185,10 +208,17 @@ def pick(candidates: Iterable[Track], *, played: Iterable[Track] = (), seed_titl
     pool = [c for c in candidates if fresh(c)]
     if not pool:
         return None
-    # A soft shuffle over the first handful keeps repeats away without making
-    # autoplay feel like a lottery.
-    head = pool[:4]
-    return random.choice(head) if len(head) > 1 else head[0]
+    # Rotate the artist: five songs by the same person in a row is the other
+    # way autoplay feels broken. Only enforced while there is real choice.
+    seed_by = (seed_artist or "").strip().lower()
+    if seed_by:
+        varied = [
+            c for c in pool if (getattr(c, "uploader", "") or "").strip().lower() != seed_by
+        ]
+        if len(varied) >= 2:
+            pool = varied
+    shuffled = _soft_shuffle(pool[:9], group=group)
+    return shuffled[0] if shuffled else pool[0]
 
 
 async def next_track(
@@ -210,7 +240,12 @@ async def next_track(
         except Exception as exc:  # pragma: no cover - network paths
             logger.debug("autoplay search failed for %r: %s", query, exc)
             continue
-        chosen = pick(results, played=seen, seed_title=seed.title)
+        chosen = pick(
+            results,
+            played=seen,
+            seed_title=seed.title,
+            seed_artist=seed.uploader or "",
+        )
         if chosen is not None:
             chosen.requested_name = "autoplay"
             logger.info("autoplay picked %r for %r", chosen.title, seed.title)

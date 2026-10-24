@@ -100,3 +100,35 @@ def test_next_track_gives_up_quietly_when_search_fails():
 def test_describe_reads_like_a_sentence():
     assert auto.describe("chill", "hindi") == "lofi chill relaxing · hindi songs"
     assert auto.describe("", "") == ""
+
+
+def test_pick_rotates_the_artist_when_it_can():
+    candidates = [
+        Track(id="aaaa1111111", title="Tum Hi Ho", duration=240, uploader="Arijit Singh"),
+        Track(id="bbbb2222222", title="Kesariya", duration=240, uploader="Arijit Singh"),
+        Track(id="cccc3333333", title="Raata Lambiyo", duration=230, uploader="Shreya Ghoshal"),
+        Track(id="dddd4444444", title="Channa Mereya", duration=250, uploader="Pritam"),
+    ]
+    for _ in range(20):
+        chosen = auto.pick(
+            candidates,
+            seed_title="Some Arijit song",
+            seed_artist="Arijit Singh",
+        )
+        assert chosen is not None
+        assert chosen.uploader != "Arijit Singh"
+
+
+def test_pick_falls_back_to_the_same_artist_when_that_is_all_there_is():
+    candidates = [
+        Track(id="aaaa1111111", title="Tum Hi Ho", duration=240, uploader="Arijit Singh"),
+        Track(id="bbbb2222222", title="Kesariya", duration=240, uploader="Arijit Singh"),
+    ]
+    chosen = auto.pick(candidates, seed_title="x", seed_artist="Arijit Singh")
+    assert chosen in candidates
+
+
+def test_soft_shuffle_keeps_every_track():
+    pool = [Track(id=f"id{i:09d}", title=f"t{i}", duration=200) for i in range(7)]
+    shuffled = auto._soft_shuffle(pool, group=3)
+    assert sorted(t.id for t in shuffled) == sorted(t.id for t in pool)
