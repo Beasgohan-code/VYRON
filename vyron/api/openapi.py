@@ -299,8 +299,18 @@ def spec(request: web.Request) -> dict:
                     "description": (
                         "Same engine as `POST /tracks`, but it returns immediately with a "
                         "job id: poll `/downloads/{job_id}` for progress, then fetch "
-                        "`/downloads/{job_id}/file`. Requires the `download` scope."
+                        "`/downloads/{job_id}/file`. Requires the `download` scope. "
+                        "Send `Idempotency-Key: <client-generated id>` and a retry returns "
+                        "the same job (`replayed: true`) instead of queueing a second file."
                     ),
+                    "parameters": [
+                        {
+                            "name": "Idempotency-Key",
+                            "in": "header",
+                            "required": False,
+                            "schema": {"type": "string", "maxLength": 120},
+                        }
+                    ],
                     "requestBody": {
                         "required": True,
                         "content": {
@@ -495,6 +505,33 @@ def spec(request: web.Request) -> dict:
                     "summary": "Revoke a key by id or prefix",
                     "responses": {"200": {"description": "revoked"}, **_err(403, 404)},
                 },
+            },
+            "/token": {
+                "post": {
+                    "tags": ["Keys"],
+                    "summary": "Mint a short-lived browser token",
+                    "description": (
+                        "Exchanges the calling key for a signed token (default 15 min, "
+                        "max 60) carrying a subset of its scopes. Use it in a browser or "
+                        "Mini App instead of putting a `vyrn_` key in JavaScript. Send it "
+                        "as `Authorization: Bearer vyt_…`."
+                    ),
+                    "requestBody": {
+                        "required": False,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "ttl": {"type": "integer", "minimum": 30, "maximum": 3600},
+                                        "scopes": {"type": "array", "items": {"type": "string"}},
+                                    },
+                                }
+                            }
+                        },
+                    },
+                    "responses": {"200": {"description": "token"}, **_err(400, 403, 429)},
+                }
             },
             "/keys": {
                 "get": {

@@ -479,6 +479,11 @@ class MusicAPI:
                 return AuthResult(True, None, limit=limit, remaining=limit, open_access=True)
             return AuthResult(False, None, status=401, code="missing_key", error="missing API key — send X-API-Key")
 
+        from vyron.core import shortlived
+
+        if shortlived.looks_like_token(raw):
+            return self._authenticate_token(raw)
+
         candidates = await self._load()
         record = next((item for item in candidates if self._matches(item, raw)), None)
         if record is None:
@@ -519,6 +524,51 @@ class MusicAPI:
             remaining=remaining,
             reset_in=reset_in,
             scopes=tuple(normalise_scopes(record.get("scopes"))),
+        )
+
+    def _authenticate_token(self, raw: str) -> AuthResult:
+        """A browser token: signed, scoped, short-lived, and not a key.
+
+        It carries no counters of its own — the owner's window applies — but it
+        is rate limited per token id so one open tab cannot drain the quota.
+        """
+        from vyron.core import shortlived
+
+        try:
+            body = shortlived.verify(raw, settings=self.settings)
+        except shortlived.TokenError as exc:
+            return AuthResult(
+                False,
+                None,
+                status=403,
+                code="invalid_token",
+                error=f"invalid token: {exc}",
+            )
+        scopes = tuple(normalise_scopes(body.get("sc")))
+        limit = max(int(self.settings.music_api_rate), 60)
+        bucket = f"token:{body.get('jti') or body.get('sub')}"
+        if not self._consume(bucket, limit):
+            remaining, reset_in = self._rate(bucket, limit)
+            return AuthResult(
+                False,
+                None,
+                status=429,
+                code="rate_limited",
+                error=f"rate limit reached ({limit}/min) — retry in {reset_in}s",
+                limit=limit,
+                remaining=remaining,
+                reset_in=reset_in,
+                scopes=scopes,
+            )
+        remaining, reset_in = self._rate(bucket, limit)
+        return AuthResult(
+            True,
+            {"token": True, "owner_id": int(body.get("sub") or 0), "scopes": list(scopes),
+             "expires_at": body.get("exp"), "kid": body.get("kid", "")},
+            limit=limit,
+            remaining=remaining,
+            reset_in=reset_in,
+            scopes=scopes,
         )
 
     async def authenticate_owner(self, owner_id: int) -> AuthResult:

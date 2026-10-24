@@ -123,6 +123,7 @@ def build_app() -> web.Application:
     router.add_get("/me", routes.me)
     router.add_get("/sources", routes.sources_route)
     router.add_get("/sources/{name}", routes.sources_route)
+    router.add_post("/token", routes.mint_token)
     router.add_get("/keys", routes.own_keys)
     router.add_post("/keys", routes.own_keys)
     router.add_patch("/keys/{identifier}", routes.own_key_item)

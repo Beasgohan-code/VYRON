@@ -103,6 +103,10 @@ class Settings:
     download_accelerator: str = field(
         default_factory=lambda: (_env("DOWNLOAD_ACCELERATOR", "auto") or "auto").lower()
     )
+    # Optional: the HMAC secret behind short-lived browser tokens (`/v1/token`).
+    # Empty means "derive it from the bot token", which survives restarts and
+    # dies when the credentials change.
+    api_token_secret: str = field(default_factory=lambda: _env("API_TOKEN_SECRET"))
     # The HTTP port opens before the bot finishes booting (a host that never
     # sees the port assumes the deploy failed). A request that lands during that
     # window waits this long for the engine instead of getting a 503: a free

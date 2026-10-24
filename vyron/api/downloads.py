@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from urllib.parse import quote
 from aiohttp import web
 
@@ -98,9 +99,47 @@ async def _resolve_track(data: dict):
 
 
 # ── endpoints ──────────────────────────────────────────────────────────────
+# A retried request must not become a second download. The key is the
+# client's, the window is ours: five minutes is long enough for a flaky mobile
+# connection to retry and short enough that a reused key still means a new job.
+_IDEMPOTENCY: dict[str, tuple[str, float]] = {}
+_IDEMPOTENCY_TTL = 300.0
+
+
+def _idempotent_replay(request: web.Request, owner: str) -> str:
+    key = (request.headers.get("Idempotency-Key") or request.headers.get("X-Idempotency-Key") or "").strip()
+    if not key:
+        return ""
+    namespaced = f"{owner}:{key}"
+    now = time.time()
+    for stale in [name for name, (_, stamp) in _IDEMPOTENCY.items() if now - stamp > _IDEMPOTENCY_TTL]:
+        _IDEMPOTENCY.pop(stale, None)
+    found = _IDEMPOTENCY.get(namespaced)
+    if not found:
+        return ""
+    job = get_download_jobs().get(found[0])
+    return job.id if job is not None else ""
+
+
+def _remember(request: web.Request, owner: str, job_id: str) -> None:
+    key = (request.headers.get("Idempotency-Key") or request.headers.get("X-Idempotency-Key") or "").strip()
+    if key:
+        _IDEMPOTENCY[f"{owner}:{key}"] = (job_id, time.time())
+
+
 async def submit(request: web.Request) -> web.StreamResponse:
     auth = await _authorize(request)
     await _ensure_ready()
+    owner = _owner(auth)
+    replay = _idempotent_replay(request, owner)
+    if replay:
+        job = get_download_jobs().get(replay)
+        if job is not None:
+            body = job.to_json(base_url(request))
+            body["ok"] = True
+            body["replayed"] = True
+            body["poll"] = f"{base_url(request)}/downloads/{job.id}"
+            return web.json_response(body, headers=headers_for(auth))
     data = await payload(request)
     kind = str(data.get("format") or data.get("kind") or "audio").strip().lower()
     if kind in {"mp3", "m4a", "music", "song"}:
@@ -111,7 +150,8 @@ async def submit(request: web.Request) -> web.StreamResponse:
         raise ApiError("bad_request", "format must be audio or video")
 
     track = await _resolve_track(data)
-    job = get_download_jobs().submit(track, kind=kind, owner=_owner(auth))
+    job = get_download_jobs().submit(track, kind=kind, owner=owner)
+    _remember(request, owner, job.id)
     body = job.to_json(base_url(request))
     body["ok"] = True
     body["poll"] = f"{base_url(request)}/downloads/{job.id}"

@@ -558,6 +558,43 @@ async def admin_keys(request: web.Request) -> web.Response:
     )
 
 
+async def mint_token(request: web.Request) -> web.Response:
+    """Exchange a key (or an owner token) for a short-lived browser token.
+
+    A Mini App should not hold a `vyrn_` key in JavaScript: this returns a
+    fifteen-minute token carrying a subset of the caller's scopes, which is
+    useless to anyone who lifts it out of a WebView a day later.
+    """
+    from vyron.core import shortlived
+
+    auth = await authorize(request, "read")
+    data = {}
+    if request.can_read_body:
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+    ttl = int(data.get("ttl") or shortlived.DEFAULT_TTL)
+    scopes = data.get("scopes") or list(auth.scopes or SCOPES)
+    allowed = set(SCOPES)
+    scopes = [scope for scope in scopes if scope in allowed and auth.has(scope)]
+    if not scopes:
+        raise ApiError("forbidden_scope", "none of those scopes belong to this key")
+    owner_id = _actor(auth)
+    record = auth.record or {}
+    minted = shortlived.mint(
+        owner_id=owner_id,
+        scopes=scopes,
+        ttl=ttl,
+        key_id=str(record.get("id") or record.get("kid") or ""),
+        settings=settings,
+    )
+    return web.json_response(
+        {"ok": True, "token_type": "Bearer", **minted, "owner_id": owner_id},
+        headers=headers_for(auth),
+    )
+
+
 async def own_keys(request: web.Request) -> web.Response:
     """Self-service: a key manages *its own owner's* keys, nothing else.
 

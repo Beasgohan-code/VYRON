@@ -805,3 +805,102 @@ def test_a_request_during_boot_gets_retry_after(monkeypatch):
 
     asyncio.run(scenario())
     runtime._ready = False
+
+
+def test_a_retried_download_is_the_same_job(tmp_path, monkeypatch):
+    """Idempotency-Key stops a flaky client from queueing the same file twice."""
+    api, _ = _api(tmp_path, monkeypatch, music_api_open=False)
+    monkeypatch.setattr(runtime, "youtube", _FakeYoutube())
+    audio = tmp_path / "x.mp3"
+    audio.write_bytes(b"ID3")
+    monkeypatch.setattr(runtime, "downloader", _FakeDownloader(audio))
+    monkeypatch.setattr("vyron.api.routes.get_music_api", lambda: api)
+    monkeypatch.setattr("vyron.api.security.get_music_api", lambda: api)
+    monkeypatch.setattr("vyron.api.downloads.get_music_api", lambda: api)
+    from vyron.core.downloadjobs import reset_download_jobs
+
+    reset_download_jobs()
+
+    async def scenario():
+        record, _ = await api.issue(5150, "ci")
+        headers = {"X-API-Key": record["key"], "Idempotency-Key": "nightly-run-17"}
+        app = build_app(with_webapp=False)
+        async with TestClient(TestServer(app)) as client:
+            first = await client.post("/v1/downloads", json={"video_id": "abc12345678"}, headers=headers)
+            body = await first.json()
+            assert first.status == 202
+            created = body["job_id"]
+
+            again = await client.post("/v1/downloads", json={"video_id": "abc12345678"}, headers=headers)
+            replay = await again.json()
+            assert replay["job_id"] == created and replay.get("replayed") is True
+
+            other = await client.post(
+                "/v1/downloads", json={"video_id": "abc12345678"}, headers={"X-API-Key": record["key"]}
+            )
+            assert (await other.json())["job_id"] != created
+
+    asyncio.run(scenario())
+
+
+def test_browser_tokens_are_short_lived_and_scoped(tmp_path, monkeypatch):
+    """The Mini App should never hold a vyrn_ key in JavaScript."""
+    from vyron.core import shortlived
+
+    api, _ = _api(tmp_path, monkeypatch, music_api_open=False)
+    audio = tmp_path / "a.mp3"
+    audio.write_bytes(b"ID3")
+    monkeypatch.setattr(runtime, "youtube", _FakeYoutube())
+    monkeypatch.setattr(runtime, "downloader", _FakeDownloader(audio))
+    monkeypatch.setattr("vyron.api.routes.get_music_api", lambda: api)
+    monkeypatch.setattr("vyron.api.security.get_music_api", lambda: api)
+    import vyron.api.routes as api_routes
+
+    monkeypatch.setattr(api_routes, "settings", dataclasses.replace(settings, boot_wait=0))
+
+    async def scenario():
+        record, _ = await api.issue(900, "web", scopes=["read", "search", "download"])
+        headers = {"X-API-Key": record["key"]}
+        app = build_app(with_webapp=False)
+        async with TestClient(TestServer(app)) as client:
+            minted = await client.post("/v1/token", json={"ttl": 120, "scopes": ["read"]}, headers=headers)
+            body = await minted.json()
+            assert minted.status == 200
+            assert body["token"].startswith("vyt_") and body["expires_in"] == 120
+            assert body["scopes"] == ["read"]
+
+            used = await client.get(
+                "/v1/tracks/abc12345678", headers={"Authorization": f"Bearer {body['token']}"}
+            )
+            assert used.status == 200
+
+            blocked = await client.get("/v1/search?q=x", headers={"Authorization": f"Bearer {body['token']}"})
+            assert blocked.status == 403        # read token cannot search
+
+            # a token cannot mint another token for more than it holds
+            narrower = await client.post("/v1/token", json={"scopes": ["admin"]}, headers=headers)
+            assert narrower.status == 403
+
+    asyncio.run(scenario())
+
+
+def test_token_verification_rejects_tampering_and_expiry(monkeypatch):
+    import base64
+    import json as _json
+
+    from vyron.core import shortlived
+
+    fresh = shortlived.mint(owner_id=5, scopes=["read"], ttl=60)
+    body = shortlived.verify(fresh["token"])
+    assert body["sub"] == 5 and body["sc"] == ["read"]
+
+    tampered = fresh["token"][:-4] + "AAAA"
+    with pytest.raises(shortlived.TokenError):
+        shortlived.verify(tampered)
+
+    # an expired payload with a valid signature is still expired
+    payload = _json.dumps({"sub": 5, "sc": ["read"], "exp": 1, "iat": 1, "jti": "x"}).encode()
+    encoded = base64.urlsafe_b64encode(payload).decode().rstrip("=")
+    token = f"{shortlived.PREFIX}{encoded}.{shortlived._sign(payload)}"
+    with pytest.raises(shortlived.TokenError):
+        shortlived.verify(token)
