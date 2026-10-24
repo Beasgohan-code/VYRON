@@ -1,0 +1,90 @@
+# Nightly liveness of the *external* world.
+#
+# The main suite is fully offline on purpose: it must pass with no network and
+# no credentials. But every resolver we depend on (Invidious, Piped, Cobalt,
+# song.link, saavn.dev, LRCLIB) can change shape without warning, and no unit
+# test would notice. This job talks to the real internet once a day and opens a
+# single issue when something has genuinely broken — never on a pull request,
+# never as a required check.
+name: live
+
+on:
+  schedule:
+    - cron: "23 3 * * *"   # 03:23 UTC — off-peak, away from every other cron
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Resolve real tracks end to end
+        id: live
+        continue-on-error: true
+        env:
+          BOT_TOKEN: "123456789:TEST-TOKEN"
+          API_ID: "123456"
+          API_HASH: "0123456789abcdef0123456789abcdef"
+          OWNER_ID: "424242"
+        run: python -m vyron.tools.livecheck --json live-report.json
+
+      - name: Summarise
+        if: always()
+        run: |
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json, pathlib
+          path = pathlib.Path("live-report.json")
+          if not path.is_file():
+              print("no report produced"); raise SystemExit
+          data = json.loads(path.read_text())
+          print("| check | result | detail |")
+          print("| --- | --- | --- |")
+          for row in data.get("checks", []):
+              print(f"| {row['name']} | {'ok' if row['ok'] else '**failed**'} | {row['detail']} |")
+          PY
+
+      - name: Report a broken resolver
+        if: steps.live.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let body = 'The nightly live check failed. Details are in the run log.';
+            try {
+              const data = JSON.parse(fs.readFileSync('live-report.json', 'utf8'));
+              const rows = (data.checks || []).map(c => `- **${c.name}**: ${c.ok ? 'ok' : 'FAILED'} — ${c.detail}`);
+              if (rows.length) body = 'The nightly live check failed:\\n\\n' + rows.join('\\n');
+            } catch (e) {}
+            const title = 'live check failed: a source changed shape';
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', labels: 'live-check',
+            });
+            const match = existing.data.find(i => i.title === title);
+            if (match) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: match.number, body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo,
+                title, body, labels: ['live-check'],
+              });
+            }

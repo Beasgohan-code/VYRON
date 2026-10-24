@@ -37,6 +37,19 @@ jobs:
       - name: Verify bundle
         run: test -f webapp/dist/index.html && test -d webapp/dist/assets
 
+      # webapp/dist is committed because it is what the Docker image and every
+      # host serve. If a change to frontend/src is not accompanied by a rebuilt
+      # bundle, the repository ships a UI that does not match its source — and
+      # nothing else in CI would notice.
+      - name: The committed bundle matches frontend/src
+        run: |
+          if ! git diff --quiet -- webapp/dist; then
+            echo "::error::webapp/dist is stale — run 'npm run build' in frontend/ and commit the result"
+            git diff --stat -- webapp/dist
+            exit 1
+          fi
+          echo "bundle is current"
+
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
