@@ -79,6 +79,12 @@ class Settings:
     # a tap-happy listener from re-running the whole resolver, short enough that
     # a transient 403 heals by itself.
     stream_failure_ttl: int = field(default_factory=lambda: max(5, _int("STREAM_FAILURE_TTL", 60)))
+    # No cookies? Impersonating a real browser is the next best thing: it fixes
+    # the TLS/JA3 fingerprint YouTube uses to spot a datacenter IP.
+    impersonate: str = field(default_factory=lambda: _env("IMPERSONATE", "chrome"))
+    # YouTube breaks old extractors first. Checking PyPI once a day and
+    # upgrading in place is what keeps a deployment playing without cookies.
+    ytdlp_autoupdate: bool = field(default_factory=lambda: _flag("YTDLP_AUTOUPDATE", True))
     # yt-dlp is CPU-bound: two extractions at a time keeps the event loop (and
     # therefore the Mini App) responsive on a small host.
     extract_concurrency: int = field(default_factory=lambda: max(1, _int("EXTRACT_CONCURRENCY", 2)))
@@ -125,6 +131,10 @@ class Settings:
     # instance list with STREAM_FALLBACK_HOSTS=a.example,b.example.
     stream_fallback: bool = field(default_factory=lambda: _flag("STREAM_FALLBACK", True))
     stream_fallback_hosts: str = field(default_factory=lambda: _env("STREAM_FALLBACK_HOSTS"))
+    # Self-hosted / extra Cobalt instances (comma separated). Empty = built-in
+    # public list; "off" disables the tier.
+    cobalt_urls: str = field(default_factory=lambda: _env("COBALT_URLS") or _env("COBALT_URL"))
+    disable_cobalt: bool = field(default_factory=lambda: _env("COBALT_URLS").lower() in {"off", "none", "0"})
     stream_fallback_timeout: int = field(
         default_factory=lambda: max(3, _int("STREAM_FALLBACK_TIMEOUT", 9))
     )

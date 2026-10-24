@@ -54,6 +54,7 @@ COMMANDS = [
     ("apitoken", "owner token for web app + API"),
     ("logs", "owner journal: starts, stops, errors"),
     ("doctor", "deployment self-check"),
+    ("sources", "which resolvers work from this server"),
     ("logger", "mirror warnings to a channel"),
     ("effects", "audio effects panel"),
     ("voice", "voice engine status"),
@@ -391,6 +392,9 @@ async def _async_main() -> int:
         runtime.charts.prime()
     except Exception as exc:  # pragma: no cover - never block boot
         logger.debug("chart warm-up skipped: %s", exc)
+    from vyron.core import ytdlp_update
+
+    ytdlp_update.start()
     maintenance.start()
     watchdog.start()
     keepalive.start()

@@ -30,6 +30,16 @@ async def _index(_request: web.Request) -> web.Response:
     )
 
 
+def _resolver_summary() -> dict:
+    """Which tier produced a URL recently — no host names, no secrets."""
+    try:
+        from vyron.core.resolvers import HEALTH
+
+        return HEALTH.summary()
+    except Exception:  # pragma: no cover - never break a health probe
+        return {}
+
+
 async def _health(_request: web.Request) -> web.Response:
     """Liveness probe.
 
@@ -49,6 +59,7 @@ async def _health(_request: web.Request) -> web.Response:
             "problems": list(runtime.boot_problems),
             "streaming": runtime.streaming_ready,
             "playback": "disk" if settings.play_from_disk else "stream",
+            "resolvers": _resolver_summary(),
             "apis": {
                 "music": settings.music_api,
                 "download": settings.vyron_api,

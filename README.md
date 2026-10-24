@@ -163,22 +163,27 @@ Every file the bot sends — `/song`, `/vsong`, `POST /v1/tracks`,
 is deliberately paranoid:
 
 1. **Client ladder.** The same player clients the stream resolver walks
-   (`default → android_vr → ios → tv`). YouTube issues a different format set to
-   each, and today's 403 is often tomorrow's working client.
+   (`default → tv_simply → web_embedded → android_vr → ios → tv → web_safari →
+   mweb`). YouTube issues a different format set to each, and today's 403 is
+   often tomorrow's working client. A client that fails twice in a row is put on
+   a short cooldown instead of costing every track another timeout.
 2. **Atomic writes.** yt-dlp downloads into a private temp directory and the
    finished file is renamed into place, so a half-written track can never be
    cached and served forever.
 3. **A second engine.** If yt-dlp cannot produce a file at all, the direct URL
-   from an [Invidious](https://docs.invidious.io/api/) or
-   [Piped](https://github.com/TeamPiped/Piped) instance is fetched and
+   from an [Invidious](https://docs.invidious.io/api/),
+   [Piped](https://github.com/TeamPiped/Piped) or
+   [Cobalt](https://github.com/imputnet/cobalt) instance is fetched and
    transcoded with ffmpeg (or saved raw when ffmpeg is missing). That is the
    same tier the streamer falls back to, so a track that plays can be
    downloaded too.
 4. **One cache, one lock.** Two people asking for the same song at once share a
    single download; the file is reused until `DOWNLOAD_CACHE_HOURS` expires.
 
-`/doctor` reports all four: yt-dlp version, ffmpeg, the mirror tier and a live
-YouTube probe.
+`/doctor` reports all four: yt-dlp version (and whether a newer one exists),
+ffmpeg, the mirror tier and a live YouTube probe. `/sources` goes further: it
+probes every player client and every mirror *for one video, right now*, and
+prints which ones actually answered.
 
 ### Now-playing posters
 
@@ -199,6 +204,35 @@ sampled from the artwork, so no two songs look alike.
   render as boxes (`assets/fonts/`).
 - Starting playback from the Mini App mirrors the poster into that person's DM
   (`NP_DM`), so the phone shows what the app just started.
+
+### 🍪 No cookies? Six ways to play anyway
+
+Cookies are one tool, not the only one — and on a hosted IP they are often not
+the problem at all. VYRON ships every legal, open-source lever, tries them in
+order, and remembers what works:
+
+| Tier | What it does | Needs |
+|---|---|---|
+| **Browser impersonation** | yt-dlp speaks with Chrome's TLS/JA3 fingerprint, header order and HTTP/2 settings (`curl_cffi`). Defeats the "you look like a bot" wall without an account. | nothing — on by default |
+| **Client ladder** | 8 player clients, health-scored; `tv_simply`, `web_embedded` and `android_vr` usually still answer where `web` demands a PO token | nothing |
+| **Self-updating yt-dlp** | checks PyPI on boot and daily, upgrades in place — YouTube breaks old extractors first | `YTDLP_AUTOUPDATE=on` (default) |
+| **Invidious** | community instances that sign a URL for you | `STREAM_FALLBACK=on` (default) |
+| **Piped** | same idea, different API | default hosts |
+| **Cobalt** | open-source, made to be self-hosted: `docker run ghcr.io/imputnet/cobalt`, then `COBALT_URLS=https://cobalt.example` | one small container (optional) |
+
+Whatever answers first wins, its latency is recorded, and a host that fails
+twice is skipped for a while (45 s → 10 min, exponential) instead of costing
+every listener a timeout. `/doctor` shows the best resolver and whether
+`curl_cffi` is installed; **`/sources`** runs the whole sweep in front of you:
+
+```text
+/sources              # probe every tier against a known-good video
+/sources dQw4w9WgXcQ  # …or a specific one
+```
+
+If every row says `fail`, the answer is not a setting — it is the network:
+run behind a proxy (`PROXY=`), self-host Cobalt, or move the service to a region
+YouTube has not flagged.
 
 ### Two interfaces, and a fallback that always works
 
@@ -282,7 +316,8 @@ feeds the Library view of the web app. (YouTube imports stay on `/playlist`.)
 | `/setpfp` (reply to a photo) | replace its profile picture |
 | `/delpfp` | clear its profile pictures |
 | `/gblock` · `/gunblock` · `/ublock` · `/uunblock` | aliases of `/block` & `/unblock` |
-| `/doctor` | deployment self-check: config, yt-dlp, cookies, a **live** YouTube resolve, voice engine, storage, web app, music API |
+| `/doctor` | deployment self-check: config, yt-dlp (and whether it is current), impersonation, cookies, a **live** YouTube resolve, resolvers, voice engine, storage, web app, music API |
+| `/sources` | probe **every** player client, Invidious, Piped and Cobalt host for one video, with latency and the reason each one failed — the honest answer to "why won't it play" |
 | `/uistyle rich` · `/uistyle classic` | switch between the rich card UI and the classic (old) HTML UI — persisted |
 | `/uicheck` | render the `/start` card in **both** lanes, report each one, and fall back to the old UI if the rich card is empty |
 
@@ -779,6 +814,9 @@ The interesting optional ones:
 | `DOWNLOAD_CLEANUP_SECONDS` | `900` | how long a temp download folder may live |
 | `STREAM_FAILURE_TTL` | `60` | how long a track that just failed answers instantly instead of retrying |
 | `EXTRACT_CONCURRENCY` | `2` | yt-dlp extractions allowed at once (the rest queue, so web requests stay fast) |
+| `IMPERSONATE` | `chrome` | browser fingerprint to imitate via `curl_cffi`; `off` disables |
+| `YTDLP_AUTOUPDATE` | `on` | check PyPI on boot/daily and upgrade yt-dlp in place |
+| `COBALT_URLS` | – | your own Cobalt instance(s), comma separated; `off` disables the tier |
 | `MONGO_URL` | – | persistence (JSON file otherwise) |
 | `PREMIUM_EMOJI_FILE` | `./emoji.json` | custom emoji pack |
 | `RICH_MESSAGES` | `true` | rich cards (set `false` for plain HTML) |
@@ -869,7 +907,7 @@ owner-only `/sysstats` card.
 | `Start a voice chat in this group first` | The group has no active VC — start one (or `/vplay` after starting). |
 | `/play` says **voice engine is off** | `STRING_SESSION` is missing or failed to start — check the boot log, regenerate with `python -m vyron.tools.session`, restart. `/voice` shows the live engine state. |
 | Assistant joins but is silent | The **assistant** needs *manage voice chats*; give the bot admin too. |
-| `Could not resolve that track` | YouTube changed something → `pip install -U yt-dlp`; for age-gated videos set `COOKIES_FILE`. If `/doctor` shows the mirror tier as `off`, turn on `STREAM_FALLBACK` — a public Invidious/Piped instance usually still has the track. |
+| `Could not resolve that track` | run **`/sources`** first — it names the tier that failed and why. Then: confirm `curl_cffi` is installed (`/doctor` → impersonation), let `YTDLP_AUTOUPDATE` fetch a newer extractor, keep `STREAM_FALLBACK=on`, and self-host Cobalt (`COBALT_URLS`) if the public mirrors are rate-limited. Cookies (`COOKIES_FILE`) are only needed for age/region-locked videos. |
 | Download fails but streaming works | the client ladder got a URL but no file → check `/doctor`'s **ffmpeg** row; without ffmpeg the bot saves `.m4a` instead of `.mp3`, which is fine but not what `/song` promises. |
 | Bot replies "already in use" | Two instances with the same `STRING_SESSION` — run only one. |
 | Docker build: `error: No such file or directory: 'gcc'` | TgCrypto has no cp312 wheel; the image compiles it in its own stage. Rebuild without cache (`docker compose build --no-cache`). |

@@ -19,6 +19,11 @@ richgram>=0.2.0
 
 # ─── Media ──────────────────────────────────────────────────────────────────
 yt-dlp>=2025.1.1
+# Browser impersonation for yt-dlp (TLS/JA3 fingerprint, header order, HTTP/2
+# settings). This is the best *no-cookie* fix for a datacenter IP: YouTube
+# refuses the request fingerprint, not the account. Optional at runtime — if the
+# wheel is missing VYRON simply skips it — so it is pinned loosely.
+curl_cffi>=0.7.4
 
 # ─── Artwork (optional) ─────────────────────────────────────────────────────
 # Renders the /np "now playing" image (1280×720).  Without it VYRON simply

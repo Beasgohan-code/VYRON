@@ -21,6 +21,7 @@ from typing import Any
 import yt_dlp
 
 from vyron.config import Settings
+from vyron.core.resolvers import HEALTH
 from vyron.core.queue import Track
 from vyron.ui.progress import parse_duration, truncate
 
@@ -41,6 +42,11 @@ def _extract_slot(limit: int = 2) -> asyncio.Semaphore:
     if _SLOT is None or _SLOT[0] is not loop or _SLOT[1]._value > max(1, limit):
         _SLOT = (loop, asyncio.Semaphore(max(1, limit)))
     return _SLOT[1]
+
+
+def _client_source(client: str | None) -> str:
+    """Scoreboard key for a yt-dlp player client."""
+    return f"yt-dlp:{client or 'default'}"
 
 
 class MediaError(RuntimeError):
@@ -131,6 +137,7 @@ class YouTube:
         self._failures: dict[str, float] = {}
         # the player client that last produced a playable URL (None = yt-dlp default)
         self._client_hint: str | None = None
+        self._warned_impersonate = False
 
     # ── yt-dlp plumbing ────────────────────────────────────────────────────
     def _opts(self, **extra: Any) -> dict[str, Any]:
@@ -152,6 +159,14 @@ class YouTube:
             opts["proxy"] = self.settings.proxy
         if self.settings.ytdlp_args:
             opts.update(self._parse_ytdlp_args(self.settings.ytdlp_args))
+        # The single most effective no-cookie fix for a datacenter IP: make the
+        # HTTP client *look* like Chrome (TLS/JA3 fingerprint, header order and
+        # HTTP/2 settings). yt-dlp does this through curl_cffi, which is why it
+        # is in requirements.txt; without the module the option is skipped
+        # instead of failing the download.
+        target = self._impersonate_target()
+        if target:
+            opts.setdefault("impersonate", target)
         # `extra` always wins, but extractor_args are merged key-by-key so a
         # client passed by the ladder does not silently drop the operator's
         # own extractor tuning (and vice versa).
@@ -468,11 +483,14 @@ class YouTube:
         last_error: Exception | None = None
         same_error = 0
         for client in self._client_ladder():
+            source = _client_source(client)
+            started = time.perf_counter()
             try:
                 info = await self._async_extract(target, format=selector, **self._client_opts(client))
                 result = self._stream_from_info(info, track, video=video, target=target)
             except Exception as exc:  # MediaError, DownloadError, KeyError…
                 message = str(exc)
+                HEALTH.record(source, False, error=message)
                 # Two identical answers mean the client ladder is not the
                 # problem (a dead video, a blocked IP). Stopping there turns a
                 # six-client, 24-second stall into a two-client, 4-second one.
@@ -483,6 +501,7 @@ class YouTube:
                     logger.info("resolve for %s is deterministic, stopping the ladder", track.id)
                     break
                 continue
+            HEALTH.record(source, True, ms=(time.perf_counter() - started) * 1000)
             self._remember_client(client)
             self._stream_cache[key] = result
             self._failures.pop(key, None)
@@ -527,6 +546,9 @@ class YouTube:
         if not direct:
             return None
         logger.info("stream for %s came from %s", track.id, direct.source)
+        from vyron.core.resolvers import HEALTH
+
+        HEALTH.record(direct.source, True, ms=0)
         return StreamInfo(
             url=direct.url,
             expires_at=time.time() + self.settings.stream_cache_ttl,
@@ -537,6 +559,32 @@ class YouTube:
         )
 
     # ── stream plumbing ────────────────────────────────────────────────────
+    def _impersonate_target(self):
+        """A ready ``ImpersonateTarget``, or ``""`` when unavailable.
+
+        yt-dlp wants the *object*, not the string (the CLI parses it for you).
+        Requires curl_cffi — without it the option is skipped, never fatal.
+        """
+        requested = (getattr(self.settings, "impersonate", "") or "").strip()
+        if requested.lower() in {"", "off", "none", "0", "false"}:
+            return ""
+        try:
+            import curl_cffi  # noqa: F401  (yt-dlp needs the module, not the API)
+            from yt_dlp.networking.impersonate import ImpersonateTarget
+        except Exception:
+            if not self._warned_impersonate:
+                self._warned_impersonate = True
+                logger.info(
+                    "browser impersonation is off: `pip install curl_cffi` enables it "
+                    "(it is the best no-cookie fix for a datacenter IP)"
+                )
+            return ""
+        try:
+            return ImpersonateTarget.from_str(requested or "chrome")
+        except Exception as exc:  # an unknown target must not break playback
+            logger.info("ignoring IMPERSONATE=%s (%s)", requested, exc)
+            return ""
+
     @staticmethod
     def _client_opts(client: str | None) -> dict[str, Any]:
         if not client:
@@ -544,12 +592,29 @@ class YouTube:
         return {"extractor_args": {"youtube": {"player_client": [client]}}}
 
     def _client_ladder(self) -> list[str | None]:
-        """Player clients to try, best-known-first for this deployment."""
+        """Player clients to try, best-known-first for this deployment.
+
+        Order is experience, not documentation: `tv_simply` and `web_embedded`
+        are the clients that still hand out a signed URL to an IP YouTube does
+        not like, `android_vr`/`ios` cover the ones that need a mobile header
+        set, and plain `web` is last because it is the first to demand a PO
+        token. Clients in a cooldown (they failed twice in a row) are skipped
+        instead of costing every track another timeout.
+        """
         hint = self._client_hint
-        ladder: list[str | None] = [None, "android_vr", "ios", "tv", "web_safari", "mweb"]
+        ladder: list[str | None] = [
+            None,
+            "tv_simply",
+            "web_embedded",
+            "android_vr",
+            "ios",
+            "tv",
+            "web_safari",
+            "mweb",
+        ]
         if hint:
             ladder = [hint] + [client for client in ladder if client != hint]
-        return ladder
+        return [client for client in ladder if HEALTH.available(_client_source(client))]
 
     def _remember_client(self, client: str | None) -> None:
         if client:

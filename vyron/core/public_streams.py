@@ -12,18 +12,29 @@
 #                → adaptiveFormats[] {url, type, bitrate} · formatStreams[] {url, resolution}
 #   Piped      GET https://<host>/streams/<id>
 #                → audioStreams[] {url, bitrate, mimeType} · videoStreams[] {url, quality}
+#   Cobalt     POST https://<host>/  {"url": …, "downloadMode": "audio"}
+#                → {status: "tunnel"|"redirect", url}   (github.com/imputnet/cobalt)
+#
+# Cobalt is the newest of the three and the only one that is *meant* to be
+# self-hosted: one docker run gives you a private resolver that does not share
+# a public instance's rate limit. Set COBALT_URL to point at it.
 #
 # Everything here is best-effort: short timeouts, no retries across a host
 # twice, and a failure is a quiet ``None`` rather than an exception the caller
-# has to catch.
+# has to catch. Every answer is scored in ``core.resolvers.HEALTH``, so a dead
+# mirror is skipped instead of costing every listener a timeout, and /sources
+# can show which tier actually works from this server.
 from __future__ import annotations
 
 import asyncio
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 
 import aiohttp
+
+from vyron.core.resolvers import HEALTH
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +51,13 @@ PIPED_HOSTS: tuple[str, ...] = (
     "pipedapi.kavin.rocks",
     "pipedapi.adminforge.de",
     "api.piped.private.coffee",
+)
+# Cobalt only accepts a POST and answers with a redirect/tunnel URL. Public
+# instances come and go — COBALT_URL (a self-hosted one) is the reliable path,
+# the list below is a best effort.
+COBALT_HOSTS: tuple[str, ...] = (
+    "cobalt-api.kwiatekmiki.com",
+    "cobalt-api.ayo.tf",
 )
 
 _UA = {"User-Agent": "Mozilla/5.0 (compatible; VYRON/1.0)"}
@@ -168,33 +186,90 @@ def parse_piped_video(payload: dict, host: str, height: int) -> DirectStream | N
     )
 
 
+def parse_cobalt(payload: dict, host: str, *, height: int = 0) -> DirectStream | None:
+    """A Cobalt v10 answer (``tunnel`` or ``redirect``) → a DirectStream.
+
+    Cobalt returns either the file itself (``tunnel``) or a link to it
+    (``redirect``); both are a plain ``url``. A ``picker`` answer means the
+    instance wants an explicit format — it carries the candidates in
+    ``picker[].url``.
+    """
+    status = str(payload.get("status") or "").lower()
+    if status == "error":
+        return None
+    url = str(payload.get("url") or "").strip()
+    if not url and isinstance(payload.get("picker"), list):
+        urls = [str(item.get("url") or "") for item in payload["picker"] if item.get("url")]
+        url = urls[0] if urls else ""
+    if not url.startswith("http"):
+        return None
+    kind = "video" if height > 0 else "audio"
+    mime = "video/mp4" if kind == "video" else "audio/mp3"
+    filename = str(payload.get("filename") or "")
+    return DirectStream(
+        url=url,
+        source=f"cobalt:{host}",
+        kind=kind,
+        ext=_ext_from(filename or url, mime, video=kind == "video"),
+        mime=mime,
+        height=height,
+        headers=dict(_UA),
+    )
+
+
 class PublicStreams:
-    """Ask Invidious, then Piped, for a URL yt-dlp could not produce."""
+    """Ask Invidious, Piped and Cobalt for a URL yt-dlp could not produce."""
 
     def __init__(self, settings=None) -> None:
         self.settings = settings
         self.invidious: tuple[str, ...] = INVIDIOUS_HOSTS
         self.piped: tuple[str, ...] = PIPED_HOSTS
+        self.cobalt: tuple[str, ...] = COBALT_HOSTS
         self.timeout = 9.0
+
+        def _hosts(raw: str) -> tuple[str, ...]:
+            return tuple(
+                h.strip().replace("https://", "").replace("http://", "").strip("/")
+                for h in raw.split(",")
+                if h.strip()
+            )
+
         raw = getattr(settings, "stream_fallback_hosts", "") or ""
         if raw.strip():
-            self.invidious = tuple(h.strip() for h in raw.split(",") if h.strip())
+            self.invidious = _hosts(raw)
             self.piped = self.invidious
+        cobalt = (getattr(settings, "cobalt_urls", "") or "").strip()
+        if cobalt.lower() in {"off", "none", "0", "false"} or getattr(
+            settings, "disable_cobalt", False
+        ):
+            self.cobalt = ()
+        elif cobalt:
+            self.cobalt = _hosts(cobalt)
         timeout = getattr(settings, "stream_fallback_timeout", 0) or 0
         if timeout:
             self.timeout = float(timeout)
 
     # ── transport ──────────────────────────────────────────────────────────
+    async def _fetch(self, url: str, *, body: dict | None = None) -> dict | None:
+        timeout = aiohttp.ClientTimeout(total=self.timeout)
+        headers = dict(_UA)
+        if body is not None:
+            headers.update({"Accept": "application/json", "Content-Type": "application/json"})
+        async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
+            if body is None:
+                call = session.get(url)
+            else:
+                call = session.post(url, json=body)
+            async with call as response:
+                if response.status != 200:
+                    logger.debug("fallback %s → HTTP %s", url, response.status)
+                    return None
+                payload = await response.json(content_type=None)
+                return payload if isinstance(payload, dict) else None
+
     async def _json(self, url: str) -> dict | None:
         try:
-            timeout = aiohttp.ClientTimeout(total=self.timeout)
-            async with aiohttp.ClientSession(timeout=timeout, headers=_UA) as session:
-                async with session.get(url) as response:
-                    if response.status != 200:
-                        logger.debug("fallback %s → HTTP %s", url, response.status)
-                        return None
-                    payload = await response.json(content_type=None)
-                    return payload if isinstance(payload, dict) else None
+            return await self._fetch(url)
         except Exception as exc:
             logger.debug("fallback %s failed: %s", url, exc)
             return None
@@ -217,42 +292,24 @@ class PublicStreams:
             if not target:
                 return None
 
-        video = height > 0
-        requests: list[asyncio.Task] = []
-
-        async def ask(kind: str, host: str, url: str):
-            payload = await self._json(url)
-            return kind, host, payload
-
-        for host in self.invidious:
-            requests.append(
-                asyncio.create_task(ask("invidious", host, f"https://{host}/api/v1/videos/{target}"))
-            )
-        for host in self.piped:
-            requests.append(
-                asyncio.create_task(ask("piped", host, f"https://{host}/streams/{target}"))
-            )
+        attempts = self._plan(target, height=height)
+        if not attempts:
+            return None
+        requests: list[asyncio.Task] = [
+            asyncio.create_task(self._ask(kind, host, payload)) for kind, host, payload in attempts
+        ]
 
         try:
             # ``as_completed`` hands back the first host that answers: a mirror
             # with a cold cache is ~10 s slower than its neighbour and the user
             # is waiting on playback, so the fastest healthy answer wins.
             for finished in asyncio.as_completed(requests):
-                kind, host, payload = await finished
-                if not payload or not self._is_instance(payload, kind):
+                try:
+                    kind, host, payload = await finished
+                except Exception as exc:  # a host that timed out is not fatal
+                    logger.debug("fallback task failed: %s", exc)
                     continue
-                if kind == "invidious":
-                    stream = (
-                        parse_invidious_video(payload, host, height)
-                        if video
-                        else parse_invidious(payload, host)
-                    )
-                else:
-                    stream = (
-                        parse_piped_video(payload, host, height)
-                        if video
-                        else parse_piped(payload, host)
-                    )
+                stream = self._parse(kind, host, payload, height=height) if payload else None
                 if stream:
                     logger.info("resolved %s via %s (%s)", target, stream.source, stream.label)
                     return stream
@@ -261,6 +318,115 @@ class PublicStreams:
                 if not task.done():
                     task.cancel()
         return None
+
+    # ── plan / parse / score ───────────────────────────────────────────────
+    def _plan(self, target: str, *, height: int) -> list[tuple[str, str, object]]:
+        """The requests to make, skipping hosts that are cooling down."""
+        attempts: list[tuple[str, str, object]] = []
+        for host in self.invidious:
+            if HEALTH.available(f"invidious:{host}"):
+                attempts.append(("invidious", host, f"https://{host}/api/v1/videos/{target}"))
+        for host in self.piped:
+            if HEALTH.available(f"piped:{host}"):
+                attempts.append(("piped", host, f"https://{host}/streams/{target}"))
+        for host in self.cobalt:
+            if HEALTH.available(f"cobalt:{host}"):
+                body = {
+                    "url": f"https://www.youtube.com/watch?v={target}",
+                    "downloadMode": "audio" if height == 0 else "auto",
+                    "audioFormat": "mp3",
+                    "filenameStyle": "basic",
+                }
+                if height:
+                    body["videoQuality"] = str(height)
+                attempts.append(("cobalt", host, ("https://%s/" % host, body)))
+        return attempts
+
+    async def _ask(self, kind: str, host: str, payload) -> tuple[str, str, dict | None]:
+        started = time.perf_counter()
+        try:
+            if isinstance(payload, tuple):
+                url, body = payload
+                answer = await self._fetch(url, body=body)
+            else:
+                answer = await self._json(payload)
+        except Exception as exc:
+            HEALTH.record(f"{kind}:{host}", False, error=str(exc))
+            return kind, host, None
+        elapsed = (time.perf_counter() - started) * 1000
+        ok = bool(answer) and self._is_instance(answer, kind)
+        HEALTH.record(
+            f"{kind}:{host}",
+            ok,
+            ms=elapsed,
+            error="" if ok else "no usable streams in the answer",
+        )
+        if not ok:
+            logger.debug("fallback %s answered without streams (%s)", host, kind)
+        return kind, host, answer
+
+    @staticmethod
+    def _parse(kind: str, host: str, payload: dict, *, height: int) -> DirectStream | None:
+        if kind == "invidious":
+            return (
+                parse_invidious_video(payload, host, height)
+                if height
+                else parse_invidious(payload, host)
+            )
+        if kind == "piped":
+            return (
+                parse_piped_video(payload, host, height) if height else parse_piped(payload, host)
+            )
+        return parse_cobalt(payload, host, height=height)
+
+    async def probe(self, video_id: str, *, height: int = 0) -> list[dict]:
+        """Ask *every* source at once and report each one — /sources.
+
+        This is the command that answers "is it my bot or is it this host?":
+        same inputs, same second, one row per tier with latency and reason.
+        """
+        target = (video_id or "").strip()
+        if not re.fullmatch(r"[\w-]{6,24}", target):
+            from vyron.core.search import youtube_id
+
+            target = youtube_id(target) or target
+        results: list[dict] = []
+
+        async def one(kind: str, host: str, payload) -> dict:
+            started = time.perf_counter()
+            try:
+                if isinstance(payload, tuple):
+                    url, body = payload
+                    answer = await self._fetch(url, body=body)
+                else:
+                    answer = await self._json(payload)
+            except Exception as exc:
+                return {
+                    "source": f"{kind}:{host}",
+                    "ok": False,
+                    "ms": round((time.perf_counter() - started) * 1000),
+                    "error": f"{type(exc).__name__}: {exc}"[:120],
+                }
+            elapsed = round((time.perf_counter() - started) * 1000)
+            stream = self._parse(kind, host, answer, height=height) if answer else None
+            HEALTH.record(
+                f"{kind}:{host}",
+                stream is not None,
+                ms=elapsed,
+                error="" if stream else "no usable stream",
+            )
+            return {
+                "source": f"{kind}:{host}",
+                "ok": stream is not None,
+                "ms": elapsed,
+                "detail": stream.label if stream else "",
+                "error": "" if stream else "no usable stream",
+            }
+
+        tasks = [one(kind, host, payload) for kind, host, payload in self._plan(target, height=height)]
+        if tasks:
+            results = list(await asyncio.gather(*tasks))
+        return results
 
     async def audio(self, video_id: str) -> DirectStream | None:
         return await self.resolve(video_id, height=0)
@@ -286,11 +452,13 @@ def reset_public_streams() -> None:
 
 
 __all__ = [
+    "COBALT_HOSTS",
     "DirectStream",
     "INVIDIOUS_HOSTS",
     "PIPED_HOSTS",
     "PublicStreams",
     "get_public_streams",
+    "parse_cobalt",
     "parse_invidious",
     "parse_invidious_video",
     "parse_piped",

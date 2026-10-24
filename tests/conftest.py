@@ -18,3 +18,15 @@ os.environ.setdefault("MONGO_URL", "")
 os.environ.setdefault("PREMIUM_EMOJI", "false")
 os.environ.setdefault("PORT", "0")
 os.environ.setdefault("DATA_DIR", str(ROOT / "data_test"))
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _clean_resolver_health():
+    """Resolver cooldowns are process-wide; no test may inherit another's."""
+    from vyron.core.resolvers import reset
+
+    reset()
+    yield
+    reset()

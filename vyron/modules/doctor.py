@@ -85,6 +85,36 @@ def _cookies_state() -> tuple[bool | None, str]:
     return False, "set but missing on disk"
 
 
+def _impersonate_row() -> tuple[str, str]:
+    """Browser impersonation — the no-cookie fix for a datacenter IP."""
+    requested = (settings.impersonate or "").strip()
+    if requested.lower() in {"", "off", "none", "0", "false"}:
+        return _row(f"{E('shield')} impersonation", None, "IMPERSONATE=off")
+    try:
+        import curl_cffi  # noqa: F401
+    except Exception:
+        return _row(
+            f"{E('shield')} impersonation",
+            False,
+            "on but curl_cffi is missing — pip install curl_cffi (best no-cookie fix)",
+        )
+    return _row(f"{E('shield')} impersonation", True, f"{requested or 'chrome'} · curl_cffi ready")
+
+
+def _resolver_row() -> tuple[str, str] | None:
+    from vyron.core.resolvers import HEALTH
+
+    summary = HEALTH.summary()
+    best = summary.get("best")
+    if not best:
+        return None
+    return _row(
+        f"{E('bolt')} best resolver",
+        True,
+        f"{rich.esc(best['source'])} · {int(best['latency_ms'])} ms · /sources for the full sweep",
+    )
+
+
 def _disk_state() -> tuple[bool, str]:
     """Can the bot actually write a downloaded track?"""
     target = settings.downloads_dir
@@ -144,7 +174,19 @@ def register(client: Client) -> None:
         try:
             import yt_dlp
 
-            rows.append(_row(f"{E('download')} yt-dlp", True, f"v{yt_dlp.version.__version__}"))
+            from vyron.core import ytdlp_update
+
+            version = yt_dlp.version.__version__
+            update = ytdlp_update.status()
+            note = f"v{version}"
+            if update["latest"]:
+                if ytdlp_update.is_newer(update["latest"], version):
+                    note += f" · {update['latest']} available"
+                else:
+                    note += " · current"
+            elif update["error"]:
+                note += " · version check failed"
+            rows.append(_row(f"{E('download')} yt-dlp", True, note))
         except Exception as exc:  # pragma: no cover - packaging problem
             rows.append(_row(f"{E('download')} yt-dlp", False, str(exc)[:60]))
 
@@ -166,11 +208,21 @@ def register(client: Client) -> None:
 
             streams = PublicStreams(settings)
             hosts = list(streams.invidious) + list(streams.piped)
+            cobalt = len(streams.cobalt)
             rows.append(
-                _row(f"{E('download')} mirror tier", True, f"{len(hosts)} hosts · {hosts[0] if hosts else 'none'}")
+                _row(
+                    f"{E('download')} mirror tier",
+                    True,
+                    f"{len(hosts)} hosts · cobalt {cobalt} · {hosts[0] if hosts else 'none'}",
+                )
             )
         else:
             rows.append(_row(f"{E('download')} mirror tier", None, "STREAM_FALLBACK=off (yt-dlp only)"))
+
+        rows.append(_impersonate_row())
+        resolver_row = _resolver_row()
+        if resolver_row:
+            rows.append(resolver_row)
 
         search_ok, search_note = await _probe_search()
         rows.append(_row(f"{E('search')} youtube", search_ok, search_note))
