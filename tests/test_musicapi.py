@@ -845,8 +845,6 @@ def test_a_retried_download_is_the_same_job(tmp_path, monkeypatch):
 
 def test_browser_tokens_are_short_lived_and_scoped(tmp_path, monkeypatch):
     """The Mini App should never hold a vyrn_ key in JavaScript."""
-    from vyron.core import shortlived
-
     api, _ = _api(tmp_path, monkeypatch, music_api_open=False)
     audio = tmp_path / "a.mp3"
     audio.write_bytes(b"ID3")
