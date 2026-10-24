@@ -130,6 +130,23 @@ async def lookup_playable(media_id: str, *, user_id: int = 0) -> Track | None:
     found = await lookup_async(media_id, user_id=user_id)
     if found is not None:
         return found
+
+    # A catalogue id is self-describing too: JioSaavn's own API can hand back
+    # the song by id, so a saved track still plays after a redeploy wiped the
+    # registry. It is not an open proxy — the id names one song on one service,
+    # and the request is already authenticated.
+    if not _DIRECT_ID_RE.match(media_id) and 4 <= len(media_id) <= 40:
+        try:
+            from vyron.core import jiosaavn
+
+            track = await asyncio.wait_for(jiosaavn.by_id(media_id), timeout=8)
+        except Exception as exc:  # unknown id, or the API is down: not fatal
+            logger.debug("catalogue lookup failed for %s: %s", media_id, exc)
+            track = None
+        if track is not None:
+            remember(track)
+            return track
+
     youtube = runtime.youtube
     if youtube is None or not _DIRECT_ID_RE.match(media_id):
         return None

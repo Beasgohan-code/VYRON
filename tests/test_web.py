@@ -855,6 +855,51 @@ def test_stream_does_not_resolve_ids_nobody_was_shown(monkeypatch):
     assert asyncio.run(audio.lookup_playable("dQw4w9WgXcQ", user_id=0)).title
 
 
+def test_a_saved_catalogue_track_plays_after_a_restart(monkeypatch):
+    """The registry is per-process; a JioSaavn id can be rehydrated by its API.
+
+    Without this, every track a listener saved from the catalogue became
+    "unknown track" on the first redeploy — and a free host redeploys often.
+    """
+    from vyron.core.queue import Track
+    from vyron.web import stream as audio
+
+    audio._REGISTRY.clear()
+    asked: list[str] = []
+
+    async def by_id(song_id):
+        asked.append(song_id)
+        return Track(
+            id=song_id,
+            title="Kesariya",
+            url="https://cdn.example/kesariya.mp3",
+            source="jiosaavn",
+        )
+
+    import vyron.core.jiosaavn as saavn
+
+    monkeypatch.setattr(saavn, "by_id", by_id)
+    found = asyncio.run(audio.lookup_playable("FeM7eXKX", user_id=0))
+
+    assert found is not None and found.title == "Kesariya"
+    assert asked == ["FeM7eXKX"]
+    # …and it is remembered, so the next request never leaves the process
+    assert asyncio.run(audio.lookup_playable("FeM7eXKX", user_id=0)).source == "jiosaavn"
+
+
+def test_a_junk_id_is_still_unknown(monkeypatch):
+    import vyron.core.jiosaavn as saavn
+    from vyron.web import stream as audio
+
+    audio._REGISTRY.clear()
+
+    async def by_id(song_id):
+        return None
+
+    monkeypatch.setattr(saavn, "by_id", by_id)
+    assert asyncio.run(audio.lookup_playable("not-a-song", user_id=0)) is None
+
+
 def test_stream_budget_counts_starts_and_slots():
     from vyron.web.budget import Budget, BudgetExceeded
 
