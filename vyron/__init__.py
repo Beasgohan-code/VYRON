@@ -33,6 +33,11 @@ def setup_logging(level: str = "INFO") -> None:
     )
     for noisy in ("pyrogram", "pytgcalls", "ntgcalls", "yt_dlp", "aiohttp", "pymongo"):
         logging.getLogger(noisy).setLevel(logging.ERROR)
+    # Every handler now scrubs credentials before writing: keys, bot tokens,
+    # connection strings and session strings never reach a log line.
+    from vyron.core.redact import install as install_redaction
+
+    install_redaction()
 
 
 def banner_text() -> str:

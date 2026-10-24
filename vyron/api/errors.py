@@ -28,6 +28,7 @@ ERRORS: dict[str, tuple[int, str]] = {
     "not_found": (404, "nothing here"),
     "rate_limited": (429, "rate limit reached — retry after X-RateLimit-Reset seconds"),
     "not_ready": (503, "the bot is still starting — retry in a moment"),
+    "blocked_url": (400, "that url is not allowed (private, local or a bad scheme)"),
     "upstream_failed": (502, "the upstream provider failed"),
     "internal": (500, "unexpected server error"),
 }

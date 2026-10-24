@@ -284,7 +284,7 @@ def test_download_api_serves_audio(tmp_path, monkeypatch):
     assert audio.status == 200
     assert audio.headers["X-Engine"] == "vyron"
     assert audio.headers["X-Track-Id"] == "abc12345678"
-    assert audio.headers["X-API-Version"] == "2.0"
+    assert audio.headers["X-API-Version"].startswith("2.")
     assert "attachment" in audio.headers["Content-Disposition"]
     assert payload.startswith(b"ID3")
 

@@ -122,6 +122,7 @@ ENDPOINTS = [
     ("GET", "/v1/search?q=…", "Search YouTube (or POST JSON)", "search"),
     ("GET", "/v1/lyrics?title=…", "Synced lyrics from LRCLIB", "read"),
     ("GET", "/v1/me", "Your key, capabilities, usage and expiry", "—"),
+    ("GET", "/v1/ready", "readiness — 503 until the engine exists", "—"),
     ("GET", "/v1/sources", "Every source in fallback order, with live health", "—"),
     ("GET", "/v1/sources/{name}", "One source's detail", "—"),
     ("GET", "/v1/admin/keys", "List keys (masked)", "admin"),

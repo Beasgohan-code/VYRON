@@ -563,6 +563,13 @@ class YouTube:
         query = (query or "").strip()
         if not query:
             raise MediaError("Give me a song name, a link or reply to an audio file.")
+        if query.lower().startswith(("http://", "https://")):
+            from vyron.core.urlguard import BlockedURL, check_user_url
+
+            try:
+                query = await check_user_url(query, settings=self.settings)
+            except BlockedURL as exc:
+                raise MediaError(f"That link cannot be used: {exc}.") from exc
 
         # Direct-stream sources first (Audius, JioSaavn, SoundCloud, Bandcamp):
         # they hand out the audio themselves, so these links play without YouTube

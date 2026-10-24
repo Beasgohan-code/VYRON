@@ -170,6 +170,43 @@ def spec(request: web.Request) -> dict:
                     },
                 }
             },
+            "/": {
+                "get": {
+                    "tags": ["System"],
+                    "summary": "HTML docs page (or the JSON index with ?format=json)",
+                    "security": [],
+                    "responses": {"200": {"description": "docs or index"}},
+                }
+            },
+            "/docs": {
+                "get": {
+                    "tags": ["System"],
+                    "summary": "Human-readable documentation",
+                    "security": [],
+                    "responses": {"200": {"description": "HTML"}},
+                }
+            },
+            "/openapi.json": {
+                "get": {
+                    "tags": ["System"],
+                    "summary": "This document",
+                    "security": [],
+                    "responses": {"200": {"description": "OpenAPI 3.1"}},
+                }
+            },
+            "/ready": {
+                "get": {
+                    "tags": ["System"],
+                    "summary": "Readiness — 503 while the engine boots",
+                    "description": (
+                        "Use this for load balancers and uptime probes that should stop "
+                        "sending traffic; use /health for liveness (it never restarts a "
+                        "booting instance)."
+                    ),
+                    "security": [],
+                    "responses": {"200": {"description": "ready"}, "503": {"description": "booting"}},
+                }
+            },
             "/version": {
                 "get": {
                     "tags": ["System"],
@@ -324,6 +361,13 @@ def spec(request: web.Request) -> dict:
                     "responses": {"200": {"description": "media"}, **_err(403, 404, 409, 429)},
                 }
             },
+            "/downloads/by-video-id/{video_id}": {
+                "get": {
+                    "tags": ["Tracks"],
+                    "summary": "The newest job for a video id",
+                    "responses": {"200": {"description": "job"}, **_err(404)},
+                }
+            },
             "/search": {
                 "get": {
                     "tags": ["Discovery"],
@@ -344,6 +388,11 @@ def spec(request: web.Request) -> dict:
                 },
             },
             "/lyrics": {
+                "post": {
+                    "tags": ["Lyrics"],
+                    "summary": "Lyrics for a title/artist (JSON body)",
+                    "responses": {"200": {"description": "lyrics"}, **_err(400)},
+                },
                 "get": {
                     "tags": ["Lyrics"],
                     "summary": "Lyrics from LRCLIB",
@@ -445,8 +494,45 @@ def spec(request: web.Request) -> dict:
                     "responses": {"200": {"description": "revoked"}, **_err(403, 404)},
                 },
             },
+            "/keys": {
+                "get": {
+                    "tags": ["Keys"],
+                    "summary": "Your keys (self-service)",
+                    "responses": {"200": {"description": "keys"}, **_err(403)},
+                },
+                "post": {
+                    "tags": ["Keys"],
+                    "summary": "Mint a key for your own account (needs the admin scope)",
+                    "responses": {"201": {"description": "created"}, **_err(400, 403)},
+                },
+            },
+            "/keys/{identifier}": {
+                "patch": {
+                    "tags": ["Keys"],
+                    "summary": "Edit one of your keys without rotating it",
+                    "responses": {"200": {"description": "updated"}, **_err(400, 403, 404)},
+                },
+                "delete": {
+                    "tags": ["Keys"],
+                    "summary": "Revoke one of your keys",
+                    "responses": {"200": {"description": "revoked"}, **_err(403, 404)},
+                },
+            },
+            "/admin/keys/{identifier}/rotate": {
+                "post": {
+                    "tags": ["Keys"],
+                    "summary": "Replace a key; the old secret stops working immediately",
+                    "responses": {"200": {"description": "created"}, **_err(403, 404)},
+                }
+            },
             # ── legacy aliases (old clients keep working) ──────────────────
             "/track/by-video-id": {
+                "get": {
+                    "tags": ["Tracks"],
+                    "summary": "Legacy alias for POST /tracks (query string)",
+                    "deprecated": True,
+                    "responses": {"200": {"description": "audio/mpeg"}, **_err(400, 401, 403, 429)},
+                },
                 "post": {
                     "tags": ["Tracks"],
                     "summary": "Legacy alias for POST /tracks",
@@ -455,6 +541,12 @@ def spec(request: web.Request) -> dict:
                 }
             },
             "/track/by-query": {
+                "get": {
+                    "tags": ["Tracks"],
+                    "summary": "Legacy alias for POST /tracks (query)",
+                    "deprecated": True,
+                    "responses": {"200": {"description": "audio/mpeg"}, **_err(400, 401, 403, 429)},
+                },
                 "post": {
                     "tags": ["Tracks"],
                     "summary": "Legacy alias for POST /tracks (query)",

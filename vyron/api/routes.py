@@ -27,7 +27,13 @@ from vyron.api.metrics import METRICS
 from vyron.api.state import AUTH
 from vyron.api.security import authorize, describe, headers_for
 from vyron.config import settings
-from vyron.core.musicapi import MAX_KEYS_PER_OWNER, SCOPES, get_music_api, mask_key
+from vyron.core.musicapi import (
+    API_VERSION,
+    MAX_KEYS_PER_OWNER,
+    SCOPES,
+    get_music_api,
+    mask_key,
+)
 from vyron.runtime import runtime
 
 logger = logging.getLogger(__name__)
@@ -110,7 +116,19 @@ def track_json(track, request: web.Request) -> dict[str, Any]:
     }
 
 
+async def _guard_url(target: str) -> str:
+    """SSRF guard for a URL that came from a client, not from us."""
+    from vyron.core.urlguard import BlockedURL, check_user_url
+
+    try:
+        return await check_user_url(target)
+    except BlockedURL as exc:
+        raise ApiError("blocked_url", str(exc)) from exc
+
+
 async def _resolve(target: str):
+    if target.lower().startswith(("http://", "https://")):
+        target = await _guard_url(target)
     try:
         return await runtime.youtube.resolve(target)
     except Exception as exc:
@@ -184,7 +202,7 @@ async def index(request: web.Request) -> web.Response:
         {
             "ok": True,
             "service": "vyron-music-api",
-            "api_version": "2.0",
+            "api_version": API_VERSION,
             "version": runtime.version,
             "status": "ok",
             "base_url": api,
@@ -210,6 +228,29 @@ async def index(request: web.Request) -> web.Response:
     )
 
 
+async def readiness(request: web.Request) -> web.Response:
+    """Liveness says the process is up; this says it can actually work.
+
+    Render's health check belongs on /v1/health (a restart loop is worse than a
+    slow boot); a load balancer or an uptime probe that should stop sending
+    traffic belongs here, because it returns 503 until the engine exists.
+    """
+    ready = runtime.youtube is not None and runtime.downloader is not None
+    body = {
+        "ok": ready,
+        "ready": ready,
+        "status": "ready" if ready else "booting",
+        "streaming": runtime.streaming_ready,
+        "storage": getattr(runtime.storage, "backend", "none"),
+        "uptime": round(runtime.uptime, 1),
+        "boot_seconds": round(time.time() - runtime.boot_started_at, 1),
+    }
+    headers = {"Cache-Control": "no-store"}
+    if not ready:
+        headers["Retry-After"] = "5"
+    return web.json_response(body, status=200 if ready else 503, headers=headers)
+
+
 async def health(request: web.Request) -> web.Response:
     api = get_music_api()
     stats = await api.stats()
@@ -219,10 +260,11 @@ async def health(request: web.Request) -> web.Response:
             "status": "ok",
             "ok": True,
             "service": "vyron-music-api",
-            "api_version": "2.0",
+            "api_version": API_VERSION,
             "version": runtime.version,
             "uptime": round(runtime.uptime, 1),
             "ready": runtime.youtube is not None and runtime.downloader is not None,
+            "boot_seconds": round(time.time() - runtime.boot_started_at, 1),
             "streaming": runtime.streaming_ready,
             "auth_required": not settings.music_api_open,
             "rate_limit": stats["rate_limit"],
@@ -249,7 +291,7 @@ async def version(request: web.Request) -> web.Response:
     return web.json_response(
         {
             "ok": True,
-            "api": "2.0",
+            "api": API_VERSION,
             "bot": runtime.version,
             "python": platform.python_version(),
             "features": ["download", "stream", "search", "metadata", "lyrics", "keys", "metrics"],

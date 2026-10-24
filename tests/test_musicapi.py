@@ -305,7 +305,7 @@ def test_v1_health_docs_and_openapi():
 
         root = await client.get("/v1/?format=json")
         root_body = await root.json()
-        assert root_body["ok"] and root_body["api_version"] == "2.0"
+        assert root_body["ok"] and root_body["api_version"] == API_VERSION
 
     _client(scenario)
 

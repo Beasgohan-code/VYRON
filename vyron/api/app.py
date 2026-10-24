@@ -96,6 +96,7 @@ def build_app() -> web.Application:
     router.add_get("/docs", routes.docs)
     router.add_get("/openapi.json", routes.openapi)
     router.add_get("/health", routes.health)
+    router.add_get("/ready", routes.readiness)
     router.add_get("/version", routes.version)
     router.add_get("/metrics", routes.metrics_route)
 
