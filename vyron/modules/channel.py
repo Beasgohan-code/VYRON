@@ -105,6 +105,10 @@ def register(client: Client) -> None:
         """
         if not runtime.player:
             return
+        from vyron.modules.play import may_request
+
+        if not await may_request(client, message):
+            return
         query = command_args(message)
         reply = message.reply_to_message
         if not query and not track_from_message(message):

@@ -273,8 +273,37 @@ and translated instead of being flattened into "nothing could be extracted":
 | *cannot reach YouTube* | egress/DNS on the host | `PROXY` or a different region |
 
 `/doctor` prints the same sentence, and its first row is the **build**
-(`v1.4.0 · 2026-10-24`): if it still shows an older one, the deploy did not
+(`v1.5.0 · 2026-10-24`): if it still shows an older one, the deploy did not
 land — that is a different problem from a broken track.
+
+### More sources: Spotify, Deezer, Apple Music, SoundCloud, YouTube Music
+
+A link from a streaming service is a **catalogue** reference — those services
+do not hand out audio we may stream. So VYRON reads the metadata from the
+service's own public endpoint and lets the normal YouTube ladder find the song.
+No API keys, no logins, no credentials.
+
+| Link | Endpoint used | Result |
+|---|---|---|
+| `open.spotify.com/track/…` · `spotify:track:…` | oEmbed + the public embed page | title, artists, cover, duration |
+| `open.spotify.com/album/…` · `/playlist/…` | public embed page | the whole track list |
+| `deezer.com/track/…` · `/album/…` · `/playlist/…` | open Deezer API | title, artist, cover, full album |
+| `music.apple.com/…/song/…` · `/album/…?i=…` | iTunes lookup API | title, artist, artwork, album |
+| `soundcloud.com/artist/track` | SoundCloud oEmbed | title, artist, artwork |
+| `music.youtube.com/watch?v=…` | already a YouTube id | straight to the ladder |
+
+`/play <album or playlist link>` queues every track it can match (up to 25,
+three concurrent searches), skipping the ones that do not resolve instead of
+failing the whole album. `/play <track link>` starts the best match, and the
+catalogue's artwork replaces the YouTube thumbnail when it is available. The
+tier is controlled by `MUSIC_SOURCES` (`off` = YouTube-only behaviour).
+
+**YouTube Music search.** With `ytmusicapi` installed (it is in
+`requirements.txt`), search asks YouTube Music first: results are songs with an
+artist and an album rather than "Official Video [4K]" uploads, and each one
+carries the video id the streamer needs. If the package is missing or the call
+fails, the yt-dlp `ytsearch` ladder answers exactly as before — `YTMUSIC_SEARCH=off`
+disables it deliberately. `/doctor` shows both rows.
 
 ### Two interfaces, and a fallback that always works
 
@@ -860,6 +889,8 @@ The interesting optional ones:
 | `COMMAND_PREFIXES` | `/!.?#%$&~` | characters that may start a command; comma/space separated, `/` always on, `off` for slash-only, an empty entry enables prefix-less |
 | `YTDLP_AUTOUPDATE` | `on` | check PyPI on boot/daily and upgrade yt-dlp in place |
 | `COBALT_URLS` | – | your own Cobalt instance(s), comma separated; `off` disables the tier |
+| `MUSIC_SOURCES` | `spotify,deezer,apple,soundcloud` | catalogue links to read for metadata; `off` = YouTube only |
+| `YTMUSIC_SEARCH` | `on` | YouTube Music search via `ytmusicapi` (better artist/album matching), falls back to yt-dlp |
 | `MONGO_URL` | – | persistence (JSON file otherwise) |
 | `PREMIUM_EMOJI_FILE` | `./emoji.json` | custom emoji pack |
 | `RICH_MESSAGES` | `true` | rich cards (set `false` for plain HTML) |

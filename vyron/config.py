@@ -88,6 +88,14 @@ class Settings:
     # YouTube breaks old extractors first. Checking PyPI once a day and
     # upgrading in place is what keeps a deployment playing without cookies.
     ytdlp_autoupdate: bool = field(default_factory=lambda: _flag("YTDLP_AUTOUPDATE", True))
+    # Extra catalogue sources: a Spotify/Deezer/Apple/SoundCloud link is read
+    # for its metadata and matched on YouTube. `off` disables the whole tier.
+    music_sources: str = field(
+        default_factory=lambda: (_env("MUSIC_SOURCES", "spotify,deezer,apple,soundcloud") or "").lower()
+    )
+    # YouTube Music search (ytmusicapi) is a better *search* than ytsearch for
+    # music: songs with artist + album instead of "Official Video" uploads.
+    ytmusic_search: bool = field(default_factory=lambda: _flag("YTMUSIC_SEARCH", True))
     # auto → aria2 (16 connections) → curl → aiohttp. `none` stays pure Python.
     download_accelerator: str = field(
         default_factory=lambda: (_env("DOWNLOAD_ACCELERATOR", "auto") or "auto").lower()

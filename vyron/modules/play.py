@@ -7,8 +7,10 @@ import logging
 from pathlib import Path
 
 from pyrogram import Client
+from pyrogram.enums import ChatType
 from pyrogram.types import Message
 
+from vyron.core import chatcfg, metasources
 from vyron.core.pending import put as remember_search
 from vyron.core.player import StreamError
 from vyron.core.queue import Track
@@ -21,6 +23,8 @@ from vyron.ui.theme import E
 from vyron.utils.helpers import (
     command_args,
     display_name,
+    is_chat_admin,
+    is_owner,
     media_suffix,
     track_from_message,
 )
@@ -41,6 +45,35 @@ USAGE = (
 
 def _player():
     return runtime.require_player()
+
+
+async def may_request(client: Client, message: Message) -> bool:
+    """Honour the chat's play mode.
+
+    BadMusic calls this *playmode*: by default anyone may request a song, but a
+    group can switch to "admins only" — useful once a 200-person group finds
+    the bot. Private chats are never restricted, and the owner always is not.
+    """
+    chat = message.chat
+    if chat is None or chat.type == ChatType.PRIVATE:
+        return True
+    if not await chatcfg.get(chat.id, "admins_only", False):
+        return True
+    user = message.from_user
+    uid = user.id if user else 0
+    if is_owner(uid) or await is_chat_admin(client, chat.id, uid):
+        return True
+    await rich.send(
+        client,
+        chat.id,
+        cards.warn_card(
+            "<b>Admins only here</b>\n"
+            "<blockquote>An admin can open this up in <code>/settings</code> → "
+            "<i>who can play</i>.</blockquote>"
+        ),
+        reply_to=message.id,
+    )
+    return False
 
 
 def _too_long(track: Track) -> bool:
@@ -81,7 +114,7 @@ def register(client: Client) -> None:
     # in can `/skip` first.
     @client.on_message(cmd(["play"]))
     async def _play_cmd(_: Client, message: Message) -> None:
-        if not runtime.player:
+        if not runtime.player or not await may_request(client, message):
             return
         video = False  # replaced by the detected kind below
         chat_id = message.chat.id
@@ -138,7 +171,41 @@ def register(client: Client) -> None:
             await rich.send(client, chat_id, USAGE, reply_to=message.id)
             return
 
-        # 2) direct link → resolve and start immediately
+        # 2a) catalogue album/playlist (Spotify, Deezer, Apple Music) → queue it
+        if looks_like_url(query) and metasources.is_catalogue_link(query):
+            status = await _thinking(client, message, "Reading that link…")
+            collection = None
+            try:
+                collection = await runtime.youtube.resolve_collection(
+                    query, limit=25, requester=requester
+                )
+            except Exception as exc:  # pragma: no cover - network paths
+                logger.info("catalogue collection failed: %s", exc)
+            if collection:
+                title, tracks = collection
+                player = _player()
+                state = player.queues.get(chat_id)
+                started = not state.playing and state.current is None
+                queued = 0
+                for track in tracks:
+                    track.requested_by, track.requested_name = requester
+                    position = await player.enqueue(
+                        chat_id, track, play_now=started and queued == 0
+                    )
+                    if position > 0:
+                        queued += 1
+                await _edit(
+                    client,
+                    chat_id,
+                    status.id if status else None,
+                    cards.started_card(tracks[0])
+                    if started and queued
+                    else f"{E('queue')} <b>{rich.esc(truncate(title, 44))}</b>\n"
+                    f"<blockquote>{E('note')} {queued} tracks queued</blockquote>",
+                )
+                return
+
+        # 2b) direct link → resolve and start immediately
         if looks_like_url(query):
             status = await _thinking(client, message, "Resolving link…")
             try:
@@ -203,6 +270,8 @@ def register(client: Client) -> None:
     # ── /song (the file, one command) ──────────────────────────────────────
     @client.on_message(cmd(["song"]))
     async def _download_cmd(_: Client, message: Message) -> None:
+        if not await may_request(client, message):
+            return
         query = command_args(message)
         chat_id = message.chat.id
         if not query:
@@ -489,4 +558,4 @@ async def deliver(
         )
 
 
-__all__ = ["begin", "deliver", "register"]
+__all__ = ["begin", "deliver", "may_request", "register"]

@@ -583,6 +583,18 @@ def register(client: Client) -> None:
                 await chatcfg.set(
                     chat.id, "poster", not await chatcfg.get(chat.id, "poster", True)
                 )
+            elif arg == "playmode":
+                # Toggling who may request is an admin action (BadMusic's
+                # playmode): a member must not be able to lock the bot.
+                uid = cq.from_user.id if cq.from_user else 0
+                if not (is_owner(uid) or await is_chat_admin(client, chat.id, uid)):
+                    await cq.answer("Admins only", show_alert=True)
+                    return
+                await chatcfg.set(
+                    chat.id,
+                    "admins_only",
+                    not await chatcfg.get(chat.id, "admins_only", False),
+                )
             await player.persist(chat.id)
             cfg = await panels.chat_panel(chat.id, state)
             await _show(

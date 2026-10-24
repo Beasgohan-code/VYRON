@@ -245,6 +245,18 @@ def register(client: Client) -> None:
         from vyron.utils import commands
 
         rows.append(_row(f"{E('spark')} prefixes", True, commands.describe()))
+        from vyron.core import metasources, ytmusic
+
+        rows.append(
+            _row(
+                f"{E('globe')} sources",
+                True,
+                "spotify · deezer · apple · soundcloud"
+                if metasources.SERVICES
+                else "youtube only",
+            )
+        )
+        rows.append(_row(f"{E('search')} yt music", ytmusic.available() or None, ytmusic.describe()))
         resolver_row = _resolver_row()
         if resolver_row:
             rows.append(resolver_row)

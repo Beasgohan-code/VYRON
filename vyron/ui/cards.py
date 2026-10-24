@@ -660,6 +660,7 @@ def settings_card(cfg: dict, chat_title: str = "") -> str:
         ("Autoplay", flag(autoplay)),
         ("24/7 mode", flag(always)),
         ("Poster", flag(cfg.get("poster", True))),
+        ("Who can play", "<b>Admins</b>" if cfg.get("admins_only") else "<b>Everyone</b>"),
     ]
     if "thumbnail" in cfg:  # only shown when the caller looked it up
         rows.append(("Artwork", "<b>Custom</b>" if cfg["thumbnail"] else "<b>Cover art</b>"))
@@ -674,6 +675,14 @@ def settings_card(cfg: dict, chat_title: str = "") -> str:
             B.btn(f"{E('spark')} Autoplay", data="v:set:autoplay", style="success"),
             B.btn(f"{E('clock')} 24/7", data="v:set:always"),
             B.btn(f"{E('image')} Poster", data="v:set:poster"),
+        )
+        + B.row(
+            B.btn(
+                f"{E('shield')} "
+                + ("Admins can play" if cfg.get("admins_only") else "Everyone can play"),
+                data="v:set:playmode",
+                style="danger" if cfg.get("admins_only") else "success",
+            )
         )
         + B.row(B.btn(f"{E('globe')} Language", data="v:lang:menu"))
         + B.footer(f"{esc(truncate(chat_title, 40) or 'this chat')} · changes apply instantly")

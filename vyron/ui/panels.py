@@ -21,6 +21,8 @@ async def chat_panel(chat_id: int, state: Any) -> dict:
         "autoplay": bool(getattr(state, "autoplay", True)),
         "always_on": bool(getattr(state, "always_on", False)),
         "poster": await chatcfg.get(chat_id, "poster", True),
+        # BadMusic's "playmode": everyone can request, or admins only.
+        "admins_only": bool(await chatcfg.get(chat_id, "admins_only", False) or False),
         "thumbnail": bool(await chatcfg.get(chat_id, "thumbnail", "") or ""),
         "lang": (await i18n.for_chat(chat_id)).code,
     }

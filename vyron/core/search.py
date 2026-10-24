@@ -21,6 +21,7 @@ from typing import Any
 import yt_dlp
 
 from vyron.config import Settings
+from vyron.core import metasources, ytmusic
 from vyron.core.resolvers import HEALTH
 from vyron.core.queue import Track
 from vyron.ui.progress import parse_duration, truncate
@@ -456,16 +457,40 @@ class YouTube:
         count = limit or self.settings.search_results
         # Over-fetch so dedupe/filtering still leaves a full page of results.
         fetch = count if count <= 2 else min(40, count * 2)
-        info = await self._async_extract(f"ytsearch{fetch}:{query}", extract_flat="in_playlist")
-        entries = info.get("entries") or []
+
+        # Tier 0: YouTube Music, when the optional package is installed and the
+        # operator has not turned it off. It returns songs (artist + album)
+        # rather than "Official Video [4K]" uploads, so the top hit is usually
+        # simply correct — and its video id streams through the same ladder.
         tracks: list[Track] = []
-        for entry in entries:
+        meta = await self._ytmusic_search(query, fetch)
+        for entry in meta:
             track = self._track_from_entry(entry, requester=requester)
             if track:
                 tracks.append(track)
+        if len(tracks) < count:
+            info = await self._async_extract(f"ytsearch{fetch}:{query}", extract_flat="in_playlist")
+            entries = info.get("entries") or []
+            for entry in entries:
+                track = self._track_from_entry(entry, requester=requester)
+                if track:
+                    tracks.append(track)
         if not tracks:
             raise MediaError("No results found for that query.")
         return self.rank(query, tracks)[:count]
+
+    def _catalogue_enabled(self) -> bool:
+        """`MUSIC_SOURCES=off` keeps everything on YouTube-only behaviour."""
+        raw = (getattr(self.settings, "music_sources", "") or "").strip().lower()
+        return raw not in {"off", "none", "0", "false", "no"}
+
+    async def _ytmusic_search(self, query: str, limit: int) -> list[dict]:
+        """YouTube Music results, or ``[]`` when disabled/unavailable."""
+        if not getattr(self.settings, "ytmusic_search", True):
+            return []
+        if not ytmusic.available():
+            return []
+        return await ytmusic.search(query, limit=limit)
 
     # ── ranking ────────────────────────────────────────────────────────────
     @staticmethod
@@ -531,6 +556,15 @@ class YouTube:
         if not query:
             raise MediaError("Give me a song name, a link or reply to an audio file.")
 
+        # A Spotify / Deezer / Apple Music / SoundCloud link is metadata, not
+        # audio: read the catalogue entry, then let the normal ladder find the
+        # song. The catalogue's artwork is usually the best-looking cover, so
+        # it wins over the YouTube thumbnail when we have it.
+        if self._catalogue_enabled() and metasources.is_catalogue_link(query):
+            found = await self._from_catalogue(query, requester=requester)
+            if found is not None:
+                return found
+
         if looks_like_url(query):
             info = await self._async_extract(query)
             if info.get("_type") == "playlist" and info.get("entries"):
@@ -545,6 +579,71 @@ class YouTube:
 
         results = await self.search(query, limit=1, requester=requester)
         return results[0]
+
+    async def _from_catalogue(
+        self, url: str, *, requester: tuple[int, str] = (0, "")
+    ) -> Track | None:
+        """Spotify/Deezer/Apple/SoundCloud link → the best YouTube match."""
+        meta = await metasources.lookup(url)
+        if isinstance(meta, metasources.MetaCollection):
+            meta = meta.tracks[0] if meta.tracks else None
+        if not isinstance(meta, metasources.MetaTrack) or not meta.title:
+            return None
+        try:
+            results = await self.search(meta.query, limit=2, requester=requester)
+        except MediaError:
+            return None
+        if not results:
+            return None
+        chosen = results[0]
+        # Keep the catalogue's identity where it is better than YouTube's.
+        if meta.artwork:
+            chosen.thumbnail = meta.artwork
+        if meta.artist and not chosen.uploader:
+            chosen.uploader = meta.artist
+        chosen.source = f"{meta.service}·youtube"
+        return chosen
+
+    async def resolve_collection(
+        self,
+        url: str,
+        *,
+        limit: int = 25,
+        requester: tuple[int, str] = (0, ""),
+    ) -> tuple[str, list[Track]] | None:
+        """A catalogue album/playlist link → ``(title, tracks)``.
+
+        Every entry is matched against YouTube with a bounded number of
+        concurrent searches; entries that cannot be matched are skipped rather
+        than failing the whole album.
+        """
+        if not self._catalogue_enabled():
+            return None
+        meta = await metasources.lookup(url)
+        if not isinstance(meta, metasources.MetaCollection) or not meta.tracks:
+            return None
+        wanted = meta.tracks[:limit]
+        semaphore = asyncio.Semaphore(3)
+
+        async def _one(item: metasources.MetaTrack) -> Track | None:
+            async with semaphore:
+                try:
+                    results = await self.search(item.query, limit=1, requester=requester)
+                except MediaError:
+                    return None
+            if not results:
+                return None
+            track = results[0]
+            if item.artwork:
+                track.thumbnail = item.artwork
+            track.source = f"{meta.service}·youtube"
+            return track
+
+        found = await asyncio.gather(*(_one(item) for item in wanted))
+        tracks = [track for track in found if track]
+        if not tracks:
+            return None
+        return (meta.title or meta.service.title()), tracks
 
     async def playlist(self, url: str, limit: int = 50) -> tuple[str, list[Track]]:
         """Load a YouTube playlist / mix.  Returns (title, tracks)."""

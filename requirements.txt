@@ -20,6 +20,9 @@ richgram>=0.2.0
 # ─── Media ──────────────────────────────────────────────────────────────────
 yt-dlp>=2025.1.1
 psutil>=5.9
+# YouTube Music search for the resolver ladder (optional at runtime: the code
+# falls back to yt-dlp search when the package is absent).
+ytmusicapi>=1.8
 # Browser impersonation for yt-dlp (TLS/JA3 fingerprint, header order, HTTP/2
 # settings). This is the best *no-cookie* fix for a datacenter IP: YouTube
 # refuses the request fingerprint, not the account. Optional at runtime — if the
