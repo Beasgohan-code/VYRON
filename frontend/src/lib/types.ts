@@ -76,6 +76,21 @@ export interface ApiKey {
   expired?: boolean;
   revoked_at?: number | null;
   rate_limit?: number | null;
+  daily_requests?: number | null;
+  monthly_requests?: number | null;
+  daily_bytes?: number | null;
+  monthly_bytes?: number | null;
+  quota?: ApiQuota;
+}
+
+export interface ApiQuota {
+  limits: Record<string, number>;
+  used: {
+    day: { key: string; requests: number; bytes: number };
+    month: { key: string; requests: number; bytes: number };
+  };
+  remaining: Record<string, number | null>;
+  exceeded: string[];
 }
 
 export interface ApiSource {
@@ -143,6 +158,10 @@ export interface ApiKeyOptions {
   scopes?: ApiScope[];
   days?: number | null;
   rate_limit?: number | null;
+  daily_requests?: number | null;
+  monthly_requests?: number | null;
+  daily_bytes?: number | null;
+  monthly_bytes?: number | null;
 }
 
 export interface ApiHealth {

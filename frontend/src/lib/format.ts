@@ -45,6 +45,20 @@ export function initials(name: string | undefined): string {
   return parts.map((part) => part[0]?.toUpperCase() ?? "").join("") || "V";
 }
 
+/** Bytes → `1.4 GB`, for quota volume. */
+export function fmtBytes(bytes: number | undefined | null): string {
+  const value = Math.max(0, Number(bytes) || 0);
+  if (value < 1024) return `${value} B`;
+  const units = ["kB", "MB", "GB", "TB"];
+  let size = value / 1024;
+  let index = 0;
+  while (size >= 1024 && index < units.length - 1) {
+    size /= 1024;
+    index += 1;
+  }
+  return `${size >= 10 ? size.toFixed(0) : size.toFixed(1)} ${units[index]}`;
+}
+
 export function compact(value: number | undefined): string {
   const num = Number(value) || 0;
   if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`;

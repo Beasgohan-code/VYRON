@@ -32,6 +32,12 @@ from vyron.config import Settings, settings as default_settings
 
 logger = logging.getLogger(__name__)
 
+# Per-key rolling caps, on top of the per-minute window. A leaked key should
+# cost a bounded number of files, not "until somebody notices": the minute
+# limit stops a burst, these stop the quiet overnight drain.
+QUOTA_FIELDS = ("daily_requests", "monthly_requests", "daily_bytes", "monthly_bytes")
+QUOTA_SAVE_EVERY = 30.0     # seconds between writes for one key's counters
+
 # Wire version of the /v1 surface. Bumped for additive changes that a client
 # can act on (new routes, new fields); the bot's own version lives in
 # vyron/__init__.py. Sent back as X-API-Version on every response.
@@ -144,6 +150,11 @@ class MusicAPI:
     settings: Settings = field(default_factory=lambda: default_settings)
     _memory: dict[str, dict[str, Any]] = field(default_factory=dict)
     _hits: dict[str, deque[float]] = field(default_factory=dict)
+    _quota_saved: dict[str, float] = field(default_factory=dict)
+    # Live counters per key. The store is written every QUOTA_SAVE_EVERY seconds,
+    # but enforcement must be immediate — a cached ledger is the truth while the
+    # process is up, and a restart picks the last written snapshot back up.
+    _quota: dict[str, dict[str, Any]] = field(default_factory=dict)
     _cache: list[dict[str, Any]] | None = field(default=None, repr=False)
     _cache_at: float = field(default=0.0, repr=False)
 
@@ -215,6 +226,7 @@ class MusicAPI:
         days: int | None = None,
         rate_limit: int | None = None,
         by: int | None = None,
+        limits: dict[str, int] | None = None,
     ) -> tuple[dict[str, Any] | None, str]:
         """Create a key. The raw value is returned **once** in the record.
 
@@ -250,6 +262,9 @@ class MusicAPI:
             "bytes": 0,
             "rate_limit": max(1, int(rate_limit)) if rate_limit else None,
         }
+        for name, value in (limits or {}).items():
+            if name in QUOTA_FIELDS and value:
+                record[name] = max(1, int(value))
         await self._save(record)
         return {**record, "key": raw}, ""
 
@@ -336,6 +351,7 @@ class MusicAPI:
         rate_limit: int | None = None,
         force: bool = False,
         by: int | None = None,
+        limits: dict[str, int] | None = None,
     ) -> tuple[dict[str, Any] | None, str]:
         """Edit a key in place: label, scopes, expiry, per-key rate limit.
 
@@ -379,6 +395,16 @@ class MusicAPI:
             if value < 0:
                 return None, "rate_limit cannot be negative"
             patch["rate_limit"] = value or None
+        for name, value in (limits or {}).items():
+            if name not in QUOTA_FIELDS:
+                continue
+            try:
+                number = int(value)
+            except (TypeError, ValueError):
+                return None, f"{name} must be a number"
+            if number < 0:
+                return None, f"{name} cannot be negative"
+            patch[name] = number or None
         if days is not None:
             try:
                 span = int(days)
@@ -387,8 +413,16 @@ class MusicAPI:
             patch["expires_at"] = (
                 time.time() + span * 86400 if span > 0 else None
             )
-        if label is None and scopes is None and rate_limit is None and days is None:
-            return None, "nothing to change (send label, scopes, days or rate_limit)"
+        if (
+            label is None
+            and scopes is None
+            and rate_limit is None
+            and days is None
+            and not limits
+        ):
+            return None, (
+                "nothing to change (send label, scopes, days, rate_limit or a quota)"
+            )
         if not await self._patch(target, patch):
             return None, "could not save the change"
         record = {key: value for key, value in target.items() if key != "hash"}
@@ -443,6 +477,81 @@ class MusicAPI:
         if record.get("hash") and hmac.compare_digest(str(record["hash"]), hash_key(identifier)):
             return True
         return False
+
+    # ── quotas ─────────────────────────────────────────────────────────────
+    @staticmethod
+    def _periods(now: float | None = None) -> tuple[str, str]:
+        stamp = time.gmtime(now or time.time())
+        return time.strftime("%Y-%m-%d", stamp), time.strftime("%Y-%m", stamp)
+
+    @staticmethod
+    def _reference(record: dict[str, Any]) -> str:
+        return str(record.get("id") or record.get("prefix") or record.get("key") or "")
+
+    def _windows(self, record: dict[str, Any], now: float | None = None) -> dict[str, Any]:
+        """Today's and this month's counters, reset when the period rolls over."""
+        day, month = self._periods(now)
+        live = self._quota.get(self._reference(record))
+        if live is None:
+            stored = record.get("windows")
+            live = dict(stored) if isinstance(stored, dict) else {}
+            self._quota[self._reference(record)] = live
+        windows = live
+        if not isinstance(windows, dict):
+            windows = {}
+        current = windows.get("day")
+        if not isinstance(current, dict) or current.get("key") != day:
+            windows["day"] = {"key": day, "requests": 0, "bytes": 0}
+        current = windows.get("month")
+        if not isinstance(current, dict) or current.get("key") != month:
+            windows["month"] = {"key": month, "requests": 0, "bytes": 0}
+        record["windows"] = windows
+        return windows
+
+    @staticmethod
+    def _limits(record: dict[str, Any]) -> dict[str, int]:
+        out: dict[str, int] = {}
+        for name in QUOTA_FIELDS:
+            value = record.get(name)
+            if value:
+                try:
+                    out[name] = max(1, int(value))
+                except (TypeError, ValueError):
+                    continue
+        return out
+
+    def quota(self, record: dict[str, Any] | None, now: float | None = None) -> dict[str, Any]:
+        """What this key has spent today and this month, and what is left."""
+        record = record or {}
+        limits = self._limits(record)
+        windows = self._windows(record, now)
+        day, month = self._periods(now)
+        day_used = int(windows["day"].get("requests") or 0)
+        day_bytes = int(windows["day"].get("bytes") or 0)
+        month_used = int(windows["month"].get("requests") or 0)
+        month_bytes = int(windows["month"].get("bytes") or 0)
+        remaining = {
+            "daily_requests": max(0, limits["daily_requests"] - day_used) if "daily_requests" in limits else None,
+            "monthly_requests": max(0, limits["monthly_requests"] - month_used) if "monthly_requests" in limits else None,
+            "daily_bytes": max(0, limits["daily_bytes"] - day_bytes) if "daily_bytes" in limits else None,
+            "monthly_bytes": max(0, limits["monthly_bytes"] - month_bytes) if "monthly_bytes" in limits else None,
+        }
+        exceeded = [name for name, left in remaining.items() if left == 0]
+        return {
+            "limits": limits,
+            "used": {
+                "day": {"key": day, "requests": day_used, "bytes": day_bytes},
+                "month": {"key": month, "requests": month_used, "bytes": month_bytes},
+            },
+            "remaining": remaining,
+            "exceeded": exceeded,
+        }
+
+    def _quota_blocked(self, record: dict[str, Any]) -> dict[str, Any] | None:
+        state = self.quota(record)
+        if not state["exceeded"]:
+            return None
+        return state
 
     def _limit_for(self, record: dict[str, Any] | None = None) -> int:
         override = (record or {}).get("rate_limit")
@@ -499,6 +608,20 @@ class MusicAPI:
         expires_at = record.get("expires_at")
         if expires_at and float(expires_at) < time.time():
             return AuthResult(False, record, status=403, code="expired_key", error="this API key has expired")
+
+        blocked = self._quota_blocked(record)
+        if blocked is not None:
+            names = ", ".join(blocked["exceeded"])
+            return AuthResult(
+                False,
+                record,
+                status=429,
+                code="quota_exceeded",
+                error=f"quota reached ({names}) — this key is capped for the period",
+                limit=self._limit_for(record),
+                remaining=0,
+                scopes=tuple(normalise_scopes(record.get("scopes"))),
+            )
 
         limit = self._limit_for(record)
         bucket = str(record.get("id") or record.get("prefix") or raw)
@@ -609,6 +732,7 @@ class MusicAPI:
             return
         now = time.time()
         self._invalidate()
+        await self._count_quota(record, size=size, now=now)
         storage = self._storage()
         if storage is not None:
             try:
@@ -625,6 +749,21 @@ class MusicAPI:
             target["uses"] = int(target.get("uses") or 0) + 1
             target["bytes"] = int(target.get("bytes") or 0) + max(0, int(size))
             target["last_used_at"] = now
+
+    async def _count_quota(self, record: dict[str, Any], *, size: int, now: float) -> None:
+        """Add one use to today's and this month's window, persist occasionally."""
+        if not self._limits(record):
+            return    # no caps set: nothing to count
+        windows = self._windows(record, now)
+        for name in ("day", "month"):
+            windows[name]["requests"] = int(windows[name].get("requests") or 0) + 1
+            windows[name]["bytes"] = int(windows[name].get("bytes") or 0) + max(0, int(size))
+        reference = str(record.get("id") or record.get("prefix") or record.get("key") or "")
+        last = self._quota_saved.get(reference, 0.0)
+        if now - last < QUOTA_SAVE_EVERY:
+            return
+        self._quota_saved[reference] = now
+        await self._patch(record, {"windows": windows})
 
     # ── reporting ──────────────────────────────────────────────────────────
     async def stats(self) -> dict[str, Any]:

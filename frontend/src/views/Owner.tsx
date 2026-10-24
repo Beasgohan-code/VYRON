@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, api } from "../lib/api";
-import { fmtDuration } from "../lib/format";
+import { fmtBytes, fmtDuration } from "../lib/format";
 import { useApp } from "../lib/store";
 import type {
   ApiKey,
@@ -505,6 +505,28 @@ function KeyConsole({ toast }: { toast: (message: string, tone?: "info" | "error
                     ? ` · seen ${new Date(key.last_used_at * 1000).toLocaleDateString()}`
                     : " · never used"}
                 </span>
+                {key.quota && Object.keys(key.quota.limits).length > 0 && (
+                  <span className="quota-line">
+                    {key.quota.exceeded.length > 0 && (
+                      <span className="tag danger">capped</span>
+                    )}
+                    {key.quota.limits.daily_requests !== undefined && (
+                      <>
+                        today {key.quota.used.day.requests}/{key.quota.limits.daily_requests}
+                        {" · "}
+                      </>
+                    )}
+                    {key.quota.limits.monthly_requests !== undefined && (
+                      <>
+                        month {key.quota.used.month.requests}/{key.quota.limits.monthly_requests}
+                        {" · "}
+                      </>
+                    )}
+                    {key.quota.limits.monthly_bytes !== undefined && (
+                      <>volume {fmtBytes(key.quota.used.month.bytes)}/{fmtBytes(key.quota.limits.monthly_bytes)}</>
+                    )}
+                  </span>
+                )}
                 {isEditing && (
                   <KeyEditor
                     row={key}
@@ -590,6 +612,8 @@ function KeyEditor({
     scopes?: ApiScope[];
     days?: number | null;
     rate_limit?: number | null;
+    daily_requests?: number | null;
+    monthly_requests?: number | null;
   }) => void;
   onCancel: () => void;
 }) {
@@ -597,6 +621,8 @@ function KeyEditor({
   const [scopes, setScopes] = useState<string[]>(row.scopes ?? []);  // narrowed on save
   const [days, setDays] = useState("");
   const [rateLimit, setRateLimit] = useState(row.rate_limit ? String(row.rate_limit) : "");
+  const [daily, setDaily] = useState(row.daily_requests ? String(row.daily_requests) : "");
+  const [monthly, setMonthly] = useState(row.monthly_requests ? String(row.monthly_requests) : "");
 
   return (
     <div className="key-editor">
@@ -640,6 +666,22 @@ function KeyEditor({
           aria-label="Requests per minute (0 = default)"
           onChange={(event) => setRateLimit(event.target.value.replace(/\D/g, ""))}
         />
+        <input
+          className="text-input tiny"
+          value={daily}
+          inputMode="numeric"
+          placeholder="req/day"
+          aria-label="Requests per day (0 = unlimited)"
+          onChange={(event) => setDaily(event.target.value.replace(/\D/g, ""))}
+        />
+        <input
+          className="text-input tiny"
+          value={monthly}
+          inputMode="numeric"
+          placeholder="req/month"
+          aria-label="Requests per month (0 = unlimited)"
+          onChange={(event) => setMonthly(event.target.value.replace(/\D/g, ""))}
+        />
         <button
           type="button"
           className="btn btn-primary sm"
@@ -649,6 +691,8 @@ function KeyEditor({
               scopes: scopes as ApiScope[],
               days: days.trim() ? Number(days) : null,
               rate_limit: rateLimit.trim() ? Number(rateLimit) : null,
+              daily_requests: daily.trim() ? Number(daily) : 0,
+              monthly_requests: monthly.trim() ? Number(monthly) : 0,
             })
           }
         >

@@ -412,6 +412,21 @@ async def lyrics(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, **payload})
 
 
+def _quota_limits(body: dict) -> dict[str, int]:
+    """The rolling caps a request asked for (daily/monthly requests or bytes)."""
+    from vyron.core.musicapi import QUOTA_FIELDS
+
+    out: dict[str, int] = {}
+    for name in QUOTA_FIELDS:
+        raw = body.get(name)
+        if raw in (None, ""):
+            continue
+        text = str(raw).lstrip("-")
+        if text.isdigit():
+            out[name] = int(raw)
+    return out
+
+
 async def api_keys(request: web.Request) -> web.Response:
     """Music-API console for the Mini App (initData auth).
 
@@ -435,9 +450,12 @@ async def api_keys(request: web.Request) -> web.Response:
     is_owner = _is_owner(user)
 
     async def listing() -> list[dict]:
-        return await api.keys(
+        rows = await api.keys(
             None if is_owner else user.user_id, reveal=False, include_revoked=is_owner
         )
+        for row in rows:
+            row["quota"] = api.quota(row)
+        return rows
 
     async def payload(*extra: dict) -> web.Response:
         from vyron.api.metrics import METRICS
@@ -487,6 +505,7 @@ async def api_keys(request: web.Request) -> web.Response:
             days=int(days) if str(days or "").isdigit() else None,
             rate_limit=int(rate_limit) if str(rate_limit or "").isdigit() else None,
             by=user.user_id,
+            limits=_quota_limits(body),
         )
         if record is None:
             return web.json_response({"ok": False, "error": error or "could not create key"}, status=400)
@@ -532,6 +551,7 @@ async def api_keys(request: web.Request) -> web.Response:
             ),
             force=is_owner,
             by=user.user_id,
+            limits=_quota_limits(body),
         )
         if record is None:
             return web.json_response({"ok": False, "error": error or "could not update"}, status=400)

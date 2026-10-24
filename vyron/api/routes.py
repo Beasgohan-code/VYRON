@@ -453,6 +453,8 @@ async def me(request: web.Request) -> web.Response:
         "age_seconds": round(now - created, 1) if created else None,
         "expires_in": round(expires - now, 1) if expires else None,
     }
+    if auth.record:
+        info["quota"] = get_music_api().quota(auth.record)
     info["capabilities"] = {
         scope: info["scopes"].count(scope) > 0 or info["mode"] in {"owner", "open"}
         for scope in SCOPES
@@ -493,6 +495,21 @@ async def sources_route(request: web.Request) -> web.Response:
     )
 
 
+def _limits_from(data: dict) -> dict[str, int]:
+    """Pick the rolling caps out of a request body, ignoring anything unknown."""
+    from vyron.core.musicapi import QUOTA_FIELDS
+
+    out: dict[str, int] = {}
+    for name in QUOTA_FIELDS:
+        raw = data.get(name)
+        if raw in (None, ""):
+            continue
+        text = str(raw).lstrip("-")
+        if text.isdigit():
+            out[name] = int(raw)
+    return out
+
+
 def _actor(auth) -> int:
     """The owner id behind the current request (key owner, else the owner)."""
     if auth.record:
@@ -526,7 +543,12 @@ async def admin_keys(request: web.Request) -> web.Response:
                 "ok": True,
                 "count": len(records),
                 "keys": [
-                    {**record, "key": record.get("masked") or ""} for record in records
+                    {
+                        **record,
+                        "key": record.get("masked") or "",
+                        "quota": get_music_api().quota(record),
+                    }
+                    for record in records
                 ],
                 "requested_by": mask_key(str((auth.record or {}).get("prefix") or "")),
             },
@@ -542,6 +564,7 @@ async def admin_keys(request: web.Request) -> web.Response:
         days=int(data["days"]) if str(data.get("days") or "").isdigit() else None,
         rate_limit=int(data["rate_limit"]) if str(data.get("rate_limit") or "").isdigit() else None,
         by=_actor(auth),
+        limits=_limits_from(data),
     )
     if record is None:
         raise ApiError("bad_request", error or "could not create key")
@@ -633,6 +656,7 @@ async def own_keys(request: web.Request) -> web.Response:
         days=int(data["days"]) if str(data.get("days") or "").isdigit() else None,
         rate_limit=int(data["rate_limit"]) if str(data.get("rate_limit") or "").isdigit() else None,
         by=_actor(auth),
+        limits=_limits_from(data),
     )
     if record is None:
         raise ApiError("bad_request", error or "could not create key")
@@ -667,6 +691,7 @@ async def own_key_item(request: web.Request) -> web.Response:
             int(data["rate_limit"]) if str(data.get("rate_limit")).lstrip("-").isdigit() else None
         ),
         by=_actor(auth),
+        limits=_limits_from(data),
     )
     if record is None:
         raise ApiError("not_found" if "not found" in error or "belongs" in error else "bad_request", error)
@@ -704,6 +729,7 @@ async def admin_key_item(request: web.Request) -> web.Response:
             ),
             force=True,
             by=_actor(auth),
+            limits=_limits_from(data),
         )
         if record is None:
             raise ApiError("not_found" if "not found" in error else "bad_request", error)

@@ -902,3 +902,85 @@ def test_token_verification_rejects_tampering_and_expiry(monkeypatch):
     token = f"{shortlived.PREFIX}{encoded}.{shortlived._sign(payload)}"
     with pytest.raises(shortlived.TokenError):
         shortlived.verify(token)
+
+
+# ── rolling quotas ──────────────────────────────────────────────────────────
+def test_a_daily_cap_stops_the_key_until_tomorrow(tmp_path, monkeypatch):
+    api, _ = _api(tmp_path, monkeypatch)
+
+    async def scenario():
+        record, _ = await api.issue(70, "capped", limits={"daily_requests": 2})
+        assert record["daily_requests"] == 2
+
+        first = await api.authenticate(record["key"])
+        assert first.ok
+        await api.note_use(record)
+        await api.note_use(record)
+
+        blocked = await api.authenticate(record["key"])
+        assert blocked.ok is False
+        assert blocked.code == "quota_exceeded" and blocked.status == 429
+        assert "daily_requests" in blocked.error
+
+        state = api.quota(record)
+        assert state["used"]["day"]["requests"] == 2
+        assert state["remaining"]["daily_requests"] == 0
+        assert "daily_requests" in state["exceeded"]
+
+        # the window resets with the day, not with the process
+        tomorrow = time.time() + 86400
+        fresh = api.quota(record, now=tomorrow)
+        assert fresh["used"]["day"]["requests"] == 0
+        assert fresh["exceeded"] == []
+
+    asyncio.run(scenario())
+
+
+def test_a_monthly_byte_cap_is_enforced_during_downloads(tmp_path, monkeypatch):
+    api, _ = _api(tmp_path, monkeypatch)
+
+    async def scenario():
+        record, _ = await api.issue(71, "bytes", limits={"monthly_bytes": 1000})
+        await api.note_use(record, size=600)
+        assert (await api.authenticate(record["key"])).ok
+        await api.note_use(record, size=600)
+        blocked = await api.authenticate(record["key"])
+        assert blocked.code == "quota_exceeded"
+        assert "monthly_bytes" in blocked.error
+        assert api.quota(record)["used"]["month"]["bytes"] == 1200
+
+    asyncio.run(scenario())
+
+
+def test_quota_can_be_raised_without_rotating_the_key(tmp_path, monkeypatch):
+    api, _ = _api(tmp_path, monkeypatch)
+
+    async def scenario():
+        record, _ = await api.issue(72, "raising", limits={"daily_requests": 1})
+        await api.note_use(record)
+        assert (await api.authenticate(record["key"])).ok is False
+
+        updated, error = await api.update_key(
+            72, record["id"], limits={"daily_requests": 50}
+        )
+        assert error == "" and updated["daily_requests"] == 50
+        assert (await api.authenticate(record["key"])).ok is True
+
+    asyncio.run(scenario())
+
+
+def test_me_reports_the_quota_block(tmp_path, monkeypatch):
+    api, _ = _api(tmp_path, monkeypatch)
+    monkeypatch.setattr("vyron.api.routes.get_music_api", lambda: api)
+    monkeypatch.setattr("vyron.api.security.get_music_api", lambda: api)
+
+    async def scenario():
+        record, _ = await api.issue(73, "me", limits={"daily_requests": 100})
+        app = build_app(with_webapp=False)
+        async with TestClient(TestServer(app)) as client:
+            body = await (await client.get("/v1/me", headers={"X-API-Key": record["key"]})).json()
+            assert body["quota"]["limits"]["daily_requests"] == 100
+            assert body["quota"]["remaining"]["daily_requests"] == 100
+            assert body["quota"]["used"]["day"]["requests"] == 0
+
+    asyncio.run(scenario())

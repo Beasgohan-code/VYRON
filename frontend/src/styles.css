@@ -1130,6 +1130,13 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
 .source-pill.on i { background: var(--ok); opacity: 1; box-shadow: 0 0 8px color-mix(in srgb, var(--ok) 60%, transparent); }
 .source-pill.off { text-decoration: line-through; opacity: 0.55; }
 
+.quota-line { display: block; margin-top: 2px; font-size: 11px; color: var(--muted); }
+.quota-line .tag { margin-right: 6px; }
+.tag.danger {
+  color: var(--danger, #ff6b6b);
+  border-color: color-mix(in srgb, var(--danger, #ff6b6b) 45%, transparent);
+}
+
 .key-editor {
   display: grid; gap: 8px; margin-top: 10px;
   padding: 10px; border-radius: var(--radius-sm);
