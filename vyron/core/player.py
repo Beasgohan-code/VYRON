@@ -705,6 +705,13 @@ class Player:
         # because YouTube's related graph suggested a gaming montage.
         from vyron.core import autoplay as auto
 
+        # What was played *twice in a row* is what makes autoplay feel broken,
+        # so the artist streak travels with the request.
+        streak = [
+            getattr(item, "uploader", "") or ""
+            for item in state.history[-2:]
+            if item is not None
+        ]
         try:
             chosen = await auto.next_track(
                 self.youtube,
@@ -712,6 +719,7 @@ class Player:
                 mood=state.mood,
                 language=state.language,
                 played=state.history,
+                streak_artists=streak,
             )
             if chosen is not None:
                 return chosen

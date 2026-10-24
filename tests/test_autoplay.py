@@ -132,3 +132,24 @@ def test_soft_shuffle_keeps_every_track():
     pool = [Track(id=f"id{i:09d}", title=f"t{i}", duration=200) for i in range(7)]
     shuffled = auto._soft_shuffle(pool, group=3)
     assert sorted(t.id for t in shuffled) == sorted(t.id for t in pool)
+
+
+def test_a_third_song_by_the_same_artist_is_avoided_when_there_is_choice():
+    from vyron.core.autoplay import pick
+
+    def make(track_id, artist):
+        return Track(id=track_id, title=f"song {track_id}", duration=200, uploader=artist)
+
+    picks = pick(
+        [make("a", "Arijit Singh"), make("b", "Arijit Singh"), make("c", "Pritam"), make("d", "Shreya")],
+        played=(),
+        streak_artists=["Arijit Singh", "Arijit Singh"],
+    )
+    assert picks is not None and picks.uploader in {"Pritam", "Shreya"}
+
+
+def test_the_only_artist_left_is_still_played():
+    from vyron.core.autoplay import pick
+
+    only = Track(id="a", title="song a", duration=200, uploader="Arijit Singh")
+    assert pick([only], streak_artists=["Arijit Singh"]) is only

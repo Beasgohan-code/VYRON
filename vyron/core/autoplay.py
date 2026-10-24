@@ -186,6 +186,7 @@ def pick(
     seed_title: str = "",
     seed_artist: str = "",
     group: int = 3,
+    streak_artists: Iterable[str] = (),
 ) -> Track | None:
     """The first candidate that is not the same song as anything played."""
     known = list(played)
@@ -217,6 +218,15 @@ def pick(
         ]
         if len(varied) >= 2:
             pool = varied
+
+    # …and the same rule for an artist the room has just heard twice.
+    tired = {(name or "").strip().lower() for name in streak_artists if name}
+    if tired:
+        fresh_artists = [
+            c for c in pool if (getattr(c, "uploader", "") or "").strip().lower() not in tired
+        ]
+        if len(fresh_artists) >= 2:
+            pool = fresh_artists
     shuffled = _soft_shuffle(pool[:9], group=group)
     return shuffled[0] if shuffled else pool[0]
 
@@ -228,6 +238,7 @@ async def next_track(
     mood: str = "",
     language: str = "",
     played: Iterable[Track] = (),
+    streak_artists: Iterable[str] = (),
 ) -> Track | None:
     """Search the mood/language lane and return one track, or ``None``."""
     if youtube is None or seed is None:
@@ -245,6 +256,7 @@ async def next_track(
             played=seen,
             seed_title=seed.title,
             seed_artist=seed.uploader or "",
+            streak_artists=streak_artists,
         )
         if chosen is not None:
             chosen.requested_name = "autoplay"

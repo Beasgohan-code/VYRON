@@ -514,7 +514,6 @@ class YouTube:
         """
         wanted = self._words(query)
         seen_ids: set[str] = set()
-        seen_titles: set[str] = set()
         scored: list[tuple[float, int, Track]] = []
 
         for position, track in enumerate(tracks):
@@ -522,10 +521,11 @@ class YouTube:
             if key in seen_ids:
                 continue
             seen_ids.add(key)
+            # Dedupe by song, not by upload: three channels posting "Kesariya"
+            # with different brackets are the same song to a listener.
             normalised = " ".join(sorted(self._words(track.title)))
-            if normalised and normalised in seen_titles:
-                continue
-            seen_titles.add(normalised)
+            artist = " ".join(sorted(self._words(track.uploader or "")))[:24]
+            song_key = normalised
 
             score = 0.0
             if wanted:
@@ -545,18 +545,61 @@ class YouTube:
                 score -= 0.3
 
             title_low = track.title.lower()
+            query_low = query.lower()
             for noise in ("slowed + reverb", "1 hour", "10 hours", "nightcore", "8d audio"):
-                if noise in title_low and noise not in query.lower():
+                if noise in title_low and noise not in query_low:
                     score -= 0.6
+
+            # The upload that is the actual recording beats a re-upload of it.
+            # "Artist - Topic" is YouTube's auto-generated label for a label's
+            # own audio, which is the single most reliable "this is the song"
+            # signal available without an extra API call.
+            uploader_low = (track.uploader or "").lower()
+            if uploader_low.endswith("- topic"):
+                score += 0.9
+            elif "official audio" in title_low:
+                score += 0.7
+            elif "official video" in title_low or "official music video" in title_low:
+                score += 0.45
+            elif "lyric" in title_low:
+                score += 0.3
+            # …and a cover, a karaoke track, an instrumental or a reaction is
+            # not the song, unless that is exactly what was asked for.
+            for wrong in ("cover", "karaoke", "instrumental", "reaction", "tutorial"):
+                if wrong in title_low and wrong not in query_low:
+                    score -= 0.8
+            if ("live" in title_low) and "live" not in query_low:
+                score -= 0.35
             if track.views:
                 score += min(1.4, (track.views / 2_000_000) ** 0.5)
 
             # Tiny nudge so a clean tie keeps YouTube's ordering.
             score -= position * 0.01
-            scored.append((score, position, track))
+            scored.append((score, position, track, song_key))
 
+        # Sort first, *then* drop duplicates: the listener wants the best copy
+        # of a song, not whichever upload YouTube happened to list first.
         scored.sort(key=lambda item: (-item[0], item[1]))
-        return [track for _, _, track in scored]
+        kept: list[Track] = []
+        seen_versions: dict[str, list[tuple[str, int]]] = {}
+        for _score, _position, track, song_key in scored:
+            if song_key:
+                # Two uploads of the same title are the same song when they are
+                # by the same artist or run for the same length. A cover keeps a
+                # different artist *and* a different length, so it survives.
+                same = False
+                for artist_seen, duration_seen in seen_versions.get(song_key, []):
+                    if artist_seen and artist_seen == artist:
+                        same = True
+                        break
+                    if duration_seen and track.duration and abs(duration_seen - track.duration) <= 3:
+                        same = True
+                        break
+                if same:
+                    continue
+                seen_versions.setdefault(song_key, []).append((artist, int(track.duration or 0)))
+            kept.append(track)
+        return kept
 
     async def resolve(self, query: str, requester: tuple[int, str] = (0, "")) -> Track:
         """Turn a URL *or* a free-text query into a single playable track."""
