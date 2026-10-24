@@ -683,3 +683,58 @@ def test_preheat_respects_its_time_budget():
     run(player._prefetch_worker(10))
     # the first warm-up costs more than the whole budget, so it is the last one
     assert youtube.stream_info_calls == ["two"]
+
+
+# ── a restored queue resumes where it stopped (#9) ──────────────────────────
+def test_queue_snapshot_remembers_the_position():
+    player, _, _, storage = make_player()
+    state = player.queues.get(10)
+    state.current = track("abc", "Kesariya", duration=268)
+    state.queue = [track("def", "Next", duration=200)]
+    state.offset = 34.0        # not playing: elapsed() is the stored offset
+
+    snap = player.snapshot()["10"]
+    assert snap["position"] == 34.0
+
+    fresh, _, _, fresh_storage = make_player()
+    fresh_storage.meta["queues"] = {"10": snap}
+    run(fresh.restore_queues())
+    restored = fresh.queues.get(10)
+    assert restored.current is None and restored.playing is False
+    assert restored.queue[0].id == "abc"
+    assert restored.offset == 34.0
+
+
+def test_a_position_near_the_end_starts_over():
+    player, _, _, storage = make_player()
+    storage.meta["queues"] = {
+        "10": {
+            "current": track("abc", "Short", duration=200).to_dict(),
+            "queue": [],
+            "position": 195.0,          # 5 s from the end
+        }
+    }
+    run(player.restore_queues())
+    assert player.queues.get(10).offset == 185.0    # clamped to duration - 15
+
+
+def test_resume_always_on_seeks_to_the_restored_position():
+    player, calls, _, storage = make_player()
+    storage.meta["queues"] = {
+        "10": {
+            "current": track("abc", "Kesariya", duration=268).to_dict(),
+            "queue": [],
+            "always_on": True,
+            "position": 61.0,
+        }
+    }
+    run(player.restore_queues())
+    state = player.queues.get(10)
+    assert state.offset == 61.0
+
+    run(player.resume_always_on())
+    assert calls.played == ["https://cdn/abc.m4a"]
+    # the stream really started at 61 s, not at 0 s…
+    assert state.offset == 61.0 and state.playing is True
+    # …and a second pass does nothing (the chat is already playing)
+    assert run(player.resume_always_on()) == 0

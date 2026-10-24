@@ -149,6 +149,9 @@ class Player:
             data[str(state.chat_id)] = {
                 "queue": [track.to_dict() for track in state.queue],
                 "current": state.current.to_dict() if state.current else None,
+                # Where playback had reached. A queue that comes back at 0:00
+                # is a queue the listener has to scrub through again.
+                "position": round(state.elapsed(), 1) if state.current else 0.0,
                 "loop": state.loop.value,
                 "autoplay": state.autoplay,
                 "shuffle": state.shuffle,
@@ -220,9 +223,18 @@ class Player:
             ]
             current = payload.get("current")
             if isinstance(current, dict):
-                state.queue.insert(0, Track.from_dict(current))
+                track = Track.from_dict(current)
+                state.queue.insert(0, track)
+                position = float(payload.get("position") or 0.0)
+                duration = float(getattr(track, "duration", 0) or 0)
+                # Within the last 15 s of a long track, starting over is what
+                # people expect; resuming too near the end just skips it.
+                limit = max(0.0, duration - 15.0) if duration > 30 else 0.0
+                state.offset = max(0.0, min(position, limit))
             state.current = None
-            state.reset_stream()
+            state.playing = False
+            state.paused = False
+            state.started_at = 0.0
             self._settings_loaded.add(chat_id)
             restored += 1
         if restored:
@@ -240,9 +252,16 @@ class Player:
             track = self.queues.pop_next_for(state.chat_id)
             if track is None:
                 continue
+            # Continue where the track had got to before the restart instead of
+            # starting a 5-minute song from the beginning.
+            resume_at = int(max(0.0, state.offset))
+            state.offset = 0.0
             try:
                 await self.play_track(
-                    state.chat_id, track, video=track.is_video or state.is_video
+                    state.chat_id,
+                    track,
+                    video=track.is_video or state.is_video,
+                    seek=resume_at,
                 )
                 started += 1
             except Exception as exc:
