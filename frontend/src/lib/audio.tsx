@@ -28,6 +28,12 @@ export interface AudioEngine {
   buffered: number;
   /** The queue this device last left behind, if any. */
   saved: SavedSession | null;
+  /**
+   * Which engine is actually serving the current track's bytes ("jiosaavn"
+   * when YouTube refused this server and the song is playing from a
+   * catalogue). Empty while unknown.
+   */
+  servedBy: string;
   /* actions */
   play: (track: Track, list?: Track[]) => void;
   toggle: () => void;
@@ -129,6 +135,8 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
   const [normalising, setNormalising] = useState(() => read("vyron:normalise", "0") === "1");
   const initialSession = readSession();
   const [saved, setSaved] = useState<SavedSession | null>(initialSession);
+  const [servedBy, setServedBy] = useState("");
+  const servedKey = useRef("");
   const savedRef = useRef<SavedSession | null>(initialSession);
 
   /* one silent retry per track when the upstream URL expires mid-stream */
@@ -162,6 +170,35 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
     }
     return element.current;
   }, [volume, muted, rate]);
+
+  /* ── provenance: ask the server which engine serves this track ───────────
+     The substitution tier can switch a YouTube request to a catalogue copy on
+     the server side, and the app should be able to say so instead of implying
+     YouTube. One request per track, cached by the browser, never blocking. */
+  useEffect(() => {
+    const key = keyOf(track);
+    if (!key) {
+      servedKey.current = "";
+      setServedBy("");
+      return;
+    }
+    if (servedKey.current === key) return;
+    servedKey.current = key;
+    setServedBy("");
+    if (typeof fetch !== "function") return;
+    let cancelled = false;
+    void fetch(infoUrl(track as Track))
+      .then((response) => response.json())
+      .then((info: { served_by?: string; source?: string }) => {
+        if (cancelled || keyOf(track) !== key) return;
+        const engine = String(info?.served_by || info?.source || "").toLowerCase();
+        setServedBy(engine === "youtube" ? "" : engine);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [track]);
 
   /* ── audio graph: lazy, and only when something actually needs it ─────── */
   const analyser = useCallback((): AnalyserNode | null => {
@@ -739,10 +776,11 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
       muted,
       rate,
       buffered,
-      saved,
       repeat,
       shuffle,
       expanded,
+      saved,
+      servedBy,
       play,
       toggle,
       next: advance,
@@ -770,7 +808,7 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
     }),
     [
       track, queue, playing, loading, error, position, duration, volume, muted, rate, buffered,
-      repeat, shuffle, expanded, saved, play, toggle, advance, prev, seek, seekBy, setVolume,
+      repeat, shuffle, expanded, saved, servedBy, play, toggle, advance, prev, seek, seekBy, setVolume,
       setRate, setNormalise, normalising, cycleRepeat, enqueue, removeAt, move, jumpTo, clear,
       resumeSession, dismissSession,
       retryTrack, analyser,

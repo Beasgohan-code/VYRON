@@ -71,7 +71,7 @@ export function Player() {
   const swipe = useRef<{ y: number; at: number; active: boolean } | null>(null);
   const art = useTilt<HTMLDivElement>(7);
   const track = audio.track;
-  const servedBy = sourceLabel(track?.source);
+  const servedBy = sourceLabel(track?.source) || sourceLabel(audio.servedBy);
 
   useEffect(() => {
     const root = body.current;
