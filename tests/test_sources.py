@@ -827,3 +827,63 @@ def test_music_sources_names_the_catalogues_and_off_is_the_kill_switch():
     assert sources.describe(dataclasses.replace(settings, music_sources="off")).startswith(
         "ytmusic · ytdlp"
     )
+
+
+def test_source_health_is_counted_and_restored(tmp_path, monkeypatch):
+    import dataclasses
+
+    from vyron.core import sources
+    from vyron.database import JsonStorage
+
+    from vyron.config import settings as base_settings
+
+    storage = JsonStorage(dataclasses.replace(base_settings, data_dir=tmp_path))
+
+    row = sources.Source("audius", "Audius", "stream")
+    row.record(True, ms=120)
+    row.record(False, ms=800, error="HTTP 503")
+    status = row.status()
+    assert status["tries"] == 2 and status["failures"] == 1
+    assert status["avg_ms"] == 460.0 and status["last_ms"] == 800.0
+    assert status["last_error"] == "HTTP 503"
+    assert status["success_rate"] == 0.5
+
+    async def scenario():
+        await storage.connect()
+        await storage.set_meta("source_health", {"audius": row.health()})
+        fresh = sources.Source("audius", "Audius", "stream")
+        snapshot = await storage.get_meta("source_health", {})
+        fresh.restore(snapshot["audius"])
+        assert fresh.status()["tries"] == 2
+        assert fresh.status()["last_ms"] == 800.0
+        await storage.close()
+
+    asyncio.run(scenario())
+
+
+def test_probe_times_every_stream_source(monkeypatch):
+    from vyron.core import sources
+    from vyron.core.queue import Track
+
+    async def good(query, limit):
+        return [Track(id="1", title="hit", duration=1)]
+
+    async def bad(query, limit):
+        raise RuntimeError("blocked")
+
+    monkeypatch.setattr(
+        sources,
+        "stream_sources",
+        lambda settings=None: [
+            sources.Source("audius", "Audius", "stream", search=good),
+            sources.Source("jiosaavn", "JioSaavn", "stream", search=bad),
+        ],
+    )
+
+    async def scenario():
+        rows = await sources.probe(timeout=1)
+        assert rows[0]["probe"]["ok"] is True and rows[0]["probe"]["results"] == 1
+        assert rows[1]["probe"]["ok"] is False and "blocked" in rows[1]["probe"]["error"]
+        return rows
+
+    asyncio.run(scenario())

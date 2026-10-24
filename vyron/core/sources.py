@@ -44,6 +44,11 @@ class Source:
     _ok: bool | None = field(default=None, repr=False)
     _checked: float = field(default=0.0, repr=False)
     _fails: int = field(default=0, repr=False)
+    _tries: int = field(default=0, repr=False)
+    _wins: int = field(default=0, repr=False)
+    _total_ms: float = field(default=0.0, repr=False)
+    _last_ms: float = field(default=0.0, repr=False)
+    _last_error: str = field(default="", repr=False)
 
     def is_enabled(self) -> bool:
         try:
@@ -59,10 +64,18 @@ class Source:
             return False
         return True
 
-    def record(self, ok: bool) -> None:
+    def record(self, ok: bool, ms: float | None = None, error: str = "") -> None:
         self._ok = ok
         self._checked = time.monotonic()
         self._fails = 0 if ok else self._fails + 1
+        self._tries += 1
+        if ok:
+            self._wins += 1
+        if ms is not None:
+            self._last_ms = float(ms)
+            self._total_ms += float(ms)
+        self._last_error = "" if ok else (error or "failed")[:160]
+        _mark_dirty()
 
     def status(self) -> dict:
         return {
@@ -73,8 +86,39 @@ class Source:
             "available": self.available(),
             "last_ok": self._ok,
             "failures": self._fails,
+            "tries": self._tries,
+            "success_rate": round(self._wins / self._tries, 3) if self._tries else None,
+            "avg_ms": round(self._total_ms / self._tries, 1) if self._tries else None,
+            "last_ms": round(self._last_ms, 1) if self._last_ms else None,
+            "last_error": self._last_error,
             "detail": self.detail,
         }
+
+    # ── persistence ────────────────────────────────────────────────────────
+    def health(self) -> dict:
+        return {
+            "tries": self._tries,
+            "wins": self._wins,
+            "fails": self._fails,
+            "total_ms": self._total_ms,
+            "last_ms": self._last_ms,
+            "last_ok": self._ok,
+            "last_error": self._last_error,
+            "checked": self._checked,
+        }
+
+    def restore(self, data: dict) -> None:
+        """Take back counters saved by a previous process."""
+        if not isinstance(data, dict):
+            return
+        self._tries = int(data.get("tries") or 0)
+        self._wins = int(data.get("wins") or 0)
+        self._fails = int(data.get("fails") or 0)
+        self._total_ms = float(data.get("total_ms") or 0.0)
+        self._last_ms = float(data.get("last_ms") or 0.0)
+        self._last_ok = data.get("last_ok")
+        self._last_error = str(data.get("last_error") or "")
+        self._checked = float(data.get("checked") or 0.0)
 
 
 _OFF = {"off", "none", "0", "false", "no", ""}
@@ -210,6 +254,117 @@ def registry(settings=None) -> list[Source]:
     return items
 
 
+# ── health persistence ──────────────────────────────────────────────────────
+# A restart used to erase everything VYRON had learned about a source. The
+# counters live in the same store as the rest of the bot's state, so /doctor
+# and /v1/sources can answer "has Audius actually been working this week?"
+_PERSIST = {"dirty": False, "last_save": 0.0, "task": None}
+_META_KEY = "source_health"
+_SAVE_EVERY = 45.0
+
+
+def _mark_dirty() -> None:
+    _PERSIST["dirty"] = True
+    import asyncio
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:  # no loop: a sync caller, nothing to schedule
+        return
+    if time.monotonic() - _PERSIST["last_save"] < _SAVE_EVERY:
+        return
+    task = _PERSIST["task"]
+    if task is None or task.done():
+        _PERSIST["task"] = loop.create_task(save())
+
+
+async def save(storage=None, *, force: bool = False) -> bool:
+    """Write the health snapshot; debounced unless *force* is set."""
+    if not force and not _PERSIST["dirty"]:
+        return False
+    if not force and time.monotonic() - _PERSIST["last_save"] < _SAVE_EVERY:
+        return False
+    if storage is None:
+        try:
+            from vyron.runtime import runtime
+
+            storage = runtime.storage
+        except Exception:  # pragma: no cover
+            storage = None
+    if storage is None:
+        return False
+    snapshot = {item.name: item.health() for item in registry()}
+    try:
+        await storage.set_meta(_META_KEY, snapshot)
+    except Exception as exc:  # pragma: no cover - storage oddities
+        logger.debug("could not persist source health: %s", exc)
+        return False
+    _PERSIST["dirty"] = False
+    _PERSIST["last_save"] = time.monotonic()
+    return True
+
+
+async def load(storage=None) -> int:
+    """Restore counters saved by a previous process. Returns rows restored."""
+    if storage is None:
+        try:
+            from vyron.runtime import runtime
+
+            storage = runtime.storage
+        except Exception:  # pragma: no cover
+            storage = None
+    if storage is None:
+        return 0
+    try:
+        snapshot = await storage.get_meta(_META_KEY, {}) or {}
+    except Exception:  # pragma: no cover
+        return 0
+    restored = 0
+    for item in registry():
+        if isinstance(snapshot, dict) and item.name in snapshot:
+            item.restore(snapshot[item.name])
+            restored += 1
+    if restored:
+        logger.info("restored health for %d source(s)", restored)
+    return restored
+
+
+async def probe(settings=None, *, timeout: float = 8.0, query: str = "kesariya") -> list[dict]:
+    """Ask every stream source for one track and time the answer.
+
+    Flags say "not in cooldown"; this says "responded in 840 ms with 1 result".
+    """
+    import asyncio
+
+    rows: list[dict] = []
+    for source in stream_sources(settings):
+        if not source.search:
+            rows.append({**source.status(), "probe": {"ok": False, "error": "no search"}})
+            continue
+        started = time.perf_counter()
+        try:
+            found = await asyncio.wait_for(source.search(query, 1), timeout=timeout)
+            ms = (time.perf_counter() - started) * 1000
+            source.record(bool(found), ms=ms)
+            rows.append(
+                {
+                    **source.status(),
+                    "probe": {"ok": bool(found), "ms": round(ms, 1), "results": len(found or [])},
+                }
+            )
+        except Exception as exc:
+            ms = (time.perf_counter() - started) * 1000
+            source.record(False, ms=ms, error=str(exc))
+            rows.append(
+                {
+                    **source.status(),
+                    "probe": {"ok": False, "ms": round(ms, 1), "error": str(exc)[:160]},
+                }
+            )
+    await save(force=True)
+    return rows
+
+
 def search_sources(settings=None) -> list[Source]:
     return [item for item in registry(settings) if item.kind in {"search", "stream"} and item.search]
 
@@ -235,11 +390,11 @@ async def fallback_search(query: str, limit: int, *, settings=None) -> list[Trac
         try:
             found = await source.search(query, limit)
         except Exception as exc:
-            source.record(False)
+            source.record(False, error=str(exc))
             logger.info("%s search failed: %s", source.name, exc)
             continue
         took = (time.perf_counter() - started) * 1000
-        source.record(bool(found))
+        source.record(bool(found), ms=took)
         if found:
             logger.info(
                 "%s answered %r with %d track(s) in %.0f ms",
@@ -259,13 +414,14 @@ async def resolve_direct(url: str, *, settings=None) -> Track | None:
     for source in stream_sources(settings):
         if not source.resolve or not source.available():
             continue
+        started = time.perf_counter()
         try:
             track = await source.resolve(url)
         except Exception as exc:  # pragma: no cover - defensive
-            source.record(False)
+            source.record(False, error=str(exc))
             logger.info("%s link resolve failed: %s", source.name, exc)
             continue
-        source.record(track is not None)
+        source.record(track is not None, ms=(time.perf_counter() - started) * 1000)
         if track is not None:
             return track
     return None
@@ -288,6 +444,9 @@ def describe(settings=None) -> str:
 
 __all__ = [
     "CATALOGUE_SOURCES",
+    "load",
+    "probe",
+    "save",
     "DIRECT_SOURCES",
     "EXTRACT_SOURCES",
     "Source",

@@ -422,7 +422,9 @@ def spec(request: web.Request) -> dict:
                     "description": (
                         "`primary` is what answers first, `fallback` is the direct-stream chain "
                         "used when YouTube returns nothing, and `sources[]` reports each entry's "
-                        "`available` flag live (a failing source cools down for 60 s)."
+                        "live counters — successes, failures, average latency and the last error. "
+                        "Counters survive restarts. `?probe=1` (admin scope) asks every stream "
+                        "source for one track and returns the measured latency."
                     ),
                     "responses": {"200": {"description": "sources"}, **_err(401, 403)},
                 }

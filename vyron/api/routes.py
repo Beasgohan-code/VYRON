@@ -468,6 +468,10 @@ async def sources_route(request: web.Request) -> web.Response:
     from vyron.core import sources as registry
 
     rows = registry.status(settings)
+    if request.query.get("probe") in {"1", "true", "yes"}:
+        # Probing spends an upstream request per source, so it is an admin tool.
+        await authorize(request, "admin")
+        rows = await registry.probe(settings)
     name = request.match_info.get("name")
     if name:
         match = next((row for row in rows if row["name"] == name), None)

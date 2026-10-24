@@ -99,9 +99,12 @@ class Runtime:
         self.downloader = Downloader(self.settings)
         self.lyrics = LyricsClient()
         self.storage = await make_storage(self.settings)
-        from vyron.core import acl
+        from vyron.core import acl, sources
 
         await acl.load(self.storage)
+        # Source health survives a deploy, so /doctor can say "Audius has been
+        # failing since Tuesday" instead of "no failures since boot".
+        await sources.load(self.storage)
         self.player = Player(
             bot=self.bot,
             calls=self.calls,
@@ -114,6 +117,12 @@ class Runtime:
         logger.info("services ready (storage=%s, streaming=%s)", self.storage.backend, self.streaming_ready)
 
     async def shutdown(self) -> None:
+        try:
+            from vyron.core import sources
+
+            await sources.save(force=True)
+        except Exception:  # pragma: no cover - shutdown must never raise
+            pass
         if self.player:
             await self.player.shutdown()
         if self.lyrics:
