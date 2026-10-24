@@ -107,6 +107,13 @@ class Settings:
     # Empty means "derive it from the bot token", which survives restarts and
     # dies when the credentials change.
     api_token_secret: str = field(default_factory=lambda: _env("API_TOKEN_SECRET"))
+    # How many upcoming tracks are resolved ahead of time. Warming the next
+    # *two* removes the dead air after a skip, but each one is a yt-dlp run, so
+    # the worker is bounded by both this number and PREHEAT_SECONDS.
+    preheat_depth: int = field(default_factory=lambda: max(0, _int("PREHEAT_DEPTH", 2)))
+    # Wall-clock budget for one preheat pass: a slow first extraction must not
+    # keep a background task alive, competing with the song that is playing.
+    preheat_seconds: float = field(default_factory=lambda: max(0.0, float(_int("PREHEAT_SECONDS", 25))))
     # The HTTP port opens before the bot finishes booting (a host that never
     # sees the port assumes the deploy failed). A request that lands during that
     # window waits this long for the engine instead of getting a 503: a free

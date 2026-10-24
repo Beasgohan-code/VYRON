@@ -119,6 +119,8 @@ SETTINGS = SimpleNamespace(
     np_refresh_seconds=45,
     idle_leave_seconds=300,
     play_from_disk=True,
+    preheat_depth=2,
+    preheat_seconds=25,
 )
 
 
@@ -626,3 +628,58 @@ def test_recovery_is_rate_limited_per_chat(monkeypatch):
 
     first, second = run(scenario())
     assert first is True and second is False
+
+
+# ── queue warming ───────────────────────────────────────────────────────────
+def test_preheat_resolves_the_next_two_tracks():
+    player, _, youtube, _ = make_player()
+    run(player.play_track(10, track("one", duration=180)))
+    run(player.enqueue(10, track("two")))
+    run(player.enqueue(10, track("three")))
+    run(player.enqueue(10, track("four")))
+    youtube.stream_info_calls.clear()
+
+    run(player._prefetch_worker(10))
+
+    assert youtube.stream_info_calls == ["two", "three"]     # depth 2, not more
+
+
+def test_preheat_does_nothing_while_paused_or_idle():
+    player, _, youtube, _ = make_player()
+    run(player.play_track(10, track("one")))
+    run(player.enqueue(10, track("two")))
+    player.queues.get(10).paused = True
+    youtube.stream_info_calls.clear()
+
+    run(player._prefetch_worker(10))
+    assert youtube.stream_info_calls == []
+
+    player.queues.get(10).playing = False
+    player.queues.get(10).paused = False
+    run(player._prefetch_worker(10))
+    assert youtube.stream_info_calls == []
+
+
+def test_preheat_respects_its_time_budget():
+    """A slow extraction must not keep a preheat pass alive forever."""
+    slow_settings = SimpleNamespace(
+        **{**vars(SETTINGS), "preheat_depth": 3, "preheat_seconds": 0.01}
+    )
+    player, _, youtube, _ = make_player(settings=slow_settings)
+    run(player.play_track(10, track("one", duration=180)))
+    run(player.enqueue(10, track("two")))
+    run(player.enqueue(10, track("three")))
+    youtube.stream_info_calls.clear()
+
+    original = youtube.stream_info
+
+    async def slower(candidate, video=False):
+        import asyncio as _asyncio
+
+        await _asyncio.sleep(0.02)
+        return await original(candidate, video=video)
+
+    youtube.stream_info = slower
+    run(player._prefetch_worker(10))
+    # the first warm-up costs more than the whole budget, so it is the last one
+    assert youtube.stream_info_calls == ["two"]

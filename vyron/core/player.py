@@ -847,11 +847,31 @@ class Player:
             task.cancel()
 
     async def _prefetch_worker(self, chat_id: int) -> None:
+        """Warm what plays next — a bounded number, inside a time budget.
+
+        The next two tracks matter: after a skip or a finished song the hand-off
+        is audible dead air. But every warm-up is a yt-dlp run, so the pass has
+        a wall-clock deadline and never starts while nothing is playing or the
+        chat is paused — a background task competing with the song on air is
+        worse than the dead air it prevents.
+        """
+        started = time.monotonic()
+        depth = max(0, int(getattr(self.settings, "preheat_depth", 2)))
+        budget = max(0.0, float(getattr(self.settings, "preheat_seconds", 25)))
+        if depth == 0:
+            return
         try:
             state = self.queues.get(chat_id)
-            next_track = state.queue[0] if state.queue else None
-            if next_track is not None:
-                await self.youtube.stream_info(next_track, video=next_track.is_video)
+            if not state.playing or state.paused:
+                return
+            warmed = 0
+            for upcoming in list(state.queue)[:depth]:
+                if time.monotonic() - started > budget:
+                    logger.debug("preheat budget spent in %s after %d track(s)", chat_id, warmed)
+                    break
+                await self.youtube.stream_info(upcoming, video=upcoming.is_video)
+                warmed += 1
+            if warmed:
                 return
             if not state.autoplay or not state.current:
                 return
