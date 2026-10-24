@@ -290,7 +290,24 @@ def register(client: Client) -> None:
         rows.append(_row(f"{E('live')} voice engine", engine_ok, engine_note))
 
         storage_ok, storage_note = await _probe_storage()
-        rows.append(_row(f"{E('cloud')} storage", storage_ok, storage_note))
+        reason = getattr(runtime.storage, "ephemeral_reason", "") if runtime.storage else ""
+        if reason:
+            rows.append(
+                _row(
+                    f"{E('cloud')} storage",
+                    False,
+                    f"{storage_note} · <b>ephemeral</b> — {reason}",
+                )
+            )
+            rows.append(
+                _row(
+                    f"{E('warn')} durability",
+                    False,
+                    "data is lost on redeploy · set <code>MONGO_URL</code>",
+                )
+            )
+        else:
+            rows.append(_row(f"{E('cloud')} storage", storage_ok, storage_note))
 
         lease_status = lease.status()
         rows.append(

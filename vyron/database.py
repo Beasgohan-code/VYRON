@@ -105,6 +105,8 @@ class Storage:
 # ── in-memory / JSON backend ────────────────────────────────────────────────
 class JsonStorage(Storage):
     backend = "json"
+    #: set by `make_storage` when this host wipes its disk (Render, Koyeb, /tmp)
+    ephemeral_reason: str = ""
 
     def __init__(self, settings: Settings) -> None:
         self.path = Path(settings.data_dir) / "vyron.json"
@@ -355,6 +357,33 @@ class JsonStorage(Storage):
 
     async def counters(self) -> dict[str, int]:
         return dict(self._data["counters"])
+
+
+# ── durability ──────────────────────────────────────────────────────────────
+#: Hosts whose filesystem is thrown away on every deploy. A JSON file there is
+#: not storage, it is a very slow cache — and nothing told the operator.
+_EPHEMERAL = ("RENDER", "KOYEB_APP_NAME", "FLY_APP_NAME", "DYNO", "RAILWAY_ENVIRONMENT")
+
+
+def ephemeral_reason(settings: Settings) -> str:
+    """Why the JSON backend will lose its data on this host ('' when it won't)."""
+    import os
+
+    for marker in _EPHEMERAL:
+        if os.environ.get(marker):
+            return f"{marker} gives this container an ephemeral disk"
+    data_dir = str(getattr(settings, "data_dir", "") or "")
+    if data_dir.startswith(("/tmp", "/var/tmp", "/dev/shm")):
+        return f"DATA_DIR is {data_dir}, which is wiped on restart"
+    return ""
+
+
+def is_durable(storage: Storage | None, settings: Settings) -> bool:
+    if storage is None:
+        return False
+    if getattr(storage, "backend", "") == "mongo":
+        return True
+    return not ephemeral_reason(settings)
 
 
 # ── MongoDB backend ─────────────────────────────────────────────────────────
@@ -759,7 +788,22 @@ async def make_storage(settings: Settings) -> Storage:
             )
     storage = JsonStorage(settings)
     await storage.connect()
-    journal.warn("database", "using JSON storage (single instance only)")
+    reason = ephemeral_reason(settings)
+    if reason:
+        # This is an error, not a note: history, playlists and API keys all
+        # vanish on the next deploy, and the operator finds out afterwards.
+        journal.error(
+            "database",
+            f"JSON storage on an ephemeral disk ({reason}) — set MONGO_URL or data is lost on redeploy",
+        )
+        logger.error(
+            "STORAGE IS EPHEMERAL: %s. History, playlists and API keys will be "
+            "lost on the next deploy. Set MONGO_URL (Atlas free tier is enough).",
+            reason,
+        )
+        storage.ephemeral_reason = reason
+    else:
+        journal.warn("database", "using JSON storage (single instance only)")
     return storage
 
 

@@ -426,3 +426,40 @@ def test_mongo_imports_an_existing_json_database_once(monkeypatch, tmp_path):
     assert inserted["playlists"][0]["id"] == "p1"
     assert meta["counter:tracks"] == 4
     assert "imported_from_json" in meta
+
+
+# ── an ephemeral disk is not storage (#4) ───────────────────────────────────
+def test_json_on_render_is_reported_as_ephemeral(monkeypatch, tmp_path):
+    """Data vanishing on every deploy used to happen in silence."""
+    import sys
+    import types
+
+    monkeypatch.setitem(
+        sys.modules, "pymongo", types.SimpleNamespace(MongoClient=lambda *a, **k: None)
+    )
+    from vyron.database import ephemeral_reason, is_durable, make_storage
+
+    # a Render container, with a data dir that looks like a real disk
+    monkeypatch.setenv("RENDER", "true")
+    render = dataclasses.replace(Settings(), data_dir="/var/data/vyron")
+    assert "RENDER" in ephemeral_reason(render)
+
+    storage = asyncio.run(make_storage(dataclasses.replace(render, data_dir=tmp_path)))
+    assert storage.backend == "json"
+    assert storage.ephemeral_reason          # the warning was raised and recorded
+    assert is_durable(storage, render) is False
+
+    # a plain VPS keeps its disk: no scary warning, no false alarm
+    monkeypatch.delenv("RENDER")
+    assert ephemeral_reason(render) == ""
+    assert is_durable(storage, render) is True
+
+    # mongo is always durable
+    assert is_durable(types.SimpleNamespace(backend="mongo"), render) is True
+
+
+def test_tmpfs_data_dir_is_ephemeral_even_off_platform():
+    from vyron.database import ephemeral_reason
+
+    settings = dataclasses.replace(Settings(), data_dir="/tmp/vyron")
+    assert "/tmp" in ephemeral_reason(settings)

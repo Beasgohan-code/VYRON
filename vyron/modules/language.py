@@ -22,8 +22,13 @@ def language_card(current: str, *, text_key: str = "lang.note") -> str:
     """The picker: what is on, what is available, how to change it."""
     catalog = i18n.catalog(current)
     active = i18n.resolve(current)
+    coverage = i18n.coverage()
     rows = [
-        (f"{'✅' if code == active else '▫️'} <b>{name}</b>", f"<code>{code}</code>")
+        (
+            f"{'✅' if code == active else '▫️'} <b>{name}</b>",
+            f"<code>{code}</code>"
+            + ("" if coverage.get(code, 100) >= 100 else f" · {coverage.get(code)}% translated"),
+        )
         for code, name in i18n.available().items()
     ]
     return (
@@ -34,7 +39,10 @@ def language_card(current: str, *, text_key: str = "lang.note") -> str:
             f"{E('check')} <b>{catalog.t('lang.current')}</b> — {i18n.name(active)}"
         )
         + B.row(*language_buttons(active))
-        + B.footer("admins choose in groups · your DM keeps its own")
+        + B.footer(
+            "admins choose in groups · your DM keeps its own · "
+            "any missing string falls back to English"
+        )
     )
 
 

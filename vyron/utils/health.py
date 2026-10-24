@@ -38,9 +38,12 @@ def _database() -> dict:
     storage = runtime.storage
     if storage is None:
         return {"backend": "none", "ok": False}
+    reason = getattr(storage, "ephemeral_reason", "") or ""
     return {
         "backend": getattr(storage, "backend", "unknown"),
         "ok": True,
+        "durable": not reason,
+        "warning": reason or None,
         "last_error": getattr(storage, "last_error", "") or None,
     }
 

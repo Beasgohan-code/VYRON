@@ -235,6 +235,32 @@ def is_known(code: str | None) -> bool:
     return str(code or "").strip().lower() in CATALOGS
 
 
+def missing(code: str | None) -> list[str]:
+    """Keys English has that this catalog does not translate.
+
+    A missing key falls back to English (that is deliberate), but a *half*
+    translation is invisible until somebody sees the wrong language mid-card —
+    so this is the number `/language` and the tests look at.
+    """
+    target = CATALOGS.get(resolve(code)) or {}
+    return sorted(key for key in _EN if key not in target)
+
+
+def stray(code: str | None) -> list[str]:
+    """Keys a catalog carries that English does not — usually a typo."""
+    target = CATALOGS.get(resolve(code)) or {}
+    return sorted(key for key in target if key not in _EN)
+
+
+def coverage() -> dict[str, float]:
+    """code → percentage of the English catalog that is translated."""
+    total = max(1, len(_EN))
+    return {
+        code: round(100.0 * (total - len(missing(code))) / total, 1)
+        for code in available()
+    }
+
+
 async def for_chat(chat_id: int) -> Catalog:
     """This chat's language, read from the per-chat config."""
     try:
@@ -260,6 +286,9 @@ __all__ = [
     "DEFAULT",
     "NAMES",
     "available",
+    "coverage",
+    "missing",
+    "stray",
     "catalog",
     "for_chat",
     "is_known",

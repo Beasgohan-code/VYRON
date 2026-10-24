@@ -159,3 +159,69 @@ def test_caption_uses_the_chat_catalog():
     assert "streaming" in english
     assert "चल रहा है" in hindi
     assert "streaming" not in hindi
+
+
+# ── completeness is measured, not assumed ───────────────────────────────────
+import re as _re
+
+_PLACEHOLDER = _re.compile(r"\{(\w+)\}")
+
+
+def test_a_translation_keeps_every_placeholder_of_its_english_string():
+    """A missing `{count}` renders the sentence raw — silently, in production."""
+    english = i18n.catalog("en")
+    for code in i18n.CATALOGS:
+        if code == "en":
+            continue
+        catalog = i18n.catalog(code)
+        for key in i18n.CATALOGS["en"]:
+            expected = set(_PLACEHOLDER.findall(english.t(key)))
+            found = set(_PLACEHOLDER.findall(catalog.t(key)))
+            assert found == expected, f"{code}:{key} has {found}, expected {expected}"
+
+
+def test_no_catalog_carries_a_key_english_does_not_have():
+    for code in i18n.CATALOGS:
+        assert i18n.stray(code) == [], f"{code} has stray keys: {i18n.stray(code)}"
+
+
+def test_coverage_reports_a_real_number():
+    coverage = i18n.coverage()
+    assert coverage["en"] == 100.0
+    assert all(0.0 <= value <= 100.0 for value in coverage.values())
+    # every shipped language is complete today
+    assert min(coverage.values()) == 100.0
+
+
+def test_a_json_locale_file_is_validated_like_the_rest(tmp_path, monkeypatch):
+    """Dropping a JSON file must not be able to ship a broken translation."""
+    locales = tmp_path / "locales"
+    locales.mkdir()
+    (locales / "ta.json").write_text(
+        json.dumps(
+            {
+                "name": "தமிழ்",
+                "strings": {
+                    "lang.title": "மொழி",
+                    "ctl.volume": "ஒலி அளவு: {volume}%",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(i18n, "_LOCALES_DIR", locales)
+    i18n.CATALOGS.pop("ta", None)
+    i18n._CACHE.clear()
+    i18n._load_json_locales()
+    try:
+        assert "ta" in i18n.CATALOGS
+        assert i18n.NAMES["ta"] == "தமிழ்"
+        # a partial file is honest: it reports what it lacks and falls back
+        assert "ctl.paused" in i18n.missing("ta")
+        assert i18n.catalog("ta").t("ctl.paused") == i18n.catalog("en").t("ctl.paused")
+        assert i18n.coverage()["ta"] < 100.0
+    finally:
+        i18n.CATALOGS.pop("ta", None)
+        i18n.NAMES.pop("ta", None)
+        i18n._CACHE.clear()
+        i18n._load_json_locales()
