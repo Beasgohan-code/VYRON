@@ -29,47 +29,106 @@ BLOCKED_USERS: set[int] = set()
 BLOCKED_CHATS: set[int] = set()
 
 
-def _blocked_store():
-    """Persist blocklists inside the shared storage document."""
-    return runtime.storage
+async def load(storage) -> int:
+    """Restore both blocklists from storage. Returns how many entries loaded."""
+    if storage is None:
+        return 0
+    try:
+        users = await storage.chat_settings(0) or {}
+    except Exception:
+        return 0
+    for value in users.get("blocked_users") or []:
+        try:
+            BLOCKED_USERS.add(int(value))
+        except (TypeError, ValueError):
+            continue
+    for value in users.get("blocked_chats") or []:
+        try:
+            BLOCKED_CHATS.add(int(value))
+        except (TypeError, ValueError):
+            continue
+    return len(BLOCKED_USERS) + len(BLOCKED_CHATS)
 
 
 def register(client: Client) -> None:
     # ── blocklist ──────────────────────────────────────────────────────────
-    @client.on_message(cmd(["block", "gblock", "ublock"]) & owner)
+    @client.on_message(cmd(["block"]) & owner)
     async def _block(_: Client, message: Message) -> None:
-        arg = command_args(message)
-        target = None
-        if message.reply_to_message and message.reply_to_message.from_user:
-            target = message.reply_to_message.from_user.id
-        elif arg.lstrip("-").isdigit():
+        """Block a user (reply/id) or a whole chat (negative id).
+
+        A blocked chat is ignored outright — no command runs, nothing is
+        played — which is what `/block -100123…` means to an owner whose bot
+        was added to a group they do not want to serve.
+        """
+        arg = command_args(message).strip()
+        reply_user = message.reply_to_message.from_user if message.reply_to_message else None
+        target: int | None = None
+        as_chat = False
+        if arg.lstrip("-").isdigit():
             target = int(arg)
+            as_chat = target < 0
+        elif reply_user:
+            target = reply_user.id
         if target is None:
-            await rich.send(client, message.chat.id, f"{E('info')} Reply to a user or pass an id.")
+            await rich.send(
+                client,
+                message.chat.id,
+                B.note(
+                    f"{E('info')} Reply to a user, or pass an id.\n"
+                    "<code>/block 123456789</code> · <code>/block -1001234567890</code> (chat)"
+                ),
+                reply_to=message.id,
+            )
             return
-        BLOCKED_USERS.add(int(target))
-        await runtime.storage.set_chat_setting(0, "blocked_users", sorted(BLOCKED_USERS))
+        bucket, store, label = (
+            (BLOCKED_CHATS, "blocked_chats", "chat") if as_chat
+            else (BLOCKED_USERS, "blocked_users", "user")
+        )
+        bucket.add(int(target))
+        if runtime.storage:
+            await runtime.storage.set_chat_setting(0, store, sorted(bucket))
         await rich.send(
             client,
             message.chat.id,
-            B.row(B.btn(f"{E('cross')} Blocked {target}", data="v:noop", style="danger")),
+            B.row(
+                B.btn(
+                    f"{E('cross')} Blocked {label} {target}",
+                    data="v:noop",
+                    style="danger",
+                )
+            ),
+            reply_to=message.id,
         )
 
     @client.on_message(cmd(["unblock"]) & owner)
     async def _unblock(_: Client, message: Message) -> None:
-        arg = command_args(message)
+        arg = command_args(message).strip()
+        reply_user = message.reply_to_message.from_user if message.reply_to_message else None
         target = int(arg) if arg.lstrip("-").isdigit() else None
-        if target is None and message.reply_to_message and message.reply_to_message.from_user:
-            target = message.reply_to_message.from_user.id
+        if target is None and reply_user:
+            target = reply_user.id
         if target is None:
-            await rich.send(client, message.chat.id, f"{E('info')} Reply to a user or pass an id.")
+            await rich.send(
+                client, message.chat.id, B.note(f"{E('info')} Reply to a user or pass an id.")
+            )
             return
+        was = int(target) in BLOCKED_USERS or int(target) in BLOCKED_CHATS
         BLOCKED_USERS.discard(int(target))
-        await runtime.storage.set_chat_setting(0, "blocked_users", sorted(BLOCKED_USERS))
+        BLOCKED_CHATS.discard(int(target))
+        if runtime.storage:
+            await runtime.storage.set_chat_setting(0, "blocked_users", sorted(BLOCKED_USERS))
+            await runtime.storage.set_chat_setting(0, "blocked_chats", sorted(BLOCKED_CHATS))
         await rich.send(
             client,
             message.chat.id,
-            B.row(B.btn(f"{E('check')} Unblocked {target}", data="v:noop", style="success")),
+            B.row(
+                B.btn(
+                    f"{E('check')} {'Unblocked' if was else 'Was not blocked:'} {target}",
+                    data="v:noop",
+                    style="success",
+                )
+            ),
+            reply_to=message.id,
         )
 
     @client.on_message(cmd(["blocklist"]))
@@ -239,10 +298,15 @@ def register(client: Client) -> None:
             pass
 
     # ── block enforcement ─────────────────────────────────────────────────
+    # A blocked chat never reaches another handler: the message is deleted and
+    # propagation stops, so no command, no queue, no download is started.
     @client.on_message(filters.all, group=-3)
     async def _blocked_guard(_: Client, message: Message) -> None:
         user = message.from_user
-        if not user or user.id not in BLOCKED_USERS:
+        chat_id = message.chat.id if message.chat else 0
+        blocked = bool(chat_id and chat_id in BLOCKED_CHATS)
+        blocked = blocked or bool(user and user.id in BLOCKED_USERS)
+        if not blocked:
             return
         try:
             await message.delete()
@@ -254,4 +318,4 @@ def register(client: Client) -> None:
             pass
 
 
-__all__ = ["BLOCKED_CHATS", "BLOCKED_USERS", "register"]
+__all__ = ["BLOCKED_CHATS", "BLOCKED_USERS", "load", "register"]

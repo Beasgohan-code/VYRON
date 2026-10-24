@@ -358,6 +358,12 @@ async def _async_main() -> int:
             if resumed:
                 logger.info("resumed %d 24/7 chat(s)", resumed)
 
+    from vyron.modules import extras as extras_module
+
+    restored_blocks = await extras_module.load(runtime.storage)
+    if restored_blocks:
+        logger.info("restored %d blocked id(s)", restored_blocks)
+
     try:
         loaded = register_all(bot)
     except Exception as exc:
