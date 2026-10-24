@@ -131,12 +131,15 @@ Three request commands, and the media kind is detected rather than asked for:
 | `/play <link>` | resolves the link (YouTube, YT-Music, SoundCloud, Bandcamp, any yt-dlp site) and streams it |
 | `/play` as a reply to an audio / voice note | downloads the file and streams it |
 | `/play` as a reply to a **video** | streams the video — same command, no `/vplay` |
+| `/play <video-only link>` | a source with no audio track (raw `.mp4`, silent clip) is streamed as video instead of failing |
 | `/cplay …` | exactly the same auto-detection, into the **linked channel's** voice chat |
 | `/song <song \| link>` | sends the file: audio (MP3/M4A) when the source has audio, the video file when it does not |
 
 There is no `/vplay`, `/vsong`, `/playforce` or `/cplayforce`: video is a
-property of the track (yt-dlp reports it, or the replied media is a video), not
-a separate command, and cutting in is `/skip` + `/play`.
+property of the track, not a separate command. A YouTube song keeps its audio
+mix even though it technically has a video stream — VYRON plays video only when
+you hand it one (a replied video) or when there is no audio to play (a raw
+`.mp4`, a silent clip). Cutting in is `/skip` + `/play`.
 
 | Command | What it does |
 |---|---|

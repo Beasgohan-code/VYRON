@@ -53,14 +53,21 @@ def test_media_suffix_prefers_the_file_name():
     assert media_suffix(SimpleNamespace(file_name=None, mime_type="audio/mpeg")) == ".mpeg"
 
 
-def test_full_extracts_flag_a_video_track():
+def test_only_audio_less_sources_are_flagged_video():
+    """A YouTube song has a video stream too — that must not make it video."""
     from vyron.core.search import YouTube
 
-    resolved = YouTube._track_from_entry(
+    song = YouTube._track_from_entry(
         None,
-        {"id": "abcdefghijk", "title": "clip", "vcodec": "avc1", "width": 1280},
+        {"id": "abcdefghijk", "title": "song", "vcodec": "avc1", "acodec": "mp4a"},
     )
-    assert resolved is not None and resolved.is_video is True
+    assert song is not None and song.is_video is False
+
+    video_only = YouTube._track_from_entry(
+        None,
+        {"id": "abcdefghijk", "title": "silent clip", "vcodec": "avc1", "acodec": "none"},
+    )
+    assert video_only is not None and video_only.is_video is True
 
     flat = YouTube._track_from_entry(None, {"id": "abcdefghijk", "title": "song"})
     assert flat is not None and flat.is_video is False
