@@ -57,6 +57,15 @@ class Storage:
     async def counters(self) -> dict[str, int]:
         return {}
 
+    # health ------------------------------------------------------------
+    async def ping(self) -> dict[str, object]:
+        """Backend round-trip. The file backend is always "up"."""
+        return {"ok": True, "ms": None}
+
+    async def stats(self) -> dict[str, object]:
+        """Sizes a dashboard can show without reading every row."""
+        return {}
+
     # maintenance -------------------------------------------------------
     async def prune(self, days: int = 30) -> dict[str, int]:
         """Drop history/favourite rows older than *days*."""
@@ -352,10 +361,17 @@ class JsonStorage(Storage):
 class MongoStorage(Storage):
     backend = "mongo"
 
+    #: Atlas drops the first SRV lookup of a cold Render container often enough
+    #: that a single attempt made "Mongo connected" a coin flip.
+    ATTEMPTS = 3
+
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self._client = None
         self._db = None
+        #: when this process last got an answer from the cluster
+        self.last_ok: float | None = None
+        self.last_error: str = ""
 
     async def connect(self) -> None:
         from pymongo import MongoClient
@@ -374,18 +390,123 @@ class MongoStorage(Storage):
                 connectTimeoutMS=8000,
                 socketTimeoutMS=20000,
                 # Atlas free tier is reachable from Render, but DNS SRV lookups
-                # occasionally fail on cold start — retry once before giving up.
+                # occasionally fail on cold start — retry before giving up.
                 retryWrites=True,
+                retryReads=True,
+                maxPoolSize=20,
+                appname="vyron",
+                tz_aware=True,
             )
             client.admin.command("ping")
             return client
 
-        self._client = await asyncio.to_thread(_connect)
+        last: Exception | None = None
+        for attempt in range(1, self.ATTEMPTS + 1):
+            try:
+                self._client = await asyncio.to_thread(_connect)
+                break
+            except Exception as exc:
+                last = exc
+                if attempt < self.ATTEMPTS:
+                    wait = 2 ** (attempt - 1)
+                    logger.warning(
+                        "MongoDB attempt %d/%d failed (%s) — retrying in %ss",
+                        attempt,
+                        self.ATTEMPTS,
+                        exc,
+                        wait,
+                    )
+                    await asyncio.sleep(wait)
+        if self._client is None:
+            raise last or RuntimeError("MongoDB unreachable")
+
         self._db = self._client[self.settings.mongo_db]
         # pymongo's create_index is synchronous — it returns the index *name*,
         # so awaiting it directly raises "object str can't be used in 'await'".
         await asyncio.to_thread(self._ensure_indexes)
+        self.last_ok = time.time()
         logger.info("storage: MongoDB (%s)", self.settings.mongo_db)
+        await self._import_json_once()
+
+    async def ping(self) -> dict[str, object]:
+        """Round-trip the cluster — for /dbstats and the health payload."""
+        if self._db is None:
+            return {"ok": False, "error": "not connected", "ms": None}
+        started = time.perf_counter()
+        try:
+            await asyncio.to_thread(self._client.admin.command, "ping")
+        except Exception as exc:
+            self.last_error = str(exc)[:120]
+            return {"ok": False, "error": self.last_error, "ms": None}
+        self.last_ok = time.time()
+        self.last_error = ""
+        return {"ok": True, "ms": round((time.perf_counter() - started) * 1000, 1)}
+
+    async def stats(self) -> dict[str, object]:
+        """What the cluster actually holds — sizes, not guesses."""
+        if self._db is None:
+            return {}
+        try:
+            raw = await asyncio.to_thread(self._db.command, "dbstats")
+        except Exception as exc:  # pragma: no cover - permissions
+            logger.debug("dbstats failed: %s", exc)
+            return {}
+        return {
+            "collections": int(raw.get("collections") or 0),
+            "objects": int(raw.get("objects") or 0),
+            "data_bytes": int(raw.get("dataSize") or 0),
+            "index_bytes": int(raw.get("indexSize") or 0),
+            "storage_bytes": int(raw.get("storageSize") or 0),
+        }
+
+    async def _import_json_once(self) -> None:
+        """Bring an existing JSON database along the first time Mongo is used.
+
+        Switching a running bot from the file backend to Atlas used to mean an
+        empty database: settings, favourites and keys all silently reset. This
+        runs once per database (guarded by a marker document), only when the
+        cluster is empty, and never overwrites anything.
+        """
+        path = Path(self.settings.data_dir) / "vyron.json"
+        try:
+            marker = await self.get_meta("imported_from_json")
+            if marker or not path.is_file():
+                return
+            if await asyncio.to_thread(self._db.chats.estimated_document_count):
+                return
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.debug("json import skipped: %s", exc)
+            return
+
+        def _copy() -> dict[str, int]:
+            counts: dict[str, int] = {}
+            for name in ("chats", "favorites", "history", "playlists", "api_keys"):
+                rows = payload.get(name) or {}
+                flat: list[dict] = []
+                for value in rows.values():
+                    if isinstance(value, list):
+                        flat.extend(item for item in value if isinstance(item, dict))
+                    elif isinstance(value, dict):
+                        flat.append(value)
+                if flat and name in self._db.list_collection_names():
+                    self._db[name].insert_many(flat, ordered=False)
+                counts[name] = len(flat)
+            for key, value in (payload.get("counters") or {}).items():
+                self._db.counters.update_one({"_id": key}, {"$set": {"value": int(value)}}, True)
+            counts["counters"] = len(payload.get("counters") or {})
+            return counts
+
+        try:
+            counts = await asyncio.to_thread(_copy)
+        except Exception as exc:
+            logger.warning("existing JSON database could not be imported: %s", exc)
+            return
+        await self.set_meta("imported_from_json", {**counts, "at": time.time()})
+        logger.info(
+            "imported the existing JSON database into MongoDB: %s",
+            ", ".join(f"{name}={count}" for name, count in counts.items() if count),
+        )
 
     def _ensure_indexes(self) -> None:
         self._db.chats.create_index("chat_id", unique=True)

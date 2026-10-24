@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import dataclasses
 import time
 
@@ -198,6 +199,27 @@ def test_run_once_survives_a_broken_backend(monkeypatch):
     assert asyncio.run(maintenance.run_once()) == {"files": 0, "rows": 0}
 
 
+@pytest.fixture(autouse=True)
+def _keep_an_event_loop():
+    """pytgcalls calls asyncio.get_event_loop() at import time.
+
+    `asyncio.run()` in an earlier test clears the loop, so a bare import of
+    vyron.runtime later in this file used to explode depending on test order.
+    """
+    import asyncio
+
+    previous = None
+    try:
+        previous = asyncio.get_event_loop_policy().get_event_loop()
+    except RuntimeError:
+        pass
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    yield
+    loop.close()
+    asyncio.set_event_loop(previous)
+
+
 # ── MongoDB backend (fake driver, no network) ─────────────────────────────
 def test_mongo_connect_does_not_await_create_index(monkeypatch):
     """create_index() returns a str — awaiting it used to break every boot."""
@@ -289,3 +311,139 @@ def test_make_storage_falls_back_to_json_when_mongo_fails(monkeypatch, tmp_path)
     )
     storage = asyncio.run(make_storage(settings))
     assert isinstance(storage, JsonStorage)
+
+
+def test_mongo_survives_a_flaky_first_connection(monkeypatch):
+    """One SRV failure on a cold start used to mean "JSON forever"."""
+    import sys
+    import types
+
+    attempts = {"count": 0}
+
+    class FlakyClient:
+        def __init__(self, url, **kwargs):
+            attempts["count"] += 1
+            attempts["kwargs"] = kwargs
+            if attempts["count"] < 3:
+                raise ConnectionError("temporary failure in name resolution")
+            self.admin = types.SimpleNamespace(command=lambda name: {"ok": 1})
+
+        def __getitem__(self, name):
+            return types.SimpleNamespace(
+                chats=types.SimpleNamespace(
+                    create_index=lambda *a, **k: "chats_idx",
+                    estimated_document_count=lambda: 0,
+                ),
+                favorites=types.SimpleNamespace(create_index=lambda *a, **k: "i"),
+                history=types.SimpleNamespace(create_index=lambda *a, **k: "i"),
+                playlists=types.SimpleNamespace(create_index=lambda *a, **k: "i"),
+                api_keys=types.SimpleNamespace(
+                    create_index=lambda *a, **k: "i", drop_index=lambda name: name
+                ),
+                meta=types.SimpleNamespace(find_one=lambda *a, **k: None, update_one=lambda *a, **k: None),
+                list_collection_names=lambda: [],
+            )
+
+        def close(self):
+            return None
+
+    monkeypatch.setitem(sys.modules, "pymongo", types.SimpleNamespace(MongoClient=FlakyClient))
+    from vyron.database import MongoStorage
+
+    settings = dataclasses.replace(Settings(), mongo_url="mongodb://u:p@h/db", data_dir="/tmp/none")
+    storage = MongoStorage(settings)
+    asyncio.run(storage.connect())
+    assert storage.backend == "mongo" and attempts["count"] == 3
+    # pool/app identity are set: pymongo defaults are not tuned for a web app
+    assert attempts["kwargs"]["appname"] == "vyron"
+    assert attempts["kwargs"]["retryReads"] is True
+
+
+def test_mongo_imports_an_existing_json_database_once(monkeypatch, tmp_path):
+    """Switching JSON → Atlas must not silently empty the bot."""
+    import sys
+    import types
+
+    inserted: dict[str, list] = {}
+    meta: dict[str, object] = {}
+
+    class FakeCollection:
+        def __init__(self, name):
+            self.name = name
+
+        def create_index(self, *a, **k):
+            return "idx"
+
+        def drop_index(self, name):
+            return name
+
+        def estimated_document_count(self):
+            return 0
+
+        def insert_many(self, docs, ordered=False):
+            inserted[self.name] = list(docs)
+
+        def update_one(self, query, update, upsert=False):
+            key = query.get("_id")
+            if self.name == "meta":
+                meta[key] = update.get("$set", {}).get("value")
+            else:
+                meta[f"counter:{key}"] = update.get("$set", {}).get("value")
+
+        def find_one(self, query):
+            key = query.get("_id")
+            return {"_id": key, "value": meta[key]} if key in meta else None
+
+    class FakeDB:
+        def __getitem__(self, name):
+            return FakeCollection(name)
+
+        def __getattr__(self, name):
+            return FakeCollection(name)
+
+        def list_collection_names(self):
+            return ["chats", "favorites", "history", "playlists", "api_keys", "counters"]
+
+        def command(self, name):
+            return {"collections": 6, "objects": 12, "dataSize": 4096, "indexSize": 2048}
+
+    class FakeClient:
+        def __init__(self, url, **kwargs):
+            self.admin = types.SimpleNamespace(command=lambda name: {"ok": 1})
+
+        def __getitem__(self, name):
+            return FakeDB()
+
+        def close(self):
+            return None
+
+    (tmp_path / "vyron.json").write_text(
+        json.dumps(
+            {
+                "chats": {"-100": {"mode": "audio"}},
+                "playlists": {"7": [{"id": "p1", "tracks": []}]},
+                "api_keys": {},
+                "counters": {"tracks": 4},
+            }
+        )
+    )
+    monkeypatch.setitem(sys.modules, "pymongo", types.SimpleNamespace(MongoClient=FakeClient))
+    from vyron.database import MongoStorage
+
+    settings = dataclasses.replace(
+        Settings(), mongo_url="mongodb://u:p@h/db", data_dir=str(tmp_path)
+    )
+    storage = MongoStorage(settings)
+
+    async def scenario():
+        await storage.connect()
+        stats = await storage.stats()
+        assert stats["objects"] == 12
+        # a second connect must not duplicate anything
+        await storage.connect()
+        assert len(inserted["chats"]) == 1
+
+    asyncio.run(scenario())
+    assert inserted["playlists"][0]["id"] == "p1"
+    assert meta["counter:tracks"] == 4
+    assert "imported_from_json" in meta

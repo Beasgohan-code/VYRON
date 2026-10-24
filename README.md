@@ -958,7 +958,7 @@ The interesting optional ones:
 | `COBALT_URLS` | – | your own Cobalt instance(s), comma separated; `off` disables the tier |
 | `MUSIC_SOURCES` | `spotify,deezer,apple` | catalogue links to read for metadata; `off` = YouTube only (the direct-stream tier — Audius, JioSaavn, SoundCloud, Bandcamp — is not affected) |
 | `YTMUSIC_SEARCH` | `on` | YouTube Music search via `ytmusicapi` (better artist/album matching), falls back to yt-dlp |
-| `MONGO_URL` | – | persistence (JSON file otherwise) |
+| `MONGO_URL` | – | persistence (JSON file otherwise). The first successful connection imports an existing `vyron.json` once, so switching backends does not empty the bot. |
 | `PREMIUM_EMOJI_FILE` | `./emoji.json` | custom emoji pack |
 | `RICH_MESSAGES` | `true` | rich cards (set `false` for plain HTML) |
 | `BOT_NAME` | `𓆩 𝐕𝐘𝐑𝐎𝐍 𓆪` | display name; `BOT_PROFILE` pushes it to Telegram on boot |
@@ -1052,7 +1052,7 @@ owner-only `/sysstats` card.
 | Download fails but streaming works | the client ladder got a URL but no file → check `/doctor`'s **ffmpeg** row; without ffmpeg the bot saves `.m4a` instead of `.mp3`, which is fine but not what `/song` promises. |
 | Bot replies "already in use" | Two instances with the same `STRING_SESSION` — run only one. |
 | Docker build: `error: No such file or directory: 'gcc'` | TgCrypto has no cp312 wheel; the image compiles it in its own stage. Rebuild without cache (`docker compose build --no-cache`). |
-| MongoDB falls back to JSON | `MONGO_URL` must start with `mongodb://` or `mongodb+srv://`; whitelist the host in Atlas → Network Access. The bot keeps running on JSON storage meanwhile. |
+| MongoDB falls back to JSON | `MONGO_URL` must start with `mongodb://` or `mongodb+srv://`; whitelist the host in Atlas → Network Access. The bot keeps running on JSON storage meanwhile. Mongo is tried three times before that happens, so a single cold-start DNS miss is not fatal. |
 | `PEER_ID_INVALID` on boot | The owner never opened a chat with the bot — send `/start` once; the boot card then arrives next time. |
 | Mini App asleep / slow first load | Keep-alive is off — set `KEEPALIVE_URL` (or deploy on Render, where it is automatic). |
 | `ntgcalls` import error | Python must be 3.10–3.14 on x86-64/arm64; Docker image handles this. |

@@ -28,8 +28,21 @@ async def _index(_request: web.Request) -> web.Response:
             "active_players": len(runtime.player.active_chats()) if runtime.player else 0,
             "storage": runtime.storage.backend if runtime.storage else "none",
             "instance": _lease_status(),
+            "database": _database(),
         }
     )
+
+
+def _database() -> dict:
+    """Backend and a live round-trip — a cached "connected" is not a probe."""
+    storage = runtime.storage
+    if storage is None:
+        return {"backend": "none", "ok": False}
+    return {
+        "backend": getattr(storage, "backend", "unknown"),
+        "ok": True,
+        "last_error": getattr(storage, "last_error", "") or None,
+    }
 
 
 def _lease_status() -> dict:

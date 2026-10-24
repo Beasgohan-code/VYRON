@@ -381,6 +381,24 @@ def register(client: Client) -> None:
             rows.append((f"{E('id')} file", f"<code>{rich.esc(str(path))}</code> · {human_size(size)}"))
         else:
             rows.append((f"{E('id')} database", f"<code>{rich.esc(settings.mongo_db)}</code>"))
+            try:
+                probe = await storage.ping()
+                stats = await storage.stats()
+            except Exception as exc:  # pragma: no cover - a dead cluster
+                probe, stats = {"ok": False, "error": str(exc)[:60]}, {}
+            if probe.get("ok"):
+                rows.append((f"{E('live')} ping", f"<b>{probe['ms']} ms</b>"))
+            else:
+                rows.append((f"{E('warn')} ping", f"failed — {rich.esc(str(probe.get('error')))}"))
+            if stats:
+                rows.append(
+                    (
+                        f"{E('cloud')} stored",
+                        f"{stats['collections']} collections · {stats['objects']} docs · "
+                        f"{human_size(stats['data_bytes'])} data · "
+                        f"{human_size(stats['index_bytes'])} index",
+                    )
+                )
         cache_bytes = runtime.downloader.cache_size() if runtime.downloader else 0
         files = 0
         if runtime.downloader:
