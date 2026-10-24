@@ -114,3 +114,25 @@ def test_boot_opens_the_port_before_it_validates_configuration(monkeypatch):
 
     assert code == 0
     assert calls[:3] == ["health.start", "validate", "hold_alive"]
+
+
+def test_health_reports_the_download_ladder_and_prefixes():
+    """The probe should answer "which accelerator is live?" without /doctor."""
+    import asyncio
+
+    from aiohttp.test_utils import TestClient, TestServer
+
+    from vyron.utils import health
+
+    async def _go():
+        app = health.build_app(with_webapp=False)
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get("/health")
+            assert resp.status == 200
+            payload = await resp.json()
+        return payload
+
+    payload = asyncio.run(_go())
+    assert payload["downloads"]["accelerator"] in {"aria2", "curl", "aiohttp"}
+    assert isinstance(payload["downloads"]["installed"], list)
+    assert "/" in payload["prefixes"]

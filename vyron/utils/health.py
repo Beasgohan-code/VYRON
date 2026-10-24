@@ -48,7 +48,14 @@ async def _health(_request: web.Request) -> web.Response:
     whether the bot has finished booting.
     """
     ready = runtime.bot is not None and runtime.storage is not None
-    from vyron.core import keepalive, watchdog
+    from vyron.core import accelerator, keepalive, watchdog
+
+    try:
+        from vyron.utils import commands
+
+        prefixes = list(commands.configured())
+    except Exception:  # pragma: no cover - never break a health probe
+        prefixes = []
 
     return web.json_response(
         {
@@ -61,6 +68,11 @@ async def _health(_request: web.Request) -> web.Response:
             "streaming": runtime.streaming_ready,
             "playback": "disk" if settings.play_from_disk else "stream",
             "resolvers": _resolver_summary(),
+            "downloads": {
+                "accelerator": accelerator.detect(),
+                "installed": [tool.name for tool in accelerator.available() if tool.present],
+            },
+            "prefixes": prefixes,
             "apis": {
                 "music": settings.music_api,
                 "download": settings.vyron_api,
