@@ -273,7 +273,7 @@ and translated instead of being flattened into "nothing could be extracted":
 | *cannot reach YouTube* | egress/DNS on the host | `PROXY` or a different region |
 
 `/doctor` prints the same sentence, and its first row is the **build**
-(`v1.5.0 · 2026-10-24`): if it still shows an older one, the deploy did not
+(`v1.6.0 · 2026-10-24`): if it still shows an older one, the deploy did not
 land — that is a different problem from a broken track.
 
 ### More sources: Spotify, Deezer, Apple Music, SoundCloud, YouTube Music
@@ -291,12 +291,20 @@ No API keys, no logins, no credentials.
 | `music.apple.com/…/song/…` · `/album/…?i=…` | iTunes lookup API | title, artist, artwork, album |
 | `soundcloud.com/artist/track` | SoundCloud oEmbed | title, artist, artwork |
 | `music.youtube.com/watch?v=…` | already a YouTube id | straight to the ladder |
+| `audius.co/<artist>/<track>` | Audius public API | **a real direct audio stream** — no YouTube involved |
 
 `/play <album or playlist link>` queues every track it can match (up to 25,
 three concurrent searches), skipping the ones that do not resolve instead of
 failing the whole album. `/play <track link>` starts the best match, and the
 catalogue's artwork replaces the YouTube thumbnail when it is available. The
 tier is controlled by `MUSIC_SOURCES` (`off` = YouTube-only behaviour).
+
+**Audius is different.** It is an open platform whose API serves the audio
+itself, so an Audius link becomes a playable track with no extraction step at
+all: the player streams the returned URL, `/song` downloads it through the
+aria2 → curl → aiohttp ladder, and Audius is also used as a last-resort search
+tier when YouTube returns nothing. That makes a fresh deployment able to play
+something even while YouTube is throttling its IP.
 
 **YouTube Music search.** With `ytmusicapi` installed (it is in
 `requirements.txt`), search asks YouTube Music first: results are songs with an

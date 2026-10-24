@@ -358,6 +358,11 @@ class Player:
         if track.source == "telegram" and Path(track.url).is_file():
             # already downloaded locally — stream the file, not a URL
             url = track.url
+        elif track.source == "audius" and track.url and not getattr(
+            self.settings, "play_from_disk", False
+        ):
+            # A direct stream: yt-dlp has nothing to extract here.
+            url = track.url
         elif getattr(self.settings, "play_from_disk", False) and self.downloader is not None:
             # ShizuMusic's model: fetch the file once, then hand ntgcalls a
             # local path. A local stream cannot 403, expire or be throttled

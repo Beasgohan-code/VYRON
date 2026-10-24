@@ -452,3 +452,117 @@ def test_play_mode_lets_an_admin_through(monkeypatch):
 
     monkeypatch.setattr(play_module, "is_chat_admin", admin)
     assert asyncio.run(play_module.may_request(None, meta_message())) is True
+
+
+# ── Audius: a catalogue that can serve the audio itself ─────────────────────
+def test_audius_links_are_recognised():
+    from vyron.core import audius
+
+    assert audius.is_audius("https://audius.co/artist/track-name")
+    assert audius.is_audius("audius.co/artist/track-name")
+    assert not audius.is_audius("https://open.spotify.com/track/abc")
+    assert audius.stream_url("https://node.audius.co/", "D7KyD") == (
+        "https://node.audius.co/v1/tracks/D7KyD/stream?app_name=VYRON"
+    )
+
+
+def test_audius_track_payload_becomes_a_playable_track():
+    from vyron.core import audius
+
+    track = audius.parse_track(
+        {
+            "id": "D7KyD",
+            "title": "Sunset Drive",
+            "duration": 214,
+            "artwork": {"480x480": "https://cdn/art.jpg"},
+            "user": {"name": "Nova"},
+        },
+        "https://node.audius.co",
+    )
+    assert track is not None
+    assert (track.id, track.title, track.duration) == ("D7KyD", "Sunset Drive", 214)
+    assert track.uploader == "Nova"
+    assert track.thumbnail == "https://cdn/art.jpg"
+    assert track.source == "audius"
+    assert track.url.endswith("/v1/tracks/D7KyD/stream?app_name=VYRON")
+    assert audius.parse_track({"_type": "playlist", "id": "x"}) is None
+
+
+def test_audius_resolve_uses_a_discovery_node(monkeypatch):
+    from vyron.core import audius
+
+    seen = {}
+
+    async def fake_host():
+        return "https://node.audius.co"
+
+    async def fake_json(url):
+        seen["url"] = url
+        return {"data": {"id": "D7KyD", "title": "Sunset Drive", "user": {"name": "Nova"}}}
+
+    monkeypatch.setattr(audius, "host", fake_host)
+    monkeypatch.setattr(audius, "_json", fake_json)
+    track = asyncio.run(audius.resolve("https://audius.co/nova/sunset-drive"))
+    assert track is not None and track.id == "D7KyD"
+    assert "/v1/resolve?url=" in seen["url"]
+    assert "app_name=VYRON" in seen["url"]
+
+
+def test_audius_search_is_best_effort(monkeypatch):
+    from vyron.core import audius
+
+    async def fake_host():
+        return "https://node.audius.co"
+
+    async def fake_json(url):
+        if "search" not in url:
+            return None
+        return {"data": [{"id": "A1", "title": "One"}, {"id": "A2", "title": "Two"}]}
+
+    monkeypatch.setattr(audius, "host", fake_host)
+    monkeypatch.setattr(audius, "_json", fake_json)
+    assert [t.id for t in asyncio.run(audius.search("one"))] == ["A1", "A2"]
+    assert asyncio.run(audius.search("")) == []
+
+
+def test_a_direct_stream_track_is_downloaded_by_the_accelerator(monkeypatch, tmp_path):
+    import dataclasses
+
+    from vyron.config import settings
+    from vyron.core import accelerator
+    from vyron.core.downloader import Downloader
+    from vyron.core.queue import Track
+
+    target_dir = tmp_path / "dl"
+    downloader = Downloader(dataclasses.replace(settings, downloads_dir=target_dir))
+    called = {}
+
+    async def fake_fetch(url, path, **kwargs):
+        called["url"] = url
+        path.write_bytes(b"\x00" * 64)
+        return "curl"
+
+    monkeypatch.setattr(accelerator, "fetch", fake_fetch)
+    track = Track(
+        id="D7KyD",
+        title="Sunset Drive",
+        url="https://node/v1/tracks/D7KyD/stream?app_name=VYRON",
+        source="audius",
+    )
+    path = asyncio.run(downloader.fetch(track))
+    assert path.name == "audius-D7KyD.mp3"
+    assert path.read_bytes() == b"\x00" * 64
+    assert called["url"].startswith("https://node/v1/tracks/D7KyD/stream")
+
+
+def test_resolver_prefers_audius_for_an_audius_link(monkeypatch):
+    from vyron.core import audius
+    from vyron.core.queue import Track
+
+    async def fake_resolve(url):
+        return Track(id="A1", title="One", url="https://node/stream", source="audius")
+
+    monkeypatch.setattr(audius, "resolve", fake_resolve)
+    engine = _engine()
+    track = asyncio.run(engine.resolve("https://audius.co/nova/one"))
+    assert track.source == "audius" and track.url == "https://node/stream"

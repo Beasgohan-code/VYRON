@@ -410,6 +410,10 @@ class Downloader:
             cached = self.cached(track, video=video)
             if cached:
                 return cached
+            if track.source == "audius" and track.url:
+                # A direct stream: no extraction, no ladder — just the
+                # accelerator writing bytes into the cache.
+                return await self._download_stream(track, on_progress=on_progress)
             errors: list[str] = []
             try:
                 return await asyncio.to_thread(
@@ -426,6 +430,36 @@ class Downloader:
                 errors.append(f"mirror: {exc}")
                 logger.warning("direct download failed for %s: %s", track.id, exc)
             raise DownloadError(" · ".join(errors))
+
+    async def _download_stream(
+        self, track: Track, *, on_progress: ProgressHook | None = None
+    ) -> Path:
+        """Fetch a track whose `url` *is* the audio (Audius, direct files)."""
+        from vyron.core import accelerator
+
+        target = self.settings.downloads_dir / f"{track.source}-{track.id}.mp3"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        partial = target.with_suffix(target.suffix + ".part")
+
+        def _progress(done: int, total: int) -> None:
+            if on_progress and total:
+                on_progress(min(1.0, done / total), "download")
+
+        try:
+            await accelerator.fetch(
+                track.url,
+                partial,
+                cap=self.settings.max_download_mb * 1024 * 1024,
+                on_progress=_progress,
+                order=self.accelerator_order(),
+            )
+            partial.replace(target)
+        except Exception as exc:
+            partial.unlink(missing_ok=True)
+            raise DownloadError(f"could not fetch the stream ({exc})") from exc
+        if on_progress:
+            on_progress(1.0, "done")
+        return target
 
     async def audio(
         self,
