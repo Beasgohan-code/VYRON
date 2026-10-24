@@ -21,7 +21,13 @@ from vyron.core.journal import journal
 from vyron.core.lyrics import parse_lrc
 from vyron.core.queue import LoopMode, Track
 from vyron.runtime import runtime
-from vyron.core.musicapi import find_key, get_music_api, mask_key
+from vyron.core.musicapi import (
+    MAX_KEYS_PER_OWNER,
+    API_VERSION,
+    find_key,
+    get_music_api,
+    mask_key,
+)
 from vyron.web import stream as audio
 from vyron.web.auth import WebUser, make_token, resolve_user, verify_owner_token
 
@@ -403,37 +409,50 @@ async def api_keys(request: web.Request) -> web.Response:
     meta = {
         "scopes": ["read", "search", "download", "admin"],
         "default_scopes": ["read", "search", "download"],
-        "version": "2.0",
+        "version": API_VERSION,
     }
 
     is_owner = _is_owner(user)
-    if request.method == "GET":
-        keys = await api.keys(None if is_owner else user.user_id, reveal=False)
-        stats = await api.stats()
+
+    async def listing() -> list[dict]:
+        return await api.keys(
+            None if is_owner else user.user_id, reveal=False, include_revoked=is_owner
+        )
+
+    async def payload(*extra: dict) -> web.Response:
         from vyron.api.metrics import METRICS
+        from vyron.core import sources as registry
 
-        return web.json_response(
-            {
-                "ok": True,
-                "base": base,
-                "docs": docs,
-                "openapi": f"{base}/v1/openapi.json" if base else "/v1/openapi.json",
-                "is_owner": is_owner,
-                "keys": keys,
-                "stats": stats,
-                "metrics": METRICS.snapshot(),
-                **meta,
-            }
-        )
+        body = {
+            "ok": True,
+            "base": base,
+            "docs": docs,
+            "openapi": f"{base}/v1/openapi.json" if base else "/v1/openapi.json",
+            "is_owner": is_owner,
+            "keys": await listing(),
+            "sources": [dict(row) for row in registry.status()],
+            "source_order": registry.describe(),
+            "stats": await api.stats(),
+            "metrics": METRICS.snapshot(),
+            "limits": {"max_keys": MAX_KEYS_PER_OWNER},
+            **meta,
+        }
+        for item in extra:
+            body.update(item)
+        return web.json_response(body)
 
-    if not is_owner:
-        return web.json_response(
-            {"ok": False, "error": "only the bot owner can manage API keys"}, status=403
-        )
+    if request.method == "GET":
+        return await payload()
 
     body = await _read_json(request)
     action = str(body.get("action") or "create")
-    keys = await api.keys(reveal=False)
+
+    if action in {"create", "rotate"} and not is_owner:
+        # Minting is the owner's call: the webapp is reachable by any Telegram
+        # user, and a key is a download allowance on the owner's server.
+        return web.json_response(
+            {"ok": False, "error": "only the bot owner can create or rotate keys"}, status=403
+        )
 
     if action == "create":
         scopes = body.get("scopes")
@@ -447,34 +466,56 @@ async def api_keys(request: web.Request) -> web.Response:
             scopes=scopes,
             days=int(days) if str(days or "").isdigit() else None,
             rate_limit=int(rate_limit) if str(rate_limit or "").isdigit() else None,
+            by=user.user_id,
         )
         if record is None:
             return web.json_response({"ok": False, "error": error or "could not create key"}, status=400)
         logger.info("music api key issued to %s (%s)", user.user_id, record.get("label"))
-        return web.json_response(
-            {"ok": True, "created": {**record, "masked": mask_key(str(record["key"]))}}
-        )
+        return await payload({"created": {**record, "masked": mask_key(str(record["key"]))}})
 
     identifier = str(body.get("id") or body.get("key") or body.get("prefix") or "").strip()
     if not identifier:
         return web.json_response({"ok": False, "error": "id is required"}, status=400)
-    if not find_key(keys, identifier):
+    visible = await api.keys(None if is_owner else user.user_id, reveal=False)
+    if not find_key(visible, identifier):
         return web.json_response({"ok": False, "error": "key not found"}, status=404)
 
     if action == "revoke":
-        revoked = await api.revoke(None, identifier, force=True)
-        return web.json_response(
-            {"ok": revoked, "revoked": revoked, **({} if revoked else {"error": "key not found"})}
+        revoked = await api.revoke(
+            None if is_owner else user.user_id, identifier, force=is_owner, by=user.user_id
         )
+        if not revoked:
+            return web.json_response({"ok": False, "error": "key not found"}, status=404)
+        return await payload({"revoked": True})
 
     if action == "rotate":
-        match = find_key(keys, identifier) or {}
-        record, error = await api.rotate(int(match.get("owner_id") or user.user_id), str(match.get("id")))
+        match = find_key(visible, identifier) or {}
+        record, error = await api.rotate(
+            int(match.get("owner_id") or user.user_id), str(match.get("id")), by=user.user_id
+        )
         if record is None:
             return web.json_response({"ok": False, "error": error or "could not rotate"}, status=400)
-        return web.json_response(
-            {"ok": True, "created": {**record, "masked": mask_key(str(record["key"]))}}
+        return await payload({"created": {**record, "masked": mask_key(str(record["key"]))}})
+
+    if action == "update":
+        days = body.get("days", body.get("expires_in_days"))
+        scopes = body.get("scopes") if is_owner else None
+        rate_limit = body.get("rate_limit") if is_owner else None
+        record, error = await api.update_key(
+            None if is_owner else user.user_id,
+            identifier,
+            label=body.get("label"),
+            scopes=scopes,
+            days=int(days) if str(days).lstrip("-").isdigit() else None,
+            rate_limit=(
+                int(rate_limit) if str(rate_limit).lstrip("-").isdigit() else None
+            ),
+            force=is_owner,
+            by=user.user_id,
         )
+        if record is None:
+            return web.json_response({"ok": False, "error": error or "could not update"}, status=400)
+        return await payload({"updated": True})
 
     return web.json_response({"ok": False, "error": f"unknown action {action!r}"}, status=400)
 

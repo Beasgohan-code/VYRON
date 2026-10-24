@@ -8,6 +8,7 @@ import {
   EyeOff,
   KeyRound,
   Pause,
+  Pencil,
   Play,
   RefreshCw,
   RotateCw,
@@ -19,7 +20,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, api } from "../lib/api";
 import { fmtDuration } from "../lib/format";
 import { useApp } from "../lib/store";
-import type { ApiKey, JournalEvent, JournalPayload } from "../lib/types";
+import type {
+  ApiKey,
+  ApiKeyPayload,
+  ApiScope,
+  ApiSource,
+  JournalEvent,
+  JournalPayload,
+} from "../lib/types";
 
 type Tab = "logs" | "keys" | "system";
 
@@ -334,27 +342,69 @@ function LogConsole({ toast }: { toast: (message: string, tone?: "info" | "error
 }
 
 /* ── API keys ─────────────────────────────────────────────────────────────── */
+const ALL_SCOPES = ["read", "search", "download", "admin"] as const;
+
 function KeyConsole({ toast }: { toast: (message: string, tone?: "info" | "error" | "success") => void }) {
   const [keys, setKeys] = useState<ApiKey[]>([]);
+  const [sources, setSources] = useState<ApiSource[]>([]);
+  const [order, setOrder] = useState("");
   const [base, setBase] = useState("");
   const [fresh, setFresh] = useState("");
   const [busy, setBusy] = useState(false);
   const [showSecrets, setShowSecrets] = useState(false);
   const [label, setLabel] = useState("web");
+  const [scopes, setScopes] = useState<string[]>(["read", "search", "download"]);
+  const [days, setDays] = useState("");
+  const [rateLimit, setRateLimit] = useState("");
+  const [editing, setEditing] = useState<string | null>(null);
+
+  const apply = useCallback((payload: ApiKeyPayload) => {
+    if (payload.keys) setKeys(payload.keys);
+    if (payload.sources) setSources(payload.sources);
+    if (payload.source_order !== undefined) setOrder(payload.source_order);
+    if (payload.base) setBase(payload.base);
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
-      const payload = await api.keys();
-      setKeys(payload.keys ?? []);
-      setBase(payload.base ?? "");
+      apply(await api.keys());
     } catch (cause) {
       toast(cause instanceof Error ? cause.message : "Could not load keys", "error");
     }
-  }, [toast]);
+  }, [apply, toast]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  const toggleScope = (scope: string) =>
+    setScopes((current) =>
+      current.includes(scope) ? current.filter((item) => item !== scope) : [...current, scope]
+    );
+
+  const create = async () => {
+    setBusy(true);
+    try {
+      const payload = await api.createKey({
+        label: label.trim() || "web",
+        scopes: scopes as ApiKeyPayload["scopes"],
+        days: days.trim() ? Number(days) : null,
+        rate_limit: rateLimit.trim() ? Number(rateLimit) : null,
+      });
+      apply(payload);
+      const minted = payload.created?.key ?? "";
+      setFresh(minted);
+      setShowSecrets(true);
+      toast("Key created — copy it now", "success");
+    } catch (cause) {
+      toast(cause instanceof Error ? cause.message : "Could not create a key", "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const nameOf = (key: ApiKey) => key.label || key.id || "key";
+  const secretOf = (key: ApiKey) => (showSecrets && key.key ? key.key : key.masked || key.preview || "");
 
   return (
     <>
@@ -366,104 +416,159 @@ function KeyConsole({ toast }: { toast: (message: string, tone?: "info" | "error
           placeholder="key label"
           aria-label="Key label"
         />
-        <button
-          type="button"
-          className="btn btn-primary sm"
-          disabled={busy}
-          onClick={async () => {
-            setBusy(true);
-            try {
-              const payload = await api.createKey(label.trim() || "web");
-              setKeys(payload.keys ?? []);
-              const minted = payload.keys?.find((item) => item.key)?.key ?? "";
-              setFresh(minted);
-              setShowSecrets(true);
-              toast("Key created — copy it now", "success");
-            } catch (cause) {
-              toast(cause instanceof Error ? cause.message : "Could not create a key", "error");
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
+        <button type="button" className="btn btn-primary sm" disabled={busy} onClick={() => void create()}>
           <KeyRound size={14} /> Create key
         </button>
+      </div>
+
+      <div className="chip-row" role="group" aria-label="Key scopes">
+        {ALL_SCOPES.map((scope) => (
+          <button
+            key={scope}
+            type="button"
+            className={`chip ${scopes.includes(scope) ? "active" : ""}`}
+            aria-pressed={scopes.includes(scope)}
+            onClick={() => toggleScope(scope)}
+          >
+            {scope}
+          </button>
+        ))}
+        <input
+          className="text-input tiny"
+          value={days}
+          inputMode="numeric"
+          placeholder="days"
+          aria-label="Days until expiry"
+          onChange={(event) => setDays(event.target.value.replace(/\D/g, ""))}
+        />
+        <input
+          className="text-input tiny"
+          value={rateLimit}
+          inputMode="numeric"
+          placeholder="req/min"
+          aria-label="Requests per minute"
+          onChange={(event) => setRateLimit(event.target.value.replace(/\D/g, ""))}
+        />
       </div>
 
       {fresh && (
         <div className="notice ok">
           <CheckCircle2 size={14} />
           <code>{fresh}</code>
-          <button
-            type="button"
-            className="btn btn-ghost sm"
-            onClick={() => void navigator.clipboard?.writeText(fresh)}
-          >
+          <button type="button" className="btn btn-ghost sm" onClick={() => void navigator.clipboard?.writeText(fresh)}>
             <Copy size={13} /> copy
           </button>
         </div>
       )}
 
       <p className="fine">
-        Base URL <code>{base || window.location.origin}</code> · keys are hashed at rest, shown once. Scopes:{" "}
-        <code>read · search · download · admin</code>
+        Base URL <code>{base || window.location.origin}</code> · keys are hashed at rest, shown once ·
+        editing a key never changes its secret.
       </p>
+
+      {sources.length > 0 && (
+        <div className="source-strip">
+          <span className="fine">Chain</span>
+          {sources.map((source) => (
+            <span
+              key={source.name}
+              className={`source-pill ${source.available ? "on" : ""} ${source.enabled ? "" : "off"}`}
+              title={source.detail || source.kind}
+            >
+              <i aria-hidden="true" />
+              {source.name}
+            </span>
+          ))}
+          {order && <code className="fine">{order}</code>}
+        </div>
+      )}
 
       <ul className="rows">
         {keys.length === 0 && <li className="fine">No keys yet.</li>}
-        {keys.map((key) => (
-          <li key={key.id ?? key.masked} className="key-row">
-            <span className="key-glyph">
-              <KeyRound size={15} />
-            </span>
-            <span className="tr-main">
-              <b className="tr-title">{key.label || "key"}</b>
-              <span className="tr-sub">
-                <code>{showSecrets && key.key ? key.key : key.masked || key.preview}</code> ·{" "}
-                {key.scopes?.join(", ") || "read"} · {key.uses ?? 0} uses
-                {key.last_used_at ? ` · ${new Date((key.last_used_at ?? 0) * 1000).toLocaleDateString()}` : ""}
+        {keys.map((key) => {
+          const id = String(key.id ?? key.prefix ?? "");
+          const isEditing = editing === id;
+          return (
+            <li key={id || key.masked} className="key-row">
+              <span className="key-glyph">
+                <KeyRound size={15} />
               </span>
-            </span>
-            <span className={`tag ${key.active ? "on" : ""}`}>{key.active ? "active" : "revoked"}</span>
-            <button
-              type="button"
-              className="btn-icon"
-              aria-label={`Rotate ${key.label || "key"}`}
-              onClick={async () => {
-                try {
-                  const payload = await api.rotateKey(String(key.id));
-                  setKeys(payload.keys ?? []);
-                  const minted = payload.keys?.find((item) => item.key)?.key ?? "";
-                  if (minted) {
-                    setFresh(minted);
-                    setShowSecrets(true);
+              <span className="tr-main">
+                <b className="tr-title">{nameOf(key)}</b>
+                <span className="tr-sub">
+                  <code>{secretOf(key)}</code> · {key.scopes?.join(", ") || "read"} · {key.uses ?? 0} uses
+                  {key.rate_limit ? ` · ${key.rate_limit}/min` : ""}
+                  {key.expires_at
+                    ? ` · ends ${new Date(key.expires_at * 1000).toLocaleDateString()}`
+                    : " · no expiry"}
+                  {key.last_used_at
+                    ? ` · seen ${new Date(key.last_used_at * 1000).toLocaleDateString()}`
+                    : " · never used"}
+                </span>
+                {isEditing && (
+                  <KeyEditor
+                    row={key}
+                    onCancel={() => setEditing(null)}
+                    onSave={async (change) => {
+                      try {
+                        apply(await api.updateKey({ id, ...change }));
+                        setEditing(null);
+                        toast("Key updated — the secret is unchanged", "success");
+                      } catch (cause) {
+                        toast(cause instanceof Error ? cause.message : "Update failed", "error");
+                      }
+                    }}
+                  />
+                )}
+              </span>
+              <span className={`tag ${key.active ? "on" : ""}`}>{key.active ? "active" : "revoked"}</span>
+              <button
+                type="button"
+                className="btn-icon"
+                aria-label={`Edit ${nameOf(key)}`}
+                onClick={() => setEditing(isEditing ? null : id)}
+              >
+                <Pencil size={14} />
+              </button>
+              <button
+                type="button"
+                className="btn-icon"
+                aria-label={`Rotate ${nameOf(key)}`}
+                onClick={async () => {
+                  try {
+                    const payload = await api.rotateKey(id);
+                    apply(payload);
+                    const minted = payload.created?.key ?? "";
+                    if (minted) {
+                      setFresh(minted);
+                      setShowSecrets(true);
+                    }
+                    toast("Rotated — new secret shown", "success");
+                  } catch {
+                    toast("Rotate failed", "error");
                   }
-                  toast("Rotated — new secret shown", "success");
-                } catch {
-                  toast("Rotate failed", "error");
-                }
-              }}
-            >
-              <RotateCw size={14} />
-            </button>
-            <button
-              type="button"
-              className="btn-icon danger"
-              aria-label={`Revoke ${key.label || "key"}`}
-              onClick={async () => {
-                try {
-                  const payload = await api.revokeKey(String(key.id));
-                  setKeys(payload.keys ?? []);
-                  toast("Key revoked", "success");
-                } catch {
-                  toast("Revoke failed", "error");
-                }
-              }}
-            >
-              <Trash2 size={14} />
-            </button>
-          </li>
-        ))}
+                }}
+              >
+                <RotateCw size={14} />
+              </button>
+              <button
+                type="button"
+                className="btn-icon danger"
+                aria-label={`Revoke ${nameOf(key)}`}
+                onClick={async () => {
+                  try {
+                    apply(await api.revokeKey(id));
+                    toast("Key revoked", "success");
+                  } catch {
+                    toast("Revoke failed", "error");
+                  }
+                }}
+              >
+                <Trash2 size={14} />
+              </button>
+            </li>
+          );
+        })}
       </ul>
 
       <button type="button" className="btn btn-ghost sm" onClick={() => setShowSecrets((value) => !value)}>
@@ -471,6 +576,89 @@ function KeyConsole({ toast }: { toast: (message: string, tone?: "info" | "error
         {showSecrets ? "hide secrets" : "reveal this session's secrets"}
       </button>
     </>
+  );
+}
+
+function KeyEditor({
+  row,
+  onSave,
+  onCancel,
+}: {
+  row: ApiKey;
+  onSave: (change: {
+    label?: string;
+    scopes?: ApiScope[];
+    days?: number | null;
+    rate_limit?: number | null;
+  }) => void;
+  onCancel: () => void;
+}) {
+  const [label, setLabel] = useState(row.label || "");
+  const [scopes, setScopes] = useState<string[]>(row.scopes ?? []);  // narrowed on save
+  const [days, setDays] = useState("");
+  const [rateLimit, setRateLimit] = useState(row.rate_limit ? String(row.rate_limit) : "");
+
+  return (
+    <div className="key-editor">
+      <input
+        className="text-input"
+        value={label}
+        aria-label="Label"
+        onChange={(event) => setLabel(event.target.value)}
+      />
+      <div className="chip-row">
+        {ALL_SCOPES.map((scope) => (
+          <button
+            key={scope}
+            type="button"
+            className={`chip ${scopes.includes(scope) ? "active" : ""}`}
+            aria-pressed={scopes.includes(scope)}
+            onClick={() =>
+              setScopes((current) =>
+                current.includes(scope) ? current.filter((item) => item !== scope) : [...current, scope]
+              )
+            }
+          >
+            {scope}
+          </button>
+        ))}
+      </div>
+      <div className="key-editor-row">
+        <input
+          className="text-input tiny"
+          value={days}
+          inputMode="numeric"
+          placeholder="days"
+          aria-label="New expiry in days (0 = never)"
+          onChange={(event) => setDays(event.target.value.replace(/\D/g, ""))}
+        />
+        <input
+          className="text-input tiny"
+          value={rateLimit}
+          inputMode="numeric"
+          placeholder="req/min"
+          aria-label="Requests per minute (0 = default)"
+          onChange={(event) => setRateLimit(event.target.value.replace(/\D/g, ""))}
+        />
+        <button
+          type="button"
+          className="btn btn-primary sm"
+          onClick={() =>
+            onSave({
+              label,
+              scopes: scopes as ApiScope[],
+              days: days.trim() ? Number(days) : null,
+              rate_limit: rateLimit.trim() ? Number(rateLimit) : null,
+            })
+          }
+        >
+          Save
+        </button>
+        <button type="button" className="btn btn-ghost sm" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </div>
   );
 }
 

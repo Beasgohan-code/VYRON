@@ -14,6 +14,7 @@ from aiohttp.test_utils import TestClient, TestServer
 
 from vyron.config import settings
 from vyron.core.musicapi import (
+    API_VERSION,
     DEFAULT_SCOPES,
     MAX_KEYS_PER_OWNER,
     MusicAPI,
@@ -247,7 +248,7 @@ def test_stats_summarises_the_store(tmp_path, monkeypatch):
         stats = await api.stats()
         assert stats["keys"] == 2 and stats["keys_total"] == 2
         assert stats["requests"] == 1 and stats["bytes"] == 10
-        assert stats["version"] == "2.0" and stats["enabled"] is True
+        assert stats["version"] == API_VERSION and stats["enabled"] is True
         assert stats["storage"] == "json"
 
     asyncio.run(scenario())
@@ -288,7 +289,7 @@ def test_v1_health_docs_and_openapi():
         health = await client.get("/v1/health")
         payload = await health.json()
         assert health.status == 200 and payload["status"] == "ok"
-        assert health.headers["X-API-Version"] == "2.0"
+        assert health.headers["X-API-Version"] == API_VERSION
         assert "/v1/tracks" in payload["endpoints"]
 
         docs = await client.get("/v1/docs")
@@ -629,3 +630,134 @@ def test_client_ladder_puts_the_hint_first(tmp_path):
     yt._client_hint = "tv"
     assert yt._client_ladder()[0] == "tv"
     assert len(set(yt._client_ladder())) == len(yt._client_ladder())
+
+
+def test_me_reports_usage_capabilities_and_sources_endpoint(tmp_path, monkeypatch):
+    api, _ = _api(tmp_path, monkeypatch)
+    monkeypatch.setattr("vyron.api.routes.get_music_api", lambda: api)
+    monkeypatch.setattr("vyron.api.security.get_music_api", lambda: api)
+
+    async def scenario():
+        root, _ = await api.issue(1, "root", scopes=["admin"], days=5)
+        headers = {"X-API-Key": root["key"]}
+
+        app = build_app(with_webapp=False)
+        async with TestClient(TestServer(app)) as client:
+            me = await (await client.get("/v1/me", headers=headers)).json()
+            assert me["usage"]["expires_in"] > 0
+            assert me["capabilities"]["admin"] is True
+            assert "download" in me["available_scopes"]
+
+            sources = await client.get("/v1/sources", headers=headers)
+            body = await sources.json()
+            assert sources.status == 200
+            assert body["primary"] == ["ytmusic", "ytdlp"]
+            assert "audius" in body["fallback"] and "jiosaavn" in body["fallback"]
+            assert all("available" in row for row in body["sources"])
+            assert "ytmusic" in body["order"]
+
+            one = await (await client.get("/v1/sources/audius", headers=headers)).json()
+            assert one["source"]["name"] == "audius"
+
+            missing = await client.get("/v1/sources/nope", headers=headers)
+            assert missing.status == 404
+
+    asyncio.run(scenario())
+
+
+def test_a_key_can_be_inspected_and_edited(tmp_path, monkeypatch):
+    api, _ = _api(tmp_path, monkeypatch)
+    monkeypatch.setattr("vyron.api.routes.get_music_api", lambda: api)
+    monkeypatch.setattr("vyron.api.security.get_music_api", lambda: api)
+
+    async def scenario():
+        root, _ = await api.issue(1, "root", scopes=["admin"])
+        headers = {"X-API-Key": root["key"]}
+        child, _ = await api.issue(1, "child", scopes=["read"], days=1)
+        child_id = child["id"]
+
+        app = build_app(with_webapp=False)
+        async with TestClient(TestServer(app)) as client:
+            detail = await client.get(f"/v1/admin/keys/{child_id}", headers=headers)
+            body = await detail.json()
+            assert detail.status == 200 and body["key"]["id"] == child_id
+            assert "hash" not in body["key"]
+            assert body["key"]["quota"]["limit_per_minute"] >= 1
+
+            edited = await client.patch(
+                f"/v1/admin/keys/{child_id}",
+                json={"label": "renamed", "scopes": ["read", "search"], "days": 30},
+                headers=headers,
+            )
+            payload = await edited.json()
+            assert edited.status == 200
+            assert payload["key"]["label"] == "renamed"
+            assert payload["key"]["scopes"] == ["read", "search"]
+            assert payload["key"]["expires_at"] > time.time() + 20 * 86400
+
+            # the old secret still works — editing never rotates it
+            check = await client.get("/v1/me", headers={"X-API-Key": child["key"]})
+            assert check.status == 200
+
+            bad = await client.patch(
+                f"/v1/admin/keys/{child_id}", json={"rate_limit": -5}, headers=headers
+            )
+            assert bad.status in {400, 404}
+
+            nothing = await client.patch(f"/v1/admin/keys/{child_id}", json={}, headers=headers)
+            assert nothing.status in {400, 404}
+
+            missing = await client.get("/v1/admin/keys/nope", headers=headers)
+            assert missing.status == 404
+
+    asyncio.run(scenario())
+
+
+def test_owner_self_service_keys_are_scoped_to_their_owner(tmp_path, monkeypatch):
+    api, _ = _api(tmp_path, monkeypatch)
+    monkeypatch.setattr("vyron.api.routes.get_music_api", lambda: api)
+    monkeypatch.setattr("vyron.api.security.get_music_api", lambda: api)
+
+    async def scenario():
+        mine, _ = await api.issue(1, "mine", scopes=["read"])
+        admin_key, _ = await api.issue(1, "admin-key", scopes=["admin"])
+        theirs, _ = await api.issue(2, "theirs", scopes=["read"])
+        headers = {"X-API-Key": admin_key["key"]}
+
+        app = build_app(with_webapp=False)
+        async with TestClient(TestServer(app)) as client:
+            listed = await (await client.get("/v1/keys", headers=headers)).json()
+            assert listed["owner_id"] == 1 and listed["limit"] == MAX_KEYS_PER_OWNER
+            assert {row["label"] for row in listed["keys"]} == {"mine", "admin-key"}
+            assert all("hash" not in row for row in listed["keys"])
+
+            # a read-only key cannot mint its way up to download
+            weak = {"X-API-Key": mine["key"]}
+            denied = await client.post("/v1/keys", json={"label": "x"}, headers=weak)
+            assert denied.status == 403
+
+            minted = await client.post(
+                "/v1/keys", json={"label": "ci", "scopes": ["read", "search"]}, headers=headers
+            )
+            body = await minted.json()
+            assert minted.status == 201 and body["created"]["owner_id"] == 1
+            assert body["created"]["by"] == 1
+            new_id = body["created"]["id"]
+
+            edited = await client.patch(
+                f"/v1/keys/{new_id}", json={"label": "ci-2"}, headers=headers
+            )
+            assert edited.status == 200
+
+            # someone else's key is invisible, even with admin on your own account
+            foreign = await client.patch(
+                f"/v1/keys/{theirs['id']}", json={"label": "hax"}, headers=headers
+            )
+            assert foreign.status == 404
+
+            gone = await client.delete(f"/v1/keys/{new_id}", headers=headers)
+            assert gone.status == 200
+            still = await (await client.get("/v1/keys", headers=headers)).json()
+            assert new_id not in {row["id"] for row in still["keys"]}
+
+    asyncio.run(scenario())

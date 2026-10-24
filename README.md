@@ -273,10 +273,10 @@ and translated instead of being flattened into "nothing could be extracted":
 | *cannot reach YouTube* | egress/DNS on the host | `PROXY` or a different region |
 
 `/doctor` prints the same sentence, and its first row is the **build**
-(`v1.6.0 · 2026-10-24`): if it still shows an older one, the deploy did not
+(`v1.7.0 · 2026-10-24`): if it still shows an older one, the deploy did not
 land — that is a different problem from a broken track.
 
-### More sources: Spotify, Deezer, Apple Music, SoundCloud, YouTube Music
+### Every source, and how they back each other up
 
 A link from a streaming service is a **catalogue** reference — those services
 do not hand out audio we may stream. So VYRON reads the metadata from the
@@ -292,19 +292,38 @@ No API keys, no logins, no credentials.
 | `soundcloud.com/artist/track` | SoundCloud oEmbed | title, artist, artwork |
 | `music.youtube.com/watch?v=…` | already a YouTube id | straight to the ladder |
 | `audius.co/<artist>/<track>` | Audius public API | **a real direct audio stream** — no YouTube involved |
+| `jiosaavn.com/song/…` · `/album/…` | JioSaavn public API (`saavn.dev`) | **a real direct audio stream**, best bitrate (320 kbps) |
 
 `/play <album or playlist link>` queues every track it can match (up to 25,
 three concurrent searches), skipping the ones that do not resolve instead of
 failing the whole album. `/play <track link>` starts the best match, and the
 catalogue's artwork replaces the YouTube thumbnail when it is available. The
-tier is controlled by `MUSIC_SOURCES` (`off` = YouTube-only behaviour).
+tier is controlled by `MUSIC_SOURCES` (`off` = YouTube-only behaviour; the
+direct-stream fallbacks are `audius` and `jiosaavn`, and both are always on).
 
-**Audius is different.** It is an open platform whose API serves the audio
-itself, so an Audius link becomes a playable track with no extraction step at
-all: the player streams the returned URL, `/song` downloads it through the
-aria2 → curl → aiohttp ladder, and Audius is also used as a last-resort search
-tier when YouTube returns nothing. That makes a fresh deployment able to play
-something even while YouTube is throttling its IP.
+**Audius and JioSaavn are different.** Both are open platforms whose APIs serve
+the audio itself, so a link from either becomes a playable track with no
+extraction step at all: the player streams the returned URL, `/song` downloads
+it through the aria2 → curl → aiohttp ladder. They are also the search fallback
+when YouTube returns nothing, which means a fresh deployment can play something
+even while YouTube is throttling its IP.
+
+**Nothing needs to be chosen.** All of this sits behind one ordered registry
+(`vyron/core/sources.py`), in the order VYRON actually tries them:
+
+```
+ytmusic · ytdlp  →  audius  →  jiosaavn
+```
+
+If a tier fails twice inside a minute it cools down for 60 s and the next one
+answers, so a single dead endpoint never turns into a failed `/play`. The whole
+chain is the same one the API reports:
+
+```bash
+curl -H "X-API-Key: vyrn_…" https://<your-app>/v1/sources
+```
+
+`/doctor` prints one row per source, live from the same registry.
 
 **YouTube Music search.** With `ytmusicapi` installed (it is in
 `requirements.txt`), search asks YouTube Music first: results are songs with an
@@ -485,9 +504,13 @@ routes add metadata, streaming, scopes, expiry and metrics.
 | `DELETE` | `/v1/downloads/{job_id}` | cancel a queued or running job | `download` |
 | `GET·POST` | `/v1/search?q=` | search YouTube | `search` |
 | `GET·POST` | `/v1/lyrics?title=` | lyrics + synced lines (LRCLIB) | `read` |
-| `GET` | `/v1/me` | your key, scopes, usage, quota | — |
-| `GET·POST` | `/v1/admin/keys` | list / mint keys (raw key returned once) | `admin` |
-| `DELETE` | `/v1/admin/keys/{id}` | revoke by id or prefix | `admin` |
+| `GET` | `/v1/me` | your key, **capabilities**, usage, expiry, quota | — |
+| `GET` | `/v1/sources` | every source, fallback order, live health | `read` |
+| `GET` | `/v1/sources/{name}` | one source's detail | `read` |
+| `GET·POST` | `/v1/keys` | list / mint **your own** keys | `read` · `admin` |
+| `PATCH·DELETE` | `/v1/keys/{id}` | edit or revoke a key of yours | `read` |
+| `GET·POST` | `/v1/admin/keys` | list / mint any key (raw key returned once) | `admin` |
+| `GET·PATCH·DELETE` | `/v1/admin/keys/{id}` | inspect, **edit without rotating**, revoke | `admin` |
 | `POST` | `/v1/admin/keys/{id}/rotate` | swap a key, old one dies instantly | `admin` |
 | `GET` | `/v1/metrics` | traffic, volume, latency (JSON or Prometheus) | `admin` |
 | `GET` | `/v1/health` · `/v1/version` | status, versions | — |
@@ -499,6 +522,22 @@ routes add metadata, streaming, scopes, expiry and metrics.
 | `POST` | `/vyron/v1/track/by-video-id` | one-shot audio download | `download` |
 | `POST` | `/vyron/v1/track/by-query` | search, then download the top hit | `download` |
 | `GET` | `/vyron/health` | engine status (format, retries, cookies) | — |
+
+**Keys that behave.** A key is created, then *edited* — never thrown away to
+change a label. `PATCH` takes any of `label`, `scopes`, `days` (expiry, `0` =
+never) and `rate_limit` (per-minute quota, `0` = deployment default), and the
+secret stays valid, so a pipeline that already holds it never breaks:
+
+```bash
+curl -X PATCH "$WEBAPP_URL/v1/keys/key_1a2b3c4d5e6f" \
+  -H "X-API-Key: vyrn_xxxxxxxx" -H "Content-Type: application/json" \
+  -d '{"label":"nightly","scopes":["read","search"],"days":30,"rate_limit":120}'
+```
+
+`/v1/keys` is self-service: a key sees and manages only its own owner's keys.
+Minting there needs the `admin` scope, so a leaked `read` key cannot launder
+itself into a download allowance. Every listing is masked from the key's own
+prefix and the stored hash is never returned.
 
 ```bash
 curl -X POST "$WEBAPP_URL/v1/tracks" \

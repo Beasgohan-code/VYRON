@@ -8,7 +8,7 @@ from aiohttp import web
 from vyron.api.errors import ApiError
 from vyron.api.state import AUTH, RATE_HEADERS
 from vyron.config import settings
-from vyron.core.musicapi import AuthResult, get_music_api
+from vyron.core.musicapi import API_VERSION, AuthResult, get_music_api
 from vyron.web.auth import OWNER_TOKEN_PREFIX, verify_owner_token
 
 
@@ -33,7 +33,7 @@ def headers_for(auth: AuthResult) -> dict[str, str]:
         "X-RateLimit-Limit": str(auth.limit),
         "X-RateLimit-Remaining": str(max(0, auth.remaining)),
         "X-RateLimit-Reset": str(auth.reset_in),
-        "X-API-Version": "2.0",
+        "X-API-Version": API_VERSION,
     }
     if auth.record:
         headers["X-Key-Prefix"] = str(auth.record.get("prefix") or "")
@@ -48,6 +48,7 @@ def headers_for(auth: AuthResult) -> dict[str, str]:
 
 def owner_token(request: web.Request) -> str:
     """`X-Owner-Token` (or an `X-API-Key` carrying a `vown_` token)."""
+
     header = (request.headers.get("X-Owner-Token") or "").strip()
     if header:
         return header

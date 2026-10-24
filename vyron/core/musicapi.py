@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import logging
 import secrets
 import time
 from collections import deque
@@ -28,6 +29,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from vyron.config import Settings, settings as default_settings
+
+logger = logging.getLogger(__name__)
+
+# Wire version of the /v1 surface. Bumped for additive changes that a client
+# can act on (new routes, new fields); the bot's own version lives in
+# vyron/__init__.py. Sent back as X-API-Version on every response.
+API_VERSION = "2.1"
 
 KEY_MARKER = "vyrn_"
 KEY_BODY_BYTES = 30  # token_urlsafe(30) → 40 url-safe characters
@@ -206,8 +214,13 @@ class MusicAPI:
         scopes: Any = None,
         days: int | None = None,
         rate_limit: int | None = None,
+        by: int | None = None,
     ) -> tuple[dict[str, Any] | None, str]:
-        """Create a key. The raw value is returned **once** in the record."""
+        """Create a key. The raw value is returned **once** in the record.
+
+        `by` records which owner minted it, so an admin-issued key can be told
+        apart from one the owner created in the Mini App.
+        """
         owner_id = int(owner_id or 0)
         if not owner_id:
             return None, "an owner id is required"
@@ -227,6 +240,7 @@ class MusicAPI:
             "hash": hash_key(raw),
             "label": (label or "key").strip()[:40] or "key",
             "owner_id": owner_id,
+            "by": int(by or owner_id),
             "scopes": normalise_scopes(scopes),
             "active": True,
             "created_at": now,
@@ -239,7 +253,14 @@ class MusicAPI:
         await self._save(record)
         return {**record, "key": raw}, ""
 
-    async def revoke(self, owner_id: int | None, identifier: str, *, force: bool = False) -> bool:
+    async def revoke(
+        self,
+        owner_id: int | None,
+        identifier: str,
+        *,
+        force: bool = False,
+        by: int | None = None,
+    ) -> bool:
         """Deactivate by id, prefix or full key. `owner_id=None` = sudo."""
         identifier = (identifier or "").strip()
         if not identifier:
@@ -249,10 +270,15 @@ class MusicAPI:
                 continue
             if not force and owner_id is not None and int(item.get("owner_id", 0)) != int(owner_id):
                 return False
-            return await self._patch(item, {"active": False, "revoked_at": time.time()})
+            patch = {"active": False, "revoked_at": time.time()}
+            if by is not None:
+                patch["revoked_by"] = int(by)
+            return await self._patch(item, patch)
         return False
 
-    async def rotate(self, owner_id: int, identifier: str) -> tuple[dict[str, Any] | None, str]:
+    async def rotate(
+        self, owner_id: int, identifier: str, *, by: int | None = None
+    ) -> tuple[dict[str, Any] | None, str]:
         """Issue a replacement key and revoke the old one (same scopes/label)."""
         target = next((item for item in await self._load(fresh=True) if self._matches(item, identifier)), None)
         if target is None:
@@ -264,10 +290,116 @@ class MusicAPI:
             str(target.get("label") or "key"),
             scopes=target.get("scopes"),
             rate_limit=target.get("rate_limit"),
+            by=by if by is not None else owner_id,
         )
         if record is None:
             return None, error
-        await self._patch(target, {"active": False, "revoked_at": time.time(), "replaced_by": record["id"]})
+        await self._patch(
+            target,
+            {
+                "active": False,
+                "revoked_at": time.time(),
+                "revoked_by": int(by if by is not None else owner_id),
+                "replaced_by": record["id"],
+            },
+        )
+        return record, ""
+
+    async def find(
+        self, identifier: str, *, owner_id: int | None = None, force: bool = False
+    ) -> dict[str, Any] | None:
+        """One key record by id / prefix / raw value (never exposes the hash)."""
+        identifier = (identifier or "").strip()
+        if not identifier:
+            return None
+        for item in await self._load(fresh=True):
+            if not self._matches(item, identifier):
+                continue
+            if not force and owner_id is not None and int(item.get("owner_id", 0)) != int(owner_id):
+                return None
+            record = {key: value for key, value in item.items() if key != "hash"}
+            record["scopes"] = normalise_scopes(record.get("scopes"))
+            record["expired"] = bool(record.get("expires_at") and record["expires_at"] < time.time())
+            prefix = str(record.get("prefix") or "")
+            record["masked"] = f"{prefix}…" if prefix else ""
+            return record
+        return None
+
+    async def update_key(
+        self,
+        owner_id: int | None,
+        identifier: str,
+        *,
+        label: str | None = None,
+        scopes: Any = None,
+        days: int | None = None,
+        rate_limit: int | None = None,
+        force: bool = False,
+        by: int | None = None,
+    ) -> tuple[dict[str, Any] | None, str]:
+        """Edit a key in place: label, scopes, expiry, per-key rate limit.
+
+        Rotation is a *different* operation (it mints a new secret) — this one
+        never changes the key value, so a client that already holds it keeps
+        working while the owner tightens or widens what it may do.
+        """
+        identifier = (identifier or "").strip()
+        if not identifier:
+            return None, "an id, prefix or key value is required"
+        target = None
+        for item in await self._load(fresh=True):
+            if self._matches(item, identifier):
+                target = item
+                break
+        if target is None:
+            return None, "key not found"
+        if not force and owner_id is not None and int(target.get("owner_id", 0)) != int(owner_id):
+            return None, "that key belongs to someone else"
+        if not target.get("active", True):
+            return None, "that key is revoked"
+
+        patch: dict[str, Any] = {"updated_at": time.time()}
+        if by is not None:
+            patch["updated_by"] = int(by)
+        if label is not None:
+            text = str(label).strip()[:40]
+            if not text:
+                return None, "label cannot be empty"
+            patch["label"] = text
+        if scopes is not None:
+            chosen = normalise_scopes(scopes)
+            if not chosen:
+                return None, "unknown scopes (use read, search, download, admin)"
+            patch["scopes"] = chosen
+        if rate_limit is not None:
+            try:
+                value = int(rate_limit)
+            except (TypeError, ValueError):
+                return None, "rate_limit must be a number"
+            if value < 0:
+                return None, "rate_limit cannot be negative"
+            patch["rate_limit"] = value or None
+        if days is not None:
+            try:
+                span = int(days)
+            except (TypeError, ValueError):
+                return None, "days must be a number"
+            patch["expires_at"] = (
+                time.time() + span * 86400 if span > 0 else None
+            )
+        if label is None and scopes is None and rate_limit is None and days is None:
+            return None, "nothing to change (send label, scopes, days or rate_limit)"
+        if not await self._patch(target, patch):
+            return None, "could not save the change"
+        record = {key: value for key, value in target.items() if key != "hash"}
+        record["scopes"] = normalise_scopes(record.get("scopes"))
+        record["expired"] = bool(record.get("expires_at") and record["expires_at"] < time.time())
+        logger.info(
+            "api key %s updated for %s: %s",
+            record.get("prefix"),
+            record.get("owner_id"),
+            ", ".join(sorted(key for key in patch if key != "updated_at")),
+        )
         return record, ""
 
     async def keys(
@@ -459,7 +591,7 @@ class MusicAPI:
             "scopes": list(SCOPES),
             "rate_limit": int(self.settings.music_api_rate),
             "storage": storage.backend if storage is not None else "memory",
-            "version": "2.0",
+            "version": API_VERSION,
         }
 
 

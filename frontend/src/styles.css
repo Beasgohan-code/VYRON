@@ -1093,7 +1093,7 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
 .key-create .text-input { flex: 1; }
 .key-row {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) auto auto auto;
+  grid-template-columns: 34px minmax(0, 1fr) auto auto auto auto;
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
@@ -1103,6 +1103,41 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
   margin-bottom: 6px;
 }
 .key-glyph { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; background: var(--panel-2); color: var(--accent); }
+
+.chip-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 12px; }
+.chip-row .chip { padding: 4px 11px; font-size: 11.5px; }
+.text-input.tiny { width: 74px; padding: 6px 9px; font-size: 12px; }
+
+/* live source chain: green = answering, dim = cooling down or disabled */
+.source-strip {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  padding: 10px 12px; margin-bottom: 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel-2) 70%, transparent);
+}
+.source-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 9px; border-radius: var(--pill);
+  border: 1px solid var(--line);
+  font-size: 11.5px; color: var(--muted);
+}
+.source-pill i {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--muted); opacity: 0.5;
+}
+.source-pill.on { color: var(--text); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+.source-pill.on i { background: var(--ok); opacity: 1; box-shadow: 0 0 8px color-mix(in srgb, var(--ok) 60%, transparent); }
+.source-pill.off { text-decoration: line-through; opacity: 0.55; }
+
+.key-editor {
+  display: grid; gap: 8px; margin-top: 10px;
+  padding: 10px; border-radius: var(--radius-sm);
+  border: 1px dashed var(--line-strong);
+  background: var(--panel-2);
+}
+.key-editor .chip-row { margin-bottom: 0; }
+.key-editor-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 
 /* ── dock ───────────────────────────────────────────────────────────────── */
 .dock {

@@ -12,6 +12,7 @@ from string import Template
 
 from aiohttp import web
 
+from vyron.api.app import API_VERSION
 from vyron.config import settings
 from vyron.runtime import runtime
 
@@ -120,9 +121,13 @@ ENDPOINTS = [
     ("DELETE", "/v1/downloads/{job_id}", "Cancel a queued or running job", "download"),
     ("GET", "/v1/search?q=…", "Search YouTube (or POST JSON)", "search"),
     ("GET", "/v1/lyrics?title=…", "Synced lyrics from LRCLIB", "read"),
-    ("GET", "/v1/me", "Your key, scopes, usage and quota", "—"),
+    ("GET", "/v1/me", "Your key, capabilities, usage and expiry", "—"),
+    ("GET", "/v1/sources", "Every source in fallback order, with live health", "—"),
+    ("GET", "/v1/sources/{name}", "One source's detail", "—"),
     ("GET", "/v1/admin/keys", "List keys (masked)", "admin"),
     ("POST", "/v1/admin/keys", "Mint a key — returned once", "admin"),
+    ("GET", "/v1/admin/keys/{id}", "One key's detail", "admin"),
+    ("PATCH", "/v1/admin/keys/{id}", "Edit label, scopes, expiry or quota", "admin"),
     ("DELETE", "/v1/admin/keys/{id}", "Revoke a key by id or prefix", "admin"),
     ("GET", "/v1/metrics", "JSON metrics (or Prometheus text)", "admin"),
 ]
@@ -138,6 +143,9 @@ ERRORS = [
 ]
 
 CHANGELOG = [
+    ("2.1", "GET /v1/sources and /v1/sources/{name} — the fallback chain and each source's health. "
+           "GET /v1/me now reports capabilities, expiry and usage. Key detail + non-destructive "
+           "PATCH (label, scopes, expiry, per-key rate limit) replace revoke-and-reissue."),
     ("2.0", "Hashed keys, scopes, expiry, rotation, admin endpoints, metrics (JSON + Prometheus), "
            "canonical REST routes, OpenAPI 3.1, richer error envelope, request ids."),
     ("1.0", "the original track download, search, metadata, lyrics, keys and docs."),
@@ -410,7 +418,7 @@ async def render(request: web.Request) -> web.Response:
 
     html = PAGE.substitute(
         css=CSS,
-        api_version="2.0",
+        api_version=API_VERSION,
         bot_version=runtime.version,
         status_text="ready" if health_ready else "starting",
         nav_links="".join(

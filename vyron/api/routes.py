@@ -5,7 +5,8 @@
 #  relative to that prefix.  Two route families are served side by side:
 #
 #    canonical  POST /tracks · GET /tracks/{id} · GET /tracks/{id}/stream
-#               POST /search · GET /lyrics · GET /me · /admin/keys
+#               POST /search · GET /lyrics · GET /me · GET /sources
+#               GET/POST /keys · PATCH/DELETE /keys/{id} · /admin/keys
 #    legacy     POST /track/by-video-id · POST /track/by-query
 #               GET /info/by-video-id · GET /key          (legacy aliases)
 # ---------------------------------------------------------------------------
@@ -26,7 +27,7 @@ from vyron.api.metrics import METRICS
 from vyron.api.state import AUTH
 from vyron.api.security import authorize, describe, headers_for
 from vyron.config import settings
-from vyron.core.musicapi import SCOPES, get_music_api, mask_key
+from vyron.core.musicapi import MAX_KEYS_PER_OWNER, SCOPES, get_music_api, mask_key
 from vyron.runtime import runtime
 
 logger = logging.getLogger(__name__)
@@ -393,8 +394,74 @@ async def lyrics(request: web.Request) -> web.Response:
 
 # ── key self-service + admin ───────────────────────────────────────────────
 async def me(request: web.Request) -> web.Response:
+    """Who am I, what may I do, how much quota is left, when do I expire."""
     auth = await authorize(request)
-    return web.json_response({"ok": True, **describe(auth)}, headers=headers_for(auth))
+    info = describe(auth)
+    created = info.get("created_at")
+    expires = info.get("expires_at")
+    now = time.time()
+    info["usage"] = {
+        "requests": int((auth.record or {}).get("uses") or 0),
+        "bytes": int((auth.record or {}).get("bytes") or 0),
+        "last_used_at": (auth.record or {}).get("last_used_at"),
+        "age_seconds": round(now - created, 1) if created else None,
+        "expires_in": round(expires - now, 1) if expires else None,
+    }
+    info["capabilities"] = {
+        scope: info["scopes"].count(scope) > 0 or info["mode"] in {"owner", "open"}
+        for scope in SCOPES
+    }
+    info["available_scopes"] = list(SCOPES)
+    return web.json_response({"ok": True, **info}, headers=headers_for(auth))
+
+
+# ── sources ────────────────────────────────────────────────────────────────
+async def sources_route(request: web.Request) -> web.Response:
+    """Every source VYRON can use, in fallback order, with live health."""
+    auth = await authorize(request, "read")
+    from vyron.core import sources as registry
+
+    rows = registry.status(settings)
+    name = request.match_info.get("name")
+    if name:
+        match = next((row for row in rows if row["name"] == name), None)
+        if match is None:
+            raise ApiError("not_found", f"no source called '{name}'")
+        match["tracks"] = _source_usage(name)
+        return web.json_response({"ok": True, "source": match}, headers=headers_for(auth))
+
+    return web.json_response(
+        {
+            "ok": True,
+            "primary": ["ytmusic", "ytdlp"],
+            "fallback": [row["name"] for row in rows if row["kind"] == "stream"],
+            "catalogues": [row["name"] for row in rows if row["kind"] == "catalogue"],
+            "order": registry.describe(settings),
+            "sources": [{**row, "tracks": _source_usage(row["name"])} for row in rows],
+        },
+        headers=headers_for(auth),
+    )
+
+
+def _actor(auth) -> int:
+    """The owner id behind the current request (key owner, else the owner)."""
+    if auth.record:
+        return int(auth.record.get("owner_id") or 0)
+    return int(settings.owner_id or 0)
+
+
+def _source_usage(name: str) -> int:
+    """How many successful resolves this process has seen for *name*."""
+    try:
+        from vyron.core.resolvers import HEALTH
+
+        summary = HEALTH.summary()
+        for key, value in summary.items():
+            if str(key).lower().startswith(name):
+                return int((value or {}).get("ok") or 0)
+    except Exception:  # pragma: no cover - health is advisory
+        pass
+    return 0
 
 
 async def admin_keys(request: web.Request) -> web.Response:
@@ -409,12 +476,7 @@ async def admin_keys(request: web.Request) -> web.Response:
                 "ok": True,
                 "count": len(records),
                 "keys": [
-                    {
-                        **record,
-                        "key": f"{record.get('prefix')}…",
-                        "masked": mask_key(str(record.get("hash") or record.get("prefix") or "")),
-                    }
-                    for record in records
+                    {**record, "key": record.get("masked") or ""} for record in records
                 ],
                 "requested_by": mask_key(str((auth.record or {}).get("prefix") or "")),
             },
@@ -429,6 +491,7 @@ async def admin_keys(request: web.Request) -> web.Response:
         scopes=data.get("scopes"),
         days=int(data["days"]) if str(data.get("days") or "").isdigit() else None,
         rate_limit=int(data["rate_limit"]) if str(data.get("rate_limit") or "").isdigit() else None,
+        by=_actor(auth),
     )
     if record is None:
         raise ApiError("bad_request", error or "could not create key")
@@ -445,31 +508,144 @@ async def admin_keys(request: web.Request) -> web.Response:
     )
 
 
+async def own_keys(request: web.Request) -> web.Response:
+    """Self-service: a key manages *its own owner's* keys, nothing else.
+
+    The Mini App uses owner-token auth for the same job; this is the path for a
+    script or a CI pipeline that already holds a `vyrn_` key and should not need
+    an owner token to rotate itself.
+    """
+    auth = await authorize(request, "read")
+    owner_id = _actor(auth)
+    if not owner_id:
+        raise ApiError("forbidden_scope", "this key has no owner to manage")
+    api = get_music_api()
+
+    if request.method == "GET":
+        records = await api.keys(owner_id, reveal=False, include_revoked=False)
+        return web.json_response(
+            {
+                "ok": True,
+                "owner_id": owner_id,
+                "count": len(records),
+                "limit": MAX_KEYS_PER_OWNER,
+                "keys": records,
+            },
+            headers=headers_for(auth),
+        )
+
+    data = await payload(request)
+    if not auth.has("admin"):
+        # Minting is a privileged act even on your own account: otherwise a
+        # stolen read key could be laundered into a download key.
+        raise ApiError("forbidden_scope", "creating keys requires the admin scope")
+    record, error = await api.issue(
+        owner_id,
+        str(data.get("label") or "api"),
+        scopes=data.get("scopes"),
+        days=int(data["days"]) if str(data.get("days") or "").isdigit() else None,
+        rate_limit=int(data["rate_limit"]) if str(data.get("rate_limit") or "").isdigit() else None,
+        by=_actor(auth),
+    )
+    if record is None:
+        raise ApiError("bad_request", error or "could not create key")
+    created = {key: value for key, value in record.items() if key != "hash"}
+    created["masked"] = mask_key(str(record.get("key") or ""))
+    return web.json_response({"ok": True, "created": created}, status=201, headers=headers_for(auth))
+
+
+async def own_key_item(request: web.Request) -> web.Response:
+    auth = await authorize(request, "read")
+    owner_id = _actor(auth)
+    identifier = request.match_info.get("identifier", "")
+    api = get_music_api()
+
+    if request.method == "DELETE":
+        revoked = await api.revoke(owner_id, identifier, by=_actor(auth))
+        if not revoked:
+            raise ApiError("not_found", "no key of yours matches that id or prefix")
+        return web.json_response(
+            {"ok": True, "revoked": identifier}, headers=headers_for(auth)
+        )
+
+    data = await payload(request)
+    days = data.get("days", data.get("expires_in_days"))
+    record, error = await api.update_key(
+        owner_id,
+        identifier,
+        label=data.get("label"),
+        scopes=data.get("scopes"),
+        days=int(days) if str(days).lstrip("-").isdigit() else None,
+        rate_limit=(
+            int(data["rate_limit"]) if str(data.get("rate_limit")).lstrip("-").isdigit() else None
+        ),
+        by=_actor(auth),
+    )
+    if record is None:
+        raise ApiError("not_found" if "not found" in error or "belongs" in error else "bad_request", error)
+    return web.json_response({"ok": True, "key": record}, headers=headers_for(auth))
+
+
 async def admin_key_item(request: web.Request) -> web.Response:
+    """GET one key's details · PATCH its label/scopes/expiry/quota · DELETE it."""
     auth = await authorize(request, "admin")
     identifier = request.match_info.get("identifier", "")
-    revoked = await get_music_api().revoke(None, identifier, force=True)
+    if request.method in {"GET", "PATCH"}:
+        if request.method == "GET":
+            record = await get_music_api().find(identifier, force=True)
+            if record is None:
+                raise ApiError("not_found", "no key matches that id, prefix or value")
+            record["quota"] = {
+                "limit_per_minute": get_music_api()._limit_for(record),
+                "requests": int(record.get("uses") or 0),
+                "bytes": int(record.get("bytes") or 0),
+            }
+            return web.json_response({"ok": True, "key": record}, headers=headers_for(auth))
+
+        data = await payload(request)
+        days = data.get("days", data.get("expires_in_days"))
+        record, error = await get_music_api().update_key(
+            None,
+            identifier,
+            label=data.get("label"),
+            scopes=data.get("scopes"),
+            days=int(days) if str(days or "").lstrip("-").isdigit() else None,
+            rate_limit=(
+                int(data["rate_limit"])
+                if str(data.get("rate_limit")).lstrip("-").isdigit()
+                else None
+            ),
+            force=True,
+            by=_actor(auth),
+        )
+        if record is None:
+            raise ApiError("not_found" if "not found" in error else "bad_request", error)
+        return web.json_response({"ok": True, "key": record}, headers=headers_for(auth))
+
+    revoked = await get_music_api().revoke(None, identifier, force=True, by=_actor(auth))
     if not revoked:
         raise ApiError("not_found", "no key matches that id, prefix or value")
     return web.json_response(
-        {"ok": True, "revoked": identifier, "by": mask_key(str((auth.record or {}).get("prefix") or ""))},
+        {"ok": True, "revoked": identifier, "by": _actor(auth)},
         headers=headers_for(auth),
     )
 
 
 async def admin_rotate(request: web.Request) -> web.Response:
-    await authorize(request, "admin")
+    auth = await authorize(request, "admin")
     identifier = request.match_info.get("identifier", "")
     record, error = None, "not found"
     for candidate in await get_music_api().keys(reveal=False):
         if candidate.get("id") == identifier or candidate.get("prefix") == identifier:
-            record, error = await get_music_api().rotate(int(candidate.get("owner_id") or 0), identifier)
+            record, error = await get_music_api().rotate(
+                int(candidate.get("owner_id") or 0), identifier, by=_actor(auth)
+            )
             break
     if record is None:
         raise ApiError("not_found", error)
-    return web.json_response(
-        {"ok": True, "created": {**{k: v for k, v in record.items() if k != "hash"}, "masked": mask_key(record["key"])}}
-    )
+    created = {key: value for key, value in record.items() if key != "hash"}
+    created["masked"] = mask_key(str(record.get("key") or ""))
+    return web.json_response({"ok": True, "created": created}, headers=headers_for(auth))
 
 
 # ── docs / spec ────────────────────────────────────────────────────────────

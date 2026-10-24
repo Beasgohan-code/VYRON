@@ -18,10 +18,9 @@ from vyron.api.errors import ApiError, envelope, error_response, request_id
 from vyron.api.metrics import METRICS
 from vyron.api.state import MOUNTED, REQUEST_ID
 from vyron.config import settings
+from vyron.core.musicapi import API_VERSION
 
 logger = logging.getLogger(__name__)
-
-API_VERSION = "2.0"
 
 
 # ── middleware ─────────────────────────────────────────────────────────────
@@ -121,8 +120,16 @@ def build_app() -> web.Application:
 
     # keys
     router.add_get("/me", routes.me)
+    router.add_get("/sources", routes.sources_route)
+    router.add_get("/sources/{name}", routes.sources_route)
+    router.add_get("/keys", routes.own_keys)
+    router.add_post("/keys", routes.own_keys)
+    router.add_patch("/keys/{identifier}", routes.own_key_item)
+    router.add_delete("/keys/{identifier}", routes.own_key_item)
     router.add_get("/admin/keys", routes.admin_keys)
     router.add_post("/admin/keys", routes.admin_keys)
+    router.add_get("/admin/keys/{identifier}", routes.admin_key_item)
+    router.add_patch("/admin/keys/{identifier}", routes.admin_key_item)
     router.add_delete("/admin/keys/{identifier}", routes.admin_key_item)
     router.add_post("/admin/keys/{identifier}/rotate", routes.admin_rotate)
 

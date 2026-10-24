@@ -1,4 +1,5 @@
 import type {
+  ApiKeyUpdate,
   ActionResult,
   ApiHealth,
   ApiKeyOptions,
@@ -210,6 +211,12 @@ export const api = {
 
   revokeKey: (id: string) =>
     request<ApiKeyPayload & { error?: string }>("/api/keys", { action: "revoke", id }),
+
+  updateKey: (change: ApiKeyUpdate | string, patch: Omit<ApiKeyUpdate, "id"> = {}) =>
+    request<ApiKeyPayload & { error?: string }>("/api/keys", {
+      action: "update",
+      ...(typeof change === "string" ? { id: change, ...patch } : change),
+    }),
 
   rotateKey: (id: string) =>
     request<ApiKeyPayload & { error?: string }>("/api/keys", { action: "rotate", id }),

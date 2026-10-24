@@ -78,6 +78,25 @@ export interface ApiKey {
   rate_limit?: number | null;
 }
 
+export interface ApiSource {
+  name: string;
+  label?: string;
+  kind: "search" | "catalogue" | "stream" | string;
+  enabled: boolean;
+  available: boolean;
+  failures?: number;
+  detail?: string;
+  last_ok?: number | null;
+}
+
+export interface ApiKeyUpdate {
+  id: string;
+  label?: string;
+  scopes?: ApiScope[];
+  days?: number | null;
+  rate_limit?: number | null;
+}
+
 export interface ApiMetrics {
   requests: number;
   downloads: number;
@@ -113,6 +132,10 @@ export interface ApiKeyPayload {
   };
   created?: ApiKey;
   revoked?: boolean;
+  updated?: boolean;
+  sources?: ApiSource[];
+  source_order?: string;
+  limits?: { max_keys: number };
 }
 
 export interface ApiKeyOptions {

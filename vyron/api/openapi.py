@@ -102,7 +102,7 @@ def spec(request: web.Request) -> dict:
         "openapi": "3.1.0",
         "info": {
             "title": "VYRON Music API",
-            "version": "2.0",
+            "version": "2.1",
             "summary": "Downloads, streaming, search, metadata, lyrics and keys for Telegram music bots.",
             "description": (
                 "A production-grade music API served by the VYRON bot on the "
@@ -119,6 +119,7 @@ def spec(request: web.Request) -> dict:
             {"name": "Discovery", "description": "search and metadata"},
             {"name": "Lyrics", "description": "LRCLIB lyrics"},
             {"name": "Keys", "description": "key introspection and administration"},
+            {"name": "Sources", "description": "which services VYRON can play from, and their health"},
         ],
         "components": {
             "securitySchemes": {
@@ -357,8 +358,39 @@ def spec(request: web.Request) -> dict:
             "/me": {
                 "get": {
                     "tags": ["Keys"],
-                    "summary": "The calling key: scopes, usage and quota",
+                    "summary": "The calling key: scopes, capabilities, usage and expiry",
+                    "description": (
+                        "`capabilities` says exactly what this key may do, `usage` carries "
+                        "request/byte counters and `expires_in` seconds until it stops working."
+                    ),
                     "responses": {"200": {"description": "key info"}, **_err(403, 429)},
+                }
+            },
+            "/sources": {
+                "get": {
+                    "tags": ["Sources"],
+                    "summary": "Every playback source, in fallback order",
+                    "description": (
+                        "`primary` is what answers first, `fallback` is the direct-stream chain "
+                        "used when YouTube returns nothing, and `sources[]` reports each entry's "
+                        "`available` flag live (a failing source cools down for 60 s)."
+                    ),
+                    "responses": {"200": {"description": "sources"}, **_err(401, 403)},
+                }
+            },
+            "/sources/{name}": {
+                "get": {
+                    "tags": ["Sources"],
+                    "summary": "One source's detail and health",
+                    "parameters": [
+                        {
+                            "name": "name",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "string", "enum": ["ytmusic", "ytdlp", "audius", "jiosaavn", "spotify", "deezer", "apple", "soundcloud"]},
+                        }
+                    ],
+                    "responses": {"200": {"description": "source"}, **_err(403, 404)},
                 }
             },
             "/admin/keys": {
@@ -376,11 +408,42 @@ def spec(request: web.Request) -> dict:
                 },
             },
             "/admin/keys/{identifier}": {
+                "get": {
+                    "tags": ["Keys"],
+                    "summary": "One key's details (masked, never the hash)",
+                    "responses": {"200": {"description": "key"}, **_err(403, 404)},
+                },
+                "patch": {
+                    "tags": ["Keys"],
+                    "summary": "Edit a key without rotating it",
+                    "description": (
+                        "Change `label`, `scopes`, `days` (expiry; `0` = never) or `rate_limit` "
+                        "(requests per minute; `0` = the deployment default). The secret stays "
+                        "valid, so a client holding it keeps working."
+                    ),
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "label": {"type": "string", "maxLength": 40},
+                                        "scopes": {"type": "array", "items": {"type": "string"}},
+                                        "days": {"type": "integer"},
+                                        "rate_limit": {"type": "integer"},
+                                    },
+                                }
+                            }
+                        },
+                    },
+                    "responses": {"200": {"description": "updated"}, **_err(400, 403, 404)},
+                },
                 "delete": {
                     "tags": ["Keys"],
                     "summary": "Revoke a key by id or prefix",
                     "responses": {"200": {"description": "revoked"}, **_err(403, 404)},
-                }
+                },
             },
             # ── legacy aliases (old clients keep working) ──────────────────
             "/track/by-video-id": {
