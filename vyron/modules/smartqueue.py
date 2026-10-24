@@ -16,7 +16,7 @@ from pyrogram.types import Message
 
 from vyron.core import pending
 from vyron.runtime import runtime
-from vyron.ui import blocks as B
+from vyron.ui import blocks as B, cards
 from vyron.ui import rich
 from vyron.ui.progress import fmt_duration, human_time, truncate
 from vyron.ui.theme import E
@@ -52,10 +52,8 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.note(
-                    f"{E('moon')} Nothing is playing. "
-                    f"Try <code>/suggest lofi hip hop</code>."
-                ),
+                cards.info_card("Nothing is playing. "
+                    "Try <code>/suggest lofi hip hop</code>."),
                 reply_to=message.id,
             )
             return
@@ -64,7 +62,7 @@ def register(client: Client) -> None:
         status = await rich.send(
             client,
             message.chat.id,
-            B.heading(f"{E('search')} finding similar", 3)
+            B.banner("finding similar", glyph="search")
             + B.note(f"{B.think()} Looking for tracks like <b>{rich.esc(truncate(query, 46))}</b>"),
             reply_to=message.id,
             editable=True,
@@ -83,7 +81,7 @@ def register(client: Client) -> None:
                 client,
                 message.chat.id,
                 status.id,
-                B.note(f"{E('warn')} {rich.esc(truncate(str(exc), 160))}"),
+                cards.warn_card(f"{rich.esc(truncate(str(exc), 160))}"),
             )
             return
 
@@ -92,7 +90,7 @@ def register(client: Client) -> None:
                 client,
                 message.chat.id,
                 status.id,
-                B.note(f"{E('info')} No similar tracks found for that."),
+                cards.info_card("No similar tracks found for that."),
             )
             return
 
@@ -106,7 +104,7 @@ def register(client: Client) -> None:
         )
 
         markup = (
-            B.heading(f"{E('spark')} up next", 3)
+            B.banner("up next", glyph="spark")
             + B.note(
                 f"{E('note')} Suggestions for <b>{rich.esc(truncate(query, 44))}</b>"
                 " • pick one to queue it"
@@ -155,7 +153,7 @@ def register(client: Client) -> None:
                     client,
                     message.chat.id,
                     status.id,
-                    B.note(f"{E('warn')} {rich.esc(truncate(str(exc), 160))}"),
+                    cards.warn_card(f"{rich.esc(truncate(str(exc), 160))}"),
                 )
             return
         if status:
@@ -181,7 +179,7 @@ def register(client: Client) -> None:
         state = runtime.player.queues.get(message.chat.id)
         remaining = state.remaining() if state.current else 0
         remaining += sum(track.duration for track in state.queue)
-        markup = B.heading(f"{E('queue')} queue health", 3) + B.kv(
+        markup = B.banner("queue health", glyph="queue") + B.kv(
             [
                 (f"{E('queue')} queued", f"<b>{len(state.queue)}</b> tracks"),
                 (f"{E('clock')} remaining", f"<b>{human_time(remaining)}</b>"),

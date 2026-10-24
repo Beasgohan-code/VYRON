@@ -65,7 +65,7 @@ def locks_panel(locks: dict, flood: dict) -> str:
             )
         )
     flood_state = "on" if flood.get("enabled") else "off"
-    body = B.heading(f"{E('shield')} content locks", 2) + B.table(None, []) + f"<table>{rows}</table>"
+    body = B.banner("content locks", glyph="shield") + B.table(None, []) + f"<table>{rows}</table>"
     body += B.kv(
         [
             (f"{E('wave')} Anti-flood", f"<b>{flood_state}</b>"),
@@ -171,7 +171,7 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.note("Usage: <code>/lock media</code> · options: " + ", ".join(LOCK_LABELS)),
+                cards.info_card("Usage: <code>/lock media</code> · options: " + ", ".join(LOCK_LABELS)),
             )
             return
         value = message.command[0].lower() == "lock"

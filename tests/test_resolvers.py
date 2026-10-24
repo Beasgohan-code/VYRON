@@ -322,7 +322,9 @@ def test_sources_command_renders_a_verdict(monkeypatch):
 
     asyncio.run(client.registry.handler(client, message))
     markup = captured.get("edited") or captured.get("sent") or ""
-    assert "resolvers" in markup.lower()
+    from vyron.ui.theme import un_small_caps
+
+    assert "resolvers" in un_small_caps(markup).lower()
     assert "No tier answered" in markup
     assert "curl_cffi" in markup
 

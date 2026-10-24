@@ -98,7 +98,7 @@ def logger_card() -> str:
     on = logsink.is_enabled()
     channel = settings.logger_id
     body = (
-        B.heading(f"{E('live')} log channel", 2)
+        B.banner("log channel", glyph="live")
         + B.kv(
             [
                 ("state", f"<b>{'on' if on else 'off'}</b>"),

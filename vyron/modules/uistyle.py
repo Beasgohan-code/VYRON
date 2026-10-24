@@ -96,7 +96,7 @@ def card() -> str:
         (f"{E('spark')} premium emoji", "<b>on</b>" if rich.RICH_AVAILABLE else "plain"),
     ]
     body = (
-        B.heading(f"{E('interface')} interface", 2)
+        B.banner("interface", glyph="interface")
         + B.kv(rows)
         + B.note(
             "<b>Rich cards</b> add headings, tables and in-message buttons.\n"
@@ -198,7 +198,7 @@ async def check(client: Client, chat_id: int) -> str:
             f"{E('check')} The card above was sent through the "
             f"<b>{STYLES[current()]}</b> lane."
         )
-    return B.heading(f"{E('shield')} ui check", 2) + B.kv(rows) + B.note(tail)
+    return B.banner("ui check", glyph="shield") + B.kv(rows) + B.note(tail)
 
 
 def register(client: Client) -> None:
@@ -210,7 +210,7 @@ def register(client: Client) -> None:
         await rich.send(
             client,
             message.chat.id,
-            B.note(f"{E('shield')} Owner only — the interface is a deployment-wide choice."),
+            cards.locked_card("Owner only — the interface is a deployment-wide choice."),
             reply_to=message.id,
         )
         return False
@@ -227,16 +227,14 @@ def register(client: Client) -> None:
                 await rich.send(
                     client,
                     message.chat.id,
-                    B.note(
-                        f"{E('warn')} Unknown style — use <code>rich</code> or <code>classic</code>."
-                    ),
+                    cards.warn_card("Unknown style — use <code>rich</code> or <code>classic</code>."),
                     reply_to=message.id,
                 )
                 return
             await rich.send(
                 client,
                 message.chat.id,
-                B.heading(f"{E('check')} interface switched", 3)
+                B.banner("interface switched", glyph="check")
                 + B.note(f"Now speaking <b>{STYLES[chosen]}</b>. It survives restarts."),
                 reply_to=message.id,
             )

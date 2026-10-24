@@ -13,7 +13,7 @@ from pyrogram.types import Message
 from vyron.core import chatcfg, i18n
 from vyron.ui import blocks as B
 from vyron.ui import rich
-from vyron.ui.theme import E, small_caps
+from vyron.ui.theme import E
 from vyron.utils.helpers import is_chat_admin, is_owner, is_private_chat
 from vyron.utils.commands import cmd
 
@@ -32,7 +32,7 @@ def language_card(current: str, *, text_key: str = "lang.note") -> str:
         for code, name in i18n.available().items()
     ]
     return (
-        B.heading(f"{E('globe')} {small_caps(catalog.t('lang.title'))}", 2)
+        B.banner(catalog.t('lang.title'), glyph="globe")
         + B.note(catalog.t(text_key))
         + B.table(None, rows, border=0)
         + B.note(

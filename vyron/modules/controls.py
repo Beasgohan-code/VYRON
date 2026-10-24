@@ -160,7 +160,7 @@ def register(client: Client) -> None:
         def _status() -> str:
             lane = auto.describe(state.mood, state.language) or "no lane — anything goes"
             return (
-                B.heading(f"{E('spark')} autoplay", 3)
+                B.banner("autoplay", glyph="spark")
                 + B.kv(
                     [
                         ("state", "<b>on</b>" if state.autoplay else "<b>off</b>"),
@@ -191,7 +191,7 @@ def register(client: Client) -> None:
                 await rich.send(
                     client_,
                     chat_id,
-                    B.note(f"{E('info')} Pick a mood: {moods}\nOr clear it with <code>/autoplay mood off</code>."),
+                    cards.info_card(f"Pick a mood: {moods}\nOr clear it with <code>/autoplay mood off</code>."),
                 )
                 return
             if value in {"off", "none", "clear", "any"}:
@@ -202,7 +202,7 @@ def register(client: Client) -> None:
                 await rich.send(
                     client_,
                     chat_id,
-                    B.note(f"{E('warn')} Unknown mood — try {', '.join(sorted(auto.MOODS))}."),
+                    cards.warn_card(f"Unknown mood — try {', '.join(sorted(auto.MOODS))}."),
                 )
                 return
             await _player().persist(chat_id)
@@ -216,7 +216,7 @@ def register(client: Client) -> None:
                 await rich.send(
                     client_,
                     chat_id,
-                    B.note(f"{E('info')} Pick a language: {codes}\nOr clear it with <code>/autoplay lang off</code>."),
+                    cards.info_card(f"Pick a language: {codes}\nOr clear it with <code>/autoplay lang off</code>."),
                 )
                 return
             if value in {"off", "none", "clear", "any"}:
@@ -227,7 +227,7 @@ def register(client: Client) -> None:
                 await rich.send(
                     client_,
                     chat_id,
-                    B.note(f"{E('warn')} Unknown language — try {', '.join(sorted(auto.LANGUAGES))}."),
+                    cards.warn_card(f"Unknown language — try {', '.join(sorted(auto.LANGUAGES))}."),
                 )
                 return
             await _player().persist(chat_id)
@@ -244,11 +244,9 @@ def register(client: Client) -> None:
         await rich.send(
             client_,
             chat_id,
-            B.note(
-                f"{E('info')} <code>/autoplay</code> toggles · "
-                f"<code>/autoplay mood chill</code> · <code>/autoplay lang malayalam</code> · "
-                f"<code>/autoplay status</code>"
-            ),
+            cards.info_card("<code>/autoplay</code> toggles · "
+                "<code>/autoplay mood chill</code> · <code>/autoplay lang malayalam</code> · "
+                "<code>/autoplay status</code>"),
         )
 
     @client.on_message(cmd(["np"]))

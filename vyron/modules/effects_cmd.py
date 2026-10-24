@@ -8,7 +8,7 @@ from pyrogram.types import Message
 
 from vyron.core import chatcfg, effects
 from vyron.runtime import runtime
-from vyron.ui import blocks as B
+from vyron.ui import blocks as B, cards
 from vyron.ui import rich
 from vyron.ui.theme import E
 from vyron.utils.helpers import command_args, is_chat_admin, is_owner
@@ -20,11 +20,12 @@ async def _active(chat_id: int) -> list[str]:
 
 
 def panel(active: list[str]) -> str:
-    rows = []
+    """The effects board — every filter, what it sounds like, one tap each."""
+    rows: list[tuple[str, str, str]] = []
     buttons: list[str] = []
     for name, effect in effects.EFFECTS.items():
         on = name in active
-        rows.append((f"{'●' if on else '○'} <b>{effect.label}</b>", f"<i>{effect.note}</i>"))
+        rows.append((("check" if on else ""), effect.label, f"<i>{effect.note}</i>"))
         buttons.append(
             B.btn(
                 f"{'●' if on else '○'} {effect.label}",
@@ -32,23 +33,28 @@ def panel(active: list[str]) -> str:
                 style="success" if on else None,
             )
         )
-    head = B.heading(f"{E('spark')} audio effects", 2)
-    note = B.note(
-        "Effects are applied from the next track. "
-        f"Up to {effects.MAX_ACTIVE} can be active at once."
-    )
-    current = B.kv([(f"{E('bolt')} Active", f"<b>{effects.labels(active)}</b>")])
     return (
-        head
-        + note
-        + B.table(None, rows)
-        + current
-        + B.divider()
-        + B.grid(buttons, columns=2)
-        + B.row(
-            B.btn(f"{E('close')} Reset all", data="v:fx:off", style="danger"),
-            B.btn(f"{E('check')} Close", data="v:close"),
+        B.banner("audio effects", glyph="spark", meta=f"<i>{len(active)}/{effects.MAX_ACTIVE}</i>")
+        + B.context(
+            "Changes the sound of the live stream. Picks up from the next track — "
+            "nothing restarts."
         )
+        + B.fields(
+            [
+                ("bolt", "active", f"<b>{effects.labels(active)}</b>"),
+                ("info", "limit", f"up to <b>{effects.MAX_ACTIVE}</b> at once"),
+            ]
+        )
+        + B.section_title("available")
+        + B.items(rows)
+        + B.actions(
+            B.grid(buttons, columns=2),
+            B.row(
+                B.btn(f"{E('cross')} Reset all", data="v:fx:off", style="danger"),
+                B.btn(f"{E('close')} Done", data="v:close"),
+            ),
+        )
+        + B.footer(f"{E('note')} tap a filter to toggle it · the ● ones are on")
     )
 
 
@@ -66,7 +72,14 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 chat_id,
-                B.row(B.btn(f"{E('shield')} Admins only", data="v:noop", style="danger")),
+                cards.change_card(
+                    "admins only",
+                    glyph="shield",
+                    label="who can change this",
+                    value="chat admins",
+                    note="Ask an admin of this group, or the bot owner, to switch effects on.",
+                    actions=B.row(B.btn(f"{E('spark')} The board", data="v:fx", style="primary")),
+                ),
             )
             return
 
@@ -75,15 +88,31 @@ def register(client: Client) -> None:
         if runtime.player:
             runtime.player.queues.get(chat_id).effects = accepted
 
-        parts = [B.kv([(f"{E('spark')} Active", f"<b>{effects.labels(accepted)}</b>")])]
-        if rejected:
-            parts.append(
-                B.note(
-                    f"{E('warn')} unknown: <code>{rich.esc(', '.join(rejected))}</code>\n"
-                    f"try: <code>{', '.join(list(effects.EFFECTS)[:6])}</code>"
-                )
-            )
-        await rich.send(client, chat_id, "".join(parts), reply_to=message.id)
+        await rich.send(
+            client,
+            chat_id,
+            cards.change_card(
+                "effects updated",
+                glyph="spark",
+                label="active",
+                value=f"<b>{effects.labels(accepted)}</b>",
+                note=(
+                    "One of those is not a filter I know — the rest were kept."
+                    if rejected
+                    else "Applied from the next track."
+                ),
+                extra=(
+                    [("warn", "ignored", f"<code>{rich.esc(', '.join(rejected))}</code>")]
+                    if rejected
+                    else []
+                ),
+                actions=B.row(
+                    B.btn(f"{E('spark')} The board", data="v:fx", style="primary"),
+                    B.btn(f"{E('close')} Close", data="v:close"),
+                ),
+            ),
+            reply_to=message.id,
+        )
 
 
 
@@ -97,13 +126,35 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 chat_id,
-                B.row(B.btn(f"{E('shield')} Admins only", data="v:noop", style="danger")),
+                cards.change_card(
+                    "admins only",
+                    glyph="shield",
+                    label="who can change this",
+                    value="chat admins",
+                    note="Ask an admin of this group, or the bot owner, to switch effects on.",
+                    actions=B.row(B.btn(f"{E('spark')} The board", data="v:fx", style="primary")),
+                ),
             )
             return
         current = await _active(chat_id)
         if enable:
             if name in current:
-                await rich.send(client, chat_id, B.note(f"{E('info')} <b>{name}</b> is already on."))
+                await rich.send(
+                    client,
+                    chat_id,
+                    cards.change_card(
+                        "already on",
+                        glyph="info",
+                        label="filter",
+                        value=f"<b>{effects.EFFECTS[name].label}</b>",
+                        note="It is already shaping the stream — nothing changed.",
+                        actions=B.row(
+                            B.btn(f"{E('spark')} The board", data="v:fx", style="primary"),
+                            B.btn(f"{E('close')} Close", data="v:close"),
+                        ),
+                    ),
+                    reply_to=message.id,
+                )
                 return
             updated = effects.resolve([*current, name])
         else:
@@ -114,10 +165,17 @@ def register(client: Client) -> None:
         await rich.send(
             client,
             chat_id,
-            B.note(
-                f"{E('check') if enable else E('cross')} "
-                f"<b>{effects.EFFECTS[name].label}</b> {'on' if enable else 'off'} · "
-                f"active: {effects.labels(updated)}"
+            cards.change_card(
+                f"{effects.EFFECTS[name].label} {'on' if enable else 'off'}",
+                glyph="check" if enable else "cross",
+                label="active",
+                value=f"<b>{effects.labels(updated)}</b>",
+                note="The next track comes through with it.",
+                actions=B.row(
+                    B.btn(f"{E('spark')} The board", data="v:fx", style="primary"),
+                    B.btn("↩ Undo", data=f"v:fx:{name}"),
+                    B.btn(f"{E('close')} Close", data="v:close"),
+                ),
             ),
             reply_to=message.id,
         )
@@ -127,7 +185,7 @@ def register(client: Client) -> None:
         name = effects.resolve([command_args(message).strip()])
         if not name:
             names = ", ".join(effects.EFFECTS)
-            await rich.send(client, message.chat.id, B.note(f"{E('info')} Pick one: {names}"))
+            await rich.send(client, message.chat.id, cards.warn_card(f"Which filter? Pick one: <code>{names}</code>"))
             return
         await _toggle_effect(message, name[0], True)
 
@@ -138,11 +196,33 @@ def register(client: Client) -> None:
             await chatcfg.set(message.chat.id, "effects", [])
             if runtime.player:
                 runtime.player.queues.get(message.chat.id).effects = []
-            await rich.send(client, message.chat.id, B.note(f"{E('cross')} All effects off."))
+            await rich.send(
+                client,
+                message.chat.id,
+                cards.change_card(
+                    "effects cleared",
+                    glyph="cross",
+                    label="active",
+                    value="<b>none</b>",
+                    note="The stream is back to the original audio from the next track.",
+                    actions=B.row(
+                        B.btn(f"{E('spark')} The board", data="v:fx", style="primary"),
+                        B.btn(f"{E('close')} Close", data="v:close"),
+                    ),
+                ),
+                reply_to=message.id,
+            )
             return
         name = effects.resolve([arg])
         if not name:
-            await rich.send(client, message.chat.id, B.note(f"{E('warn')} Unknown effect."))
+            await rich.send(
+                client,
+                message.chat.id,
+                cards.warn_card(
+                    "That is not a filter I know. Send <code>/effects</code> to see the board."
+                ),
+                reply_to=message.id,
+            )
             return
         await _toggle_effect(message, name[0], False)
 

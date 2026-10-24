@@ -671,6 +671,18 @@ def register(client: Client) -> None:
 
         # ── favourites / lyrics ────────────────────────────────────────────
         if action == "fav":
+            if arg == "list":
+                # `v:fav:list` — the shelf itself. Kept on the same action so
+                # the router's action list does not grow a near-duplicate.
+                items = await runtime.storage.favorites(cq.from_user.id, limit=10)
+                await _show(
+                    client,
+                    cq,
+                    cards.favorites_card(items),
+                    keyboards.back_close("v:help:tools"),
+                )
+                await cq.answer(f"{len(items)} saved")
+                return
             if not state or not state.current:
                 await cq.answer("Nothing is playing.", show_alert=True)
                 return

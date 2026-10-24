@@ -43,7 +43,7 @@ def register(client: Client) -> None:
         await rich.send(
             client,
             message.chat.id,
-            B.heading(f"{E('shield')} sudoers", 3)
+            B.banner("sudoers", glyph="shield")
             + (B.bullets(lines) if lines else B.note(f"{E('warn')} No owners configured."))
             + B.footer(
                 f"{E('note')} add ids via <code>SUDO_USERS=1,2,3</code> in .env, then restart"

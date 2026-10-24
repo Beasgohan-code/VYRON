@@ -232,7 +232,7 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.note("Reply to a user or pass an id — <code>/tmute 10m</code> for a timed mute."),
+                cards.info_card("Reply to a user or pass an id — <code>/tmute 10m</code> for a timed mute."),
             )
             return
         try:
@@ -627,11 +627,9 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.note(
-                    "Usage: <code>/setwelcome Welcome {mention} to {chat}!</code>\n"
+                cards.info_card("Usage: <code>/setwelcome Welcome {mention} to {chat}!</code>\n"
                     "Placeholders: <code>{mention}</code> <code>{first}</code> "
-                    "<code>{chat}</code> <code>{id}</code> <code>{count}</code>"
-                ),
+                    "<code>{chat}</code> <code>{id}</code> <code>{count}</code>"),
             )
             return
         await chatcfg.set(message.chat.id, "welcome", text)
@@ -664,7 +662,7 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.note("Usage: <code>/setgoodbye {first} just left {chat}</code>"),
+                cards.info_card("Usage: <code>/setgoodbye {first} just left {chat}</code>"),
             )
             return
         await chatcfg.set(message.chat.id, "goodbye", text)
@@ -729,7 +727,7 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.heading(f"{E('shield')} administrators", 3)
+                B.banner("administrators", glyph="shield")
                 + B.table(["admin", "role"], rows[:40]),
             )
         except Exception as exc:

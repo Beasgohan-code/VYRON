@@ -96,6 +96,29 @@ def human_time(seconds: float | int) -> str:
     return f"{days}d {hours}h"
 
 
+def human_clock(seconds: float | int) -> str:
+    """`3d 8h 40m 34s` — every unit, for a status line.
+
+    `human_time` answers "how long, roughly" and stops at two units (right for a
+    track length); a welcome card that says `3d 8h` next to an uptime label
+    reads like a rounding error. This one is exact to the second, and drops the
+    leading units that are zero so a fresh process shows `42s`, not `0d 0h 0m`.
+    """
+    total = int(max(0, seconds))
+    days, rem = divmod(total, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, secs = divmod(rem, 60)
+    parts: list[str] = []
+    if days:
+        parts.append(f"{days}d")
+    if days or hours:
+        parts.append(f"{hours}h")
+    if days or hours or minutes:
+        parts.append(f"{minutes}m")
+    parts.append(f"{secs:02d}s" if parts else f"{secs}s")
+    return " ".join(parts)
+
+
 def human_size(num_bytes: float | int) -> str:
     size = float(max(0, num_bytes or 0))
     for unit in ("B", "KB", "MB", "GB", "TB"):
@@ -135,6 +158,7 @@ __all__ = [
     "compact_number",
     "escape_markdown",
     "fmt_duration",
+    "human_clock",
     "human_size",
     "human_time",
     "now",

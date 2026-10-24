@@ -155,7 +155,7 @@ def test_token_card_explains_revocation():
         cards.token_card("vown_abc.sig", base="https://v.test", owner_id=7, epoch=1)
     )
     assert "vown_abc.sig" in text
-    assert "Revoke all" in text and "Generation" in text
+    assert "revoke all" in text.lower() and "generation" in text.lower()
     markup = cards.token_card("vown_abc.sig", base="https://v.test", owner_id=7)
     assert 'data="v:token:revoke"' in markup
     assert 'data="v:token:rotate"' in markup

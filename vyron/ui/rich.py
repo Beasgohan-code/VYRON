@@ -279,6 +279,11 @@ def to_plain_text(markup: str) -> str:
     text = _BR_RE.sub("\n", text)
     text = _ANY_TAG_RE.sub("", text)
     text = _html.unescape(text)
+    # Small caps are a display trick: undo it wherever the card is leaving the
+    # chat (toasts, logs, plain lane) so the words read normally again.
+    from vyron.ui.theme import un_small_caps
+
+    text = un_small_caps(text)
     text = re.sub(r"[ \t]*·[ \t]*(?=\n|$)", "", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()

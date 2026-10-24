@@ -101,7 +101,9 @@ def test_revoke_asks_first_then_bumps_the_epoch(wired):
 
     _dispatch(client, "v:token:confirm")
     assert tokens.cached_epoch(settings.owner_id) == 1
-    assert "revoked" in edited[-1].lower()
+    from vyron.ui.rich import to_plain_text
+
+    assert "revoked" in to_plain_text(edited[-1]).lower()
 
 
 def test_cancel_leaves_the_epoch_alone(wired):
@@ -229,7 +231,9 @@ def test_the_settings_panel_can_show_artwork(wired):
 
     query = _dispatch(client, "v:thumb:show")
 
-    assert "backdrop" in edited[-1]
+    from vyron.ui.rich import to_plain_text
+
+    assert "backdrop" in to_plain_text(edited[-1])
     assert "/thumbnail" in edited[-1]
     assert query.answers[-1][0]
 

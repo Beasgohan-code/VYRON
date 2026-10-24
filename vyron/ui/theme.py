@@ -44,6 +44,18 @@ def small_caps(text: str) -> str:
     return text.translate(SMALL_CAPS)
 
 
+#: The way back — small caps are decoration, so anything that leaves the chat
+#: (toasts, logs, plain-text fallbacks) should get ordinary letters again.
+PLAIN_CAPS = str.maketrans(
+    "ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀꜱᴛᴜᴠᴡxʏᴢ",
+    "abcdefghijklmnopqrstuvwxyz",
+)
+
+
+def un_small_caps(text: str) -> str:
+    return text.translate(PLAIN_CAPS)
+
+
 # ── Default glyph set (unicode) ─────────────────────────────────────────────
 # name -> fallback glyph.  A premium pack can override any key; unknown keys
 # degrade gracefully to the fallback, so packs can ship partial coverage.
@@ -96,13 +108,15 @@ GLYPHS: dict[str, str] = {
     "microphone": "🎤",
     "gift": "🎁",
     "wave": "🌊",
+    "hello": "👋",
     "moon": "🌙",
     "sun": "☀️",
     "globe": "🌐",
     "code": "🧩",
     "tools": "🛠️",
     "cloud": "☁️",
-    "playlist": "≡",
+    "playlist": "📚",
+    "list": "≡",
     "plus": "➕",
     "minus": "➖",
     "id": "🆔",

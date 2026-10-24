@@ -20,7 +20,7 @@ from pyrogram.types import Message
 from vyron.core import playlists as store
 from vyron.core.queue import Track
 from vyron.runtime import runtime
-from vyron.ui import blocks as B
+from vyron.ui import blocks as B, cards
 from vyron.ui import rich
 from vyron.ui.progress import truncate
 from vyron.ui.theme import E
@@ -50,7 +50,10 @@ def register(client: Client) -> None:
                 await rich.send(
                     client,
                     message.chat.id,
-                    B.note(f"{E('info')} You have no playlists yet — <code>/savepl</code> first."),
+                    cards.warn_card(
+                        "You have no playlists yet — play something and send "
+                        "<code>/savepl my list</code>."
+                    ),
                     reply_to=message.id,
                 )
                 return
@@ -58,7 +61,17 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.note(f"{E('download')} Which one? {names}\n<code>/exportpl &lt;name&gt;</code>"),
+                cards.change_card(
+                    "which playlist?",
+                    glyph="download",
+                    label="yours",
+                    value=names,
+                    note="Send <code>/exportpl &lt;name&gt;</code> and I will send it back as a file.",
+                    actions=B.row(
+                        B.btn(f"{E('playlist')} All playlists", data="v:help:tools", style="primary"),
+                        B.btn(f"{E('close')} Close", data="v:close"),
+                    ),
+                ),
                 reply_to=message.id,
             )
             return
@@ -68,7 +81,10 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.note(f"{E('warn')} No playlist called <b>{rich.esc(truncate(name, 40))}</b>."),
+                cards.warn_card(
+                    f"No playlist called <b>{rich.esc(truncate(name, 40))}</b>. "
+                    "Send <code>/playlists</code> to see what you have."
+                ),
                 reply_to=message.id,
             )
             return
@@ -109,7 +125,13 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.note(f"{E('warn')} Could not send the export: {rich.esc(truncate(str(exc), 120))}"),
+                cards.error_card(
+                    headline="could not send the file",
+                    text=(
+                        "The export was built but Telegram refused it: "
+                        f"{rich.esc(truncate(str(exc), 120))}"
+                    ),
+                ),
                 reply_to=message.id,
             )
 
@@ -124,9 +146,9 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.note(
-                    f"{E('info')} Reply to an exported <code>.json</code> with "
-                    "<code>/importpl</code> (add a name to rename it)."
+                cards.warn_card(
+                    "Reply to an exported <code>.json</code> with <code>/importpl</code> "
+                    "(add a name after it to rename the playlist)."
                 ),
                 reply_to=message.id,
             )
@@ -139,7 +161,11 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.note(f"{E('warn')} That file isn't valid JSON."),
+                cards.error_card(
+                    headline="unreadable file",
+                    text="That file is not valid JSON — export it again with "
+                    "<code>/exportpl</code>.",
+                ),
                 reply_to=message.id,
             )
             return
@@ -153,9 +179,12 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.note(
-                    f"{E('warn')} That isn't a VYRON playlist export "
-                    f"(expected <code>{EXPORT_FORMAT}</code>)."
+                cards.error_card(
+                    headline="wrong file",
+                    text=(
+                        "That is not a VYRON playlist export — expected "
+                        f"<code>{EXPORT_FORMAT}</code>."
+                    ),
                 ),
                 reply_to=message.id,
             )
@@ -188,15 +217,25 @@ def register(client: Client) -> None:
         await rich.send(
             client,
             message.chat.id,
-            B.heading(f"{E('check')} imported", 3)
-            + B.kv(
-                [
-                    (f"{E('playlist')} playlist", f"<b>{rich.esc(playlist['name'])}</b>"),
-                    (f"{E('plus')} added", f"<b>{added}</b>"),
-                    (f"{E('queue')} skipped", f"<b>{len(tracks) - added}</b> duplicates"),
-                ]
-            )
-            + B.note(f"{E('play')} queue it with <code>/pl {rich.esc(playlist['name'])}</code>"),
+            cards.change_card(
+                "playlist imported",
+                glyph="check",
+                label="playlist",
+                value=f"<b>{rich.esc(playlist['name'])}</b>",
+                note=(
+                    f"{added} track{'s' if added != 1 else ''} restored."
+                    if added
+                    else "Every track in the file was already there — nothing added."
+                ),
+                extra=[
+                    ("plus", "added", f"<b>{added}</b>"),
+                    ("skip", "already there", f"<b>{len(tracks) - added}</b>"),
+                ],
+                actions=B.row(
+                    B.btn(f"{E('play')} Queue it", data=f"v:pl:{playlist['id']}", style="primary"),
+                    B.btn(f"{E('close')} Close", data="v:close"),
+                ),
+            ),
             reply_to=message.id,
         )
 

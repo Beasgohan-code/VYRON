@@ -14,7 +14,7 @@ from pyrogram.types import Message
 from vyron.core import chatcfg, effects
 from vyron.core.search import MediaError, looks_like_url
 from vyron.runtime import runtime
-from vyron.ui import blocks as B
+from vyron.ui import blocks as B, cards
 from vyron.ui import rich
 from vyron.ui.progress import truncate
 from vyron.ui.theme import E
@@ -115,11 +115,9 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.note(
-                    f"{E('globe')} Usage: <code>/cplay song name or link</code>\n"
+                cards.info_card("Usage: <code>/cplay song name or link</code>\n"
                     "…or reply to an audio / video file with <code>/cplay</code>.\n"
-                    "The linked channel's voice chat is used."
-                ),
+                    "The linked channel's voice chat is used."),
                 reply_to=message.id,
             )
             return
@@ -171,7 +169,7 @@ def register(client: Client) -> None:
                         client,
                         message.chat.id,
                         status.id if status else 0,
-                        B.note(f"{E('cross')} {rich.esc(truncate(str(exc), 140))}"),
+                        cards.error_card(f"{rich.esc(truncate(str(exc), 140))}"),
                     )
                     return
                 if status:
@@ -179,10 +177,8 @@ def register(client: Client) -> None:
                         client,
                         message.chat.id,
                         status.id,
-                        B.note(
-                            f"{E('live')} <b>Channel stream started</b> · "
-                            f"{rich.esc(truncate(media_track.title, 50))}"
-                        ),
+                        cards.info_card(f"<b>Channel stream started</b> · "
+                            f"{rich.esc(truncate(media_track.title, 50))}"),
                     )
                 return
 
@@ -232,13 +228,11 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 chat_id,
-                B.note(
-                    f"{E('globe')} Channel playback is bound to <code>{bound}</code>.\n"
+                cards.info_card(f"Channel playback is bound to <code>{bound}</code>.\n"
                     "<code>/cplayset -1001234567890</code> to change it, "
                     "<code>/cplayset off</code> to use the linked chat."
                     if bound
-                    else f"{E('info')} No channel bound — <code>/cplayset &lt;id|@name&gt;</code>"
-                ),
+                    else f"{E('info')} No channel bound — <code>/cplayset &lt;id|@name&gt;</code>"),
                 reply_to=message.id,
             )
             return
@@ -247,7 +241,7 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 chat_id,
-                B.note(f"{E('check')} Cleared — channel playback follows the linked chat again."),
+                cards.ok_card("Cleared — channel playback follows the linked chat again."),
                 reply_to=message.id,
             )
             return
@@ -257,7 +251,7 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 chat_id,
-                B.note(f"{E('warn')} Could not resolve that channel: {rich.esc(truncate(str(exc), 90))}"),
+                cards.warn_card(f"Could not resolve that channel: {rich.esc(truncate(str(exc), 90))}"),
                 reply_to=message.id,
             )
             return
@@ -265,7 +259,7 @@ def register(client: Client) -> None:
         await rich.send(
             client,
             chat_id,
-            B.heading(f"{E('check')} channel bound", 3)
+            B.banner("channel bound", glyph="check")
             + B.kv(
                 [
                     (f"{E('globe')} title", f"<b>{rich.esc(truncate(peer.title or '—', 40))}</b>"),
@@ -319,7 +313,7 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 chat_id,
-                B.heading(f"{E('globe')} channel", 3)
+                B.banner("channel", glyph="globe")
                 + B.kv(rows)
                 + B.note(
                     "<code>/addchannel @mychannel</code> to link one · "
@@ -335,7 +329,7 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 chat_id,
-                B.note(f"{E('shield')} Only admins can link a channel."),
+                cards.locked_card("Only admins can link a channel."),
                 reply_to=message.id,
             )
             return
@@ -345,7 +339,7 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 chat_id,
-                B.note(f"{E('check')} Unlinked — playback follows the linked chat again."),
+                cards.ok_card("Unlinked — playback follows the linked chat again."),
                 reply_to=message.id,
             )
             return
@@ -356,7 +350,7 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 chat_id,
-                B.note(f"{E('warn')} Could not find that channel: {rich.esc(truncate(str(exc), 90))}"),
+                cards.warn_card(f"Could not find that channel: {rich.esc(truncate(str(exc), 90))}"),
                 reply_to=message.id,
             )
             return
@@ -364,7 +358,7 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 chat_id,
-                B.note(f"{E('warn')} That is not a channel — link the channel itself, not its group."),
+                cards.warn_card("That is not a channel — link the channel itself, not its group."),
                 reply_to=message.id,
             )
             return
@@ -382,7 +376,7 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 chat_id,
-                B.note(f"{E('warn')} Add me as an admin of that channel first."),
+                cards.warn_card("Add me as an admin of that channel first."),
                 reply_to=message.id,
             )
             return
@@ -400,7 +394,7 @@ def register(client: Client) -> None:
                 await rich.send(
                     client,
                     chat_id,
-                    B.note(f"{E('shield')} You need to be an admin of that channel."),
+                    cards.locked_card("You need to be an admin of that channel."),
                     reply_to=message.id,
                 )
                 return
@@ -410,10 +404,8 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 chat_id,
-                B.note(
-                    f"{E('warn')} That channel is already linked to another chat "
-                    f"(<code>{other}</code>). Unlink it there first."
-                ),
+                cards.warn_card(f"That channel is already linked to another chat "
+                    f"(<code>{other}</code>). Unlink it there first."),
                 reply_to=message.id,
             )
             return
@@ -426,7 +418,7 @@ def register(client: Client) -> None:
         await rich.send(
             client,
             chat_id,
-            B.heading(f"{E('check')} channel linked", 3)
+            B.banner("channel linked", glyph="check")
             + B.kv(
                 [
                     (f"{E('globe')} title", f"<b>{rich.esc(truncate(peer.title or '—', 40))}</b>"),
@@ -444,7 +436,7 @@ def register(client: Client) -> None:
         user = message.from_user
         if user and not (is_owner(user.id) or await is_chat_admin(client, chat_id, user.id)):
             await rich.send(
-                client, chat_id, B.note(f"{E('shield')} Only admins can unlink."), reply_to=message.id
+                client, chat_id, cards.locked_card("Only admins can unlink."), reply_to=message.id
             )
             return
         bound = int(await chatcfg.get(chat_id, "channel", 0) or 0)
@@ -452,7 +444,7 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 chat_id,
-                B.note(f"{E('info')} Nothing is linked — use <code>/addchannel</code>."),
+                cards.info_card("Nothing is linked — use <code>/addchannel</code>."),
                 reply_to=message.id,
             )
             return
@@ -462,7 +454,7 @@ def register(client: Client) -> None:
         await rich.send(
             client,
             chat_id,
-            B.note(f"{E('check')} Unlinked from <code>{bound}</code> — playback is back on the linked chat."),
+            cards.ok_card(f"Unlinked from <code>{bound}</code> — playback is back on the linked chat."),
             reply_to=message.id,
         )
 
@@ -473,7 +465,7 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.note(f"{E('info')} No channel linked — <code>/addchannel @name</code>."),
+                cards.info_card("No channel linked — <code>/addchannel @name</code>."),
                 reply_to=message.id,
             )
         return target
@@ -486,7 +478,7 @@ def register(client: Client) -> None:
         await rich.send(
             client,
             message.chat.id,
-            B.note(f"{E('shield')} Only admins can control channel playback."),
+            cards.locked_card("Only admins can control channel playback."),
             reply_to=message.id,
         )
         return False
@@ -528,7 +520,7 @@ def register(client: Client) -> None:
         await rich.send(
             client,
             message.chat.id,
-            B.note(f"{E('check')} {text}"),
+            cards.ok_card(f"{text}"),
             reply_to=message.id,
         )
 
@@ -545,7 +537,7 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.note(f"{E('info')} Nothing is playing in the channel."),
+                cards.info_card("Nothing is playing in the channel."),
                 reply_to=message.id,
             )
             return
@@ -556,10 +548,8 @@ def register(client: Client) -> None:
         await rich.send(
             client,
             message.chat.id,
-            B.note(
-                f"{E('clock')} <b>Channel seek</b> · {human_time(seconds)}"
-                f" / {human_time(state.current.duration or 0)}"
-            ),
+            cards.info_card(f"<b>Channel seek</b> · {human_time(seconds)}"
+                f" / {human_time(state.current.duration or 0)}"),
             reply_to=message.id,
         )
 
@@ -578,7 +568,7 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.note(f"{E('volume')} <b>Channel volume</b> <code>{current}%</code>"),
+                cards.info_card(f"<b>Channel volume</b> <code>{current}%</code>"),
                 reply_to=message.id,
             )
             return
@@ -591,7 +581,7 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.note(f"{E('warn')} Use a number between 1 and 200."),
+                cards.warn_card("Use a number between 1 and 200."),
                 reply_to=message.id,
             )
             return
@@ -600,7 +590,7 @@ def register(client: Client) -> None:
         await rich.send(
             client,
             message.chat.id,
-            B.note(f"{E('volume')} <b>Channel volume</b> <code>{volume}%</code>"),
+            cards.info_card(f"<b>Channel volume</b> <code>{volume}%</code>"),
             reply_to=message.id,
         )
 
@@ -623,7 +613,7 @@ def register(client: Client) -> None:
                 await rich.send(
                     client,
                     message.chat.id,
-                    B.note(f"{E('info')} Pick one: {names}"),
+                    cards.info_card(f"Pick one: {names}"),
                     reply_to=message.id,
                 )
                 return
@@ -633,7 +623,7 @@ def register(client: Client) -> None:
                 await rich.send(
                     client,
                     message.chat.id,
-                    B.note(f"{E('warn')} Unknown effect."),
+                    cards.warn_card("Unknown effect."),
                     reply_to=message.id,
                 )
                 return
@@ -649,10 +639,8 @@ def register(client: Client) -> None:
         await rich.send(
             client,
             message.chat.id,
-            B.note(
-                f"{E('spark')} <b>Channel effects</b> · {effects.labels(updated)}&nbsp;"
-                f"<i>(applies from the next track)</i>"
-            ),
+            cards.info_card(f"<b>Channel effects</b> · {effects.labels(updated)}&nbsp;"
+                f"<i>(applies from the next track)</i>"),
             reply_to=message.id,
         )
 
@@ -674,7 +662,7 @@ def register(client: Client) -> None:
         await rich.send(
             client,
             message.chat.id,
-            B.heading(f"{E('spark')} channel effects", 3)
+            B.banner("channel effects", glyph="spark")
             + B.kv(
                 [
                     (f"{E('globe')} channel", f"<code>{target}</code>"),
@@ -699,7 +687,7 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.note(f"{E('check')} Channel artwork removed — back to the cover art."),
+                cards.ok_card("Channel artwork removed — back to the cover art."),
                 reply_to=message.id,
             )
             return
@@ -708,10 +696,8 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.note(
-                    f"{E('image')} Reply to a photo with <code>/cthumbnail</code> to set the "
-                    "channel's poster art, or <code>/cthumbnail off</code>."
-                ),
+                cards.info_card("Reply to a photo with <code>/cthumbnail</code> to set the "
+                    "channel's poster art, or <code>/cthumbnail off</code>."),
                 reply_to=message.id,
             )
             return
@@ -719,10 +705,8 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.note(
-                    f"{E('warn')} That picture is over "
-                    f"{thumbnail_cmd.MAX_ART_BYTES // (1024 * 1024)} MB — a normal photo works best."
-                ),
+                cards.warn_card(f"That picture is over "
+                    f"{thumbnail_cmd.MAX_ART_BYTES // (1024 * 1024)} MB — a normal photo works best."),
                 reply_to=message.id,
             )
             return
@@ -730,7 +714,7 @@ def register(client: Client) -> None:
         await rich.send(
             client,
             message.chat.id,
-            B.note(f"{E('check')} Channel artwork set — every poster in there uses it."),
+            cards.ok_card("Channel artwork set — every poster in there uses it."),
             reply_to=message.id,
         )
 

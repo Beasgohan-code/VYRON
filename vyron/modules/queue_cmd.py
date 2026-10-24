@@ -7,7 +7,9 @@ from pyrogram import Client
 from pyrogram.types import Message
 
 from vyron.runtime import runtime
+from vyron.ui import blocks as B
 from vyron.ui import cards, keyboards, rich
+from vyron.ui.progress import fmt_duration
 from vyron.ui.theme import E
 from vyron.utils.helpers import command_args
 from vyron.utils.commands import cmd
@@ -39,7 +41,18 @@ def register(client: Client) -> None:
         await rich.send(
             client,
             message.chat.id,
-            f"{E('check')} <b>Queue cleared</b> <code>{removed}</code> tracks removed",
+            cards.change_card(
+                "queue cleared",
+                glyph="check",
+                label="removed",
+                value=f"<b>{removed}</b> " + ("track" if removed == 1 else "tracks"),
+                note="What is playing keeps playing — only the line behind it was emptied.",
+                actions=B.row(
+                    B.btn(f"{E('play')} Play something", data="v:help:playback", style="primary"),
+                    B.btn(f"{E('now')} Now playing", data="v:np"),
+                    B.btn(f"{E('close')} Close", data="v:close"),
+                ),
+            ),
             reply_to=message.id,
         )
 
@@ -59,7 +72,19 @@ def register(client: Client) -> None:
         await rich.send(
             client,
             message.chat.id,
-            f"{E('check')} <b>Removed</b> {rich.esc(track.short)}",
+            cards.change_card(
+                "removed",
+                glyph="check",
+                label="track",
+                value=f"<b>{rich.esc(track.title)}</b>",
+                note=f"Position #{int(arg)} is gone; everything after it moved up one.",
+                extra=[("clock", "length", f"<b>{fmt_duration(track.duration)}</b>")],
+                actions=B.row(
+                    B.btn(f"{E('queue')} Queue", data="v:queue", style="primary"),
+                    B.btn(f"{E('now')} Now playing", data="v:np"),
+                    B.btn(f"{E('close')} Close", data="v:close"),
+                ),
+            ),
             reply_to=message.id,
         )
 
@@ -73,10 +98,28 @@ def register(client: Client) -> None:
             return
         ok = runtime.player.queues.move(message.chat.id, int(parts[0]), int(parts[1]))
         await runtime.player.refresh_now_playing(message.chat.id)
+        if not ok:
+            await rich.send(
+                client,
+                message.chat.id,
+                cards.warn_card("Those positions do not exist in this queue."),
+                reply_to=message.id,
+            )
+            return
         await rich.send(
             client,
             message.chat.id,
-            cards.ok_card("<b>Queue reordered</b>" if ok else "Those positions do not exist."),
+            cards.change_card(
+                "queue reordered",
+                glyph="check",
+                label="moved",
+                value=f"<b>#{parts[0]}</b> → <b>#{parts[1]}</b>",
+                note="The order is saved — a restart keeps it.",
+                actions=B.row(
+                    B.btn(f"{E('queue')} See the queue", data="v:queue", style="primary"),
+                    B.btn(f"{E('close')} Close", data="v:close"),
+                ),
+            ),
             reply_to=message.id,
         )
 

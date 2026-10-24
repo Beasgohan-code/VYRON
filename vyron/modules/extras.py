@@ -15,7 +15,7 @@ from pyrogram import Client, filters
 from pyrogram.types import Message
 
 from vyron.runtime import runtime
-from vyron.ui import blocks as B
+from vyron.ui import blocks as B, cards
 from vyron.ui import rich
 from vyron.ui.progress import human_size, human_time, truncate
 from vyron.ui.theme import E
@@ -73,10 +73,8 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.note(
-                    f"{E('info')} Reply to a user, or pass an id.\n"
-                    "<code>/block 123456789</code> · <code>/block -1001234567890</code> (chat)"
-                ),
+                cards.info_card("Reply to a user, or pass an id.\n"
+                    "<code>/block 123456789</code> · <code>/block -1001234567890</code> (chat)"),
                 reply_to=message.id,
             )
             return
@@ -109,7 +107,7 @@ def register(client: Client) -> None:
             target = reply_user.id
         if target is None:
             await rich.send(
-                client, message.chat.id, B.note(f"{E('info')} Reply to a user or pass an id.")
+                client, message.chat.id, cards.info_card("Reply to a user or pass an id.")
             )
             return
         was = int(target) in BLOCKED_USERS or int(target) in BLOCKED_CHATS
@@ -141,7 +139,7 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.heading(f"{E('shield')} blocklist", 3)
+                B.banner("blocklist", glyph="shield")
                 + B.note(
                     f"{E('check')} Nobody is blocked.\n"
                     f"{E('info')} Use <code>/block</code> (reply or id) to add someone."
@@ -175,7 +173,7 @@ def register(client: Client) -> None:
         await rich.send(
             client,
             message.chat.id,
-            B.heading(f"{E('shield')} blocklist", 3)
+            B.banner("blocklist", glyph="shield")
             + B.table(["who", "type"], rows)
             + B.note(
                 f"{E('info')} {len(users)} user{'s' if len(users) != 1 else ''} · "
@@ -210,7 +208,7 @@ def register(client: Client) -> None:
         await rich.send(
             client,
             message.chat.id,
-            B.heading(f"{E('live')} active voice chats", 3)
+            B.banner("active voice chats", glyph="live")
             + (B.table(["chat", "title", "track"], rows) if rows else B.note("no active sessions")),
         )
 
@@ -247,7 +245,7 @@ def register(client: Client) -> None:
                 (f"{E('spark')} Streaming", f"<b>{'on' if runtime.streaming_ready else 'off'}</b>"),
             ]
         )
-        await rich.send(client, message.chat.id, B.heading(f"{E('stats')} system", 3) + body)
+        await rich.send(client, message.chat.id, B.banner("system", glyph="stats") + body)
 
     # ── leave every voice chat ─────────────────────────────────────────────
     @client.on_message(cmd(["leavevc"]) & owner)
@@ -269,10 +267,8 @@ def register(client: Client) -> None:
         await rich.send(
             client,
             message.chat.id,
-            B.note(
-                f"{E('rocket')} Restarting in 2 seconds…\n"
-                "<i>With Docker/Render the supervisor brings the process back.</i>"
-            ),
+            cards.info_card("Restarting in 2 seconds…\n"
+                "<i>With Docker/Render the supervisor brings the process back.</i>"),
         )
         await asyncio.sleep(2)
         # Self-restart: the same interpreter running the same module.

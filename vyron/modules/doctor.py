@@ -28,9 +28,9 @@ from vyron import __build__, __version__
 from vyron.config import settings
 from vyron.core import lease
 from vyron.runtime import runtime
-from vyron.ui import blocks as B
+from vyron.ui import blocks as B, cards
 from vyron.ui import rich
-from vyron.ui.theme import E
+from vyron.ui.theme import BULLET, E
 from vyron.utils.helpers import is_owner
 from vyron.utils.commands import cmd
 
@@ -159,7 +159,7 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.note(f"{E('shield')} /doctor prints deployment internals — owner only."),
+                cards.locked_card("/doctor prints deployment internals — owner only."),
                 reply_to=message.id,
             )
             return
@@ -368,7 +368,7 @@ def register(client: Client) -> None:
         )
 
         failures = sum(1 for _, value in rows if "<b>fail</b>" in value)
-        head = B.heading(f"{E('shield')} doctor · v{__version__}", 2)
+        head = B.banner(f"doctor {BULLET} v{__version__}", glyph="shield")
         body = B.table(["check", "result"], rows)
         tail = B.note(
             f"{E('check')} Everything that matters is answering."

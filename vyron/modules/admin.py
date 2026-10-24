@@ -165,7 +165,7 @@ def register(client: Client) -> None:
         status = await rich.send(
             client,
             message.chat.id,
-            B.heading(f"{E('rocket')} broadcast", 3)
+            B.banner("broadcast", glyph="rocket")
             + B.kv(
                 [
                     (f"{E('chat')} groups", f"<b>{0 if nogroup else len(groups)}</b>"),
@@ -213,7 +213,7 @@ def register(client: Client) -> None:
                             client,
                             message.chat.id,
                             status.id,
-                            B.heading(f"{E('rocket')} broadcasting…", 3)
+                            B.banner("broadcasting…", glyph="rocket")
                             + B.kv(
                                 [
                                     (f"{E('bolt')} progress", f"<b>{index}/{len(targets)}</b>"),

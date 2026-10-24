@@ -21,7 +21,7 @@ from pyrogram import Client
 from pyrogram.types import Message
 
 from vyron.runtime import runtime
-from vyron.ui import blocks as B
+from vyron.ui import blocks as B, cards
 from vyron.ui import rich
 from vyron.ui.progress import truncate
 from vyron.ui.theme import E
@@ -42,7 +42,7 @@ async def _assistant():
 def _card(me) -> str:
     username = f"@{me.username}" if me.username else "—"
     return (
-        B.heading(f"{E('microphone')} assistant", 3)
+        B.banner("assistant", glyph="microphone")
         + B.kv(
             [
                 (f"{E('user')} name", f"<b>{rich.esc(me.first_name or '—')}</b>"),
@@ -87,7 +87,7 @@ def engine_card() -> str:
         )
     )
     body = (
-        B.heading(f"{E('wave')} voice engine", 2)
+        B.banner("voice engine", glyph="wave")
         + B.kv(pairs)
         + B.note(hint)
     )
@@ -108,10 +108,8 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.note(
-                    f"{E('warn')} The assistant session isn't configured.\n"
-                    "Set <code>STRING_SESSION</code> (see <code>python -m vyron.tools.session</code>)."
-                ),
+                cards.warn_card("The assistant session isn't configured.\n"
+                    "Set <code>STRING_SESSION</code> (see <code>python -m vyron.tools.session</code>)."),
                 reply_to=message.id,
             )
             return False
@@ -133,7 +131,7 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.note(f"{E('info')} Usage: <code>/setname VYRON Assistant</code>"),
+                cards.info_card("Usage: <code>/setname VYRON Assistant</code>"),
                 reply_to=message.id,
             )
             return
@@ -145,14 +143,14 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.note(f"{E('warn')} Telegram refused that: {rich.esc(truncate(str(exc), 120))}"),
+                cards.warn_card(f"Telegram refused that: {rich.esc(truncate(str(exc), 120))}"),
                 reply_to=message.id,
             )
             return
         await rich.send(
             client,
             message.chat.id,
-            B.note(f"{E('check')} Assistant is now <b>{rich.esc((first + ' ' + last).strip())}</b>."),
+            cards.ok_card(f"Assistant is now <b>{rich.esc((first + ' ' + last).strip())}</b>."),
             reply_to=message.id,
         )
 
@@ -165,7 +163,7 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.note(f"{E('warn')} Telegram allows {MAX_BIO} characters — yours is {len(bio)}."),
+                cards.warn_card(f"Telegram allows {MAX_BIO} characters — yours is {len(bio)}."),
                 reply_to=message.id,
             )
             return
@@ -175,17 +173,15 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.note(f"{E('warn')} Could not update the bio: {rich.esc(truncate(str(exc), 120))}"),
+                cards.warn_card(f"Could not update the bio: {rich.esc(truncate(str(exc), 120))}"),
                 reply_to=message.id,
             )
             return
         await rich.send(
             client,
             message.chat.id,
-            B.note(
-                f"{E('check')} Bio updated"
-                + (f" → <i>{rich.esc(bio)}</i>" if bio else " (cleared)")
-            ),
+            cards.ok_card("Bio updated"
+                + (f" → <i>{rich.esc(bio)}</i>" if bio else " (cleared)")),
             reply_to=message.id,
         )
 
@@ -201,7 +197,7 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.note(f"{E('info')} Reply to a photo with <code>/setpfp</code>."),
+                cards.info_card("Reply to a photo with <code>/setpfp</code>."),
                 reply_to=message.id,
             )
             return
@@ -246,18 +242,16 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.note(f"{E('warn')} {rich.esc(truncate(str(exc), 120))}"),
+                cards.warn_card(f"{rich.esc(truncate(str(exc), 120))}"),
                 reply_to=message.id,
             )
             return
         await rich.send(
             client,
             message.chat.id,
-            B.note(
-                f"{E('check')} Removed {removed} profile photo{'s' if removed != 1 else ''}."
+            cards.ok_card(f"Removed {removed} profile photo{'s' if removed != 1 else ''}."
                 if removed
-                else f"{E('info')} The assistant had no profile photos."
-            ),
+                else f"{E('info')} The assistant had no profile photos."),
             reply_to=message.id,
         )
 

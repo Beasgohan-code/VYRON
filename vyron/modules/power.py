@@ -27,7 +27,7 @@ from vyron.config import settings
 from vyron.core import acl, chatcfg, maintenance
 from vyron.core.votes import VoteBoard, clamp_votes
 from vyron.runtime import runtime
-from vyron.ui import blocks as B
+from vyron.ui import blocks as B, cards
 from vyron.ui import rich
 from vyron.ui.progress import human_size, human_time, truncate
 from vyron.ui.theme import E
@@ -118,7 +118,7 @@ async def run_eval(code: str, client: Client, message: Message) -> str:
         elapsed = (time.perf_counter() - started) * 1000
         body_text = output.strip() or "<i>no output</i>"
         return (
-            B.heading(f"{E('code')} eval", 3)
+            B.banner("eval", glyph="code")
             + B.note(f"<code>{rich.esc(truncate(code, 300))}</code>")
             + f"<pre>{rich.esc(truncate(body_text, 2600))}</pre>"
             + B.footer(f"{E('clock')} {elapsed:.0f} ms")
@@ -126,7 +126,7 @@ async def run_eval(code: str, client: Client, message: Message) -> str:
     except Exception:  # noqa: BLE001 - anything the snippet raises is the answer
         trace = traceback.format_exc()
         return (
-            B.heading(f"{E('warn')} eval failed", 3)
+            B.banner("eval failed", glyph="warn")
             + B.note(f"<code>{rich.esc(truncate(code, 200))}</code>")
             + f"<pre>{rich.esc(truncate(trace, 2600))}</pre>"
         )
@@ -209,11 +209,9 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 chat_id,
-                B.note(
-                    f"{E('shield')} Vote-skip needs <b>{current}</b> votes here."
+                cards.locked_card(f"Vote-skip needs <b>{current}</b> votes here."
                     if current
-                    else f"{E('info')} Vote-skip is off — <code>/setvoteskip 3</code> to enable."
-                ),
+                    else f"{E('info')} Vote-skip is off — <code>/setvoteskip 3</code> to enable."),
                 reply_to=message.id,
             )
             return
@@ -237,7 +235,7 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 chat_id,
-                B.heading(f"{E('check')} vote-skip updated", 3)
+                B.banner("vote-skip updated", glyph="check")
                 + B.kv(
                     [
                         (f"{E('shield')} votes needed", f"<b>{needed or 'disabled'}</b>"),
@@ -254,7 +252,7 @@ def register(client: Client) -> None:
         state = runtime.player.queues.get(chat_id)
         if not state or not state.current:
             await rich.send(
-                client, chat_id, B.note(f"{E('moon')} Nothing is playing."), reply_to=message.id
+                client, chat_id, cards.info_card("Nothing is playing."), reply_to=message.id
             )
             return
 
@@ -270,10 +268,8 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 chat_id,
-                B.note(
-                    f"{E('info')} Vote-skip is off here. "
-                    "Admins can enable it with <code>/voteskip set 3</code>."
-                ),
+                cards.info_card("Vote-skip is off here. "
+                    "Admins can enable it with <code>/voteskip set 3</code>."),
                 reply_to=message.id,
             )
             return
@@ -283,7 +279,7 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 chat_id,
-                B.note(f"{E('info')} You already voted — {tally.remaining} more needed."),
+                cards.info_card(f"You already voted — {tally.remaining} more needed."),
                 reply_to=message.id,
             )
             return
@@ -293,7 +289,7 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 chat_id,
-                B.heading(f"{E('skip')} skipped by vote", 3)
+                B.banner("skipped by vote", glyph="skip")
                 + B.kv(
                     [
                         ("votes", f"<b>{needed}/{needed}</b>"),
@@ -328,10 +324,8 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.note(
-                    f"{E('code')} Usage: <code>/eval await message.reply('hi')</code>\n"
-                    "Only the owner can run this."
-                ),
+                cards.info_card("Usage: <code>/eval await message.reply('hi')</code>\n"
+                    "Only the owner can run this."),
                 reply_to=message.id,
             )
             return
@@ -342,7 +336,7 @@ def register(client: Client) -> None:
                 await rich.send(
                     client,
                     message.chat.id,
-                    B.note(f"{E('check')} Output sent to your DM — it can echo secrets."),
+                    cards.ok_card("Output sent to your DM — it can echo secrets."),
                     reply_to=message.id,
                 )
                 return
@@ -350,7 +344,7 @@ def register(client: Client) -> None:
                 await rich.send(
                     client,
                     message.chat.id,
-                    B.note(f"{E('warn')} Output withheld: open a DM with me to see it."),
+                    cards.warn_card("Output withheld: open a DM with me to see it."),
                     reply_to=message.id,
                 )
                 return
@@ -361,7 +355,7 @@ def register(client: Client) -> None:
     async def _vars(_: Client, message: Message) -> None:
         rows = var_rows()
         card = (
-            B.heading(f"{E('settings')} configuration", 3)
+            B.banner("configuration", glyph="settings")
             + B.table(None, rows)
             + B.note(
                 f"{E('warn')} secrets are masked — full values are never sent to a chat."
@@ -373,7 +367,7 @@ def register(client: Client) -> None:
                 await rich.send(
                     client,
                     message.chat.id,
-                    B.note(f"{E('check')} Sent to your DM."),
+                    cards.ok_card("Sent to your DM."),
                     reply_to=message.id,
                 )
                 return
@@ -386,7 +380,7 @@ def register(client: Client) -> None:
     async def _dbstats(_: Client, message: Message) -> None:
         storage = runtime.storage
         if storage is None:
-            await rich.send(client, message.chat.id, B.note(f"{E('warn')} storage is not ready"))
+            await rich.send(client, message.chat.id, cards.warn_card("storage is not ready"))
             return
         chats = await storage.all_chat_ids()
         counters = await storage.counters()
@@ -449,7 +443,7 @@ def register(client: Client) -> None:
         await rich.send(
             client,
             message.chat.id,
-            B.heading(f"{E('stats')} storage", 3) + B.kv(rows),
+            B.banner("storage", glyph="stats") + B.kv(rows),
             reply_to=message.id,
         )
 
@@ -458,7 +452,7 @@ def register(client: Client) -> None:
     async def _dbcleanup(_: Client, message: Message) -> None:
         storage = runtime.storage
         if storage is None:
-            await rich.send(client, message.chat.id, B.note(f"{E('warn')} storage is not ready"))
+            await rich.send(client, message.chat.id, cards.warn_card("storage is not ready"))
             return
         arg = command_args(message).strip()
         days = int(arg) if arg.isdigit() else 30
@@ -477,7 +471,7 @@ def register(client: Client) -> None:
         else:
             total = sum(int(v) for v in removed.values())
             markup = (
-                B.heading(f"{E('check')} database pruned", 3)
+                B.banner("database pruned", glyph="check")
                 + B.kv(
                     [
                         (f"{E('clock')} older than", f"<b>{days} days</b>"),
@@ -511,7 +505,7 @@ def register(client: Client) -> None:
         await rich.send(
             client,
             message.chat.id,
-            B.heading(f"{E('check')} cache cleared", 3)
+            B.banner("cache cleared", glyph="check")
             + B.kv(
                 [
                     ("files removed", f"<b>{removed}</b>"),
@@ -529,7 +523,7 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.note(f"{E('info')} Reply to someone or send <code>/addsudo 123456789</code>."),
+                cards.info_card("Reply to someone or send <code>/addsudo 123456789</code>."),
                 reply_to=message.id,
             )
             return
@@ -537,11 +531,9 @@ def register(client: Client) -> None:
         await rich.send(
             client,
             message.chat.id,
-            B.note(
-                f"{E('check')} <code>{target}</code> can now operate the bot."
+            cards.ok_card(f"<code>{target}</code> can now operate the bot."
                 if added
-                else f"{E('info')} <code>{target}</code> already had access."
-            ),
+                else f"{E('info')} <code>{target}</code> already had access."),
             reply_to=message.id,
         )
 
@@ -552,13 +544,13 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.note(f"{E('info')} Reply to someone or send <code>/delsudo 123456789</code>."),
+                cards.info_card("Reply to someone or send <code>/delsudo 123456789</code>."),
                 reply_to=message.id,
             )
             return
         if target == int(settings.owner_id or 0):
             await rich.send(
-                client, message.chat.id, B.note(f"{E('shield')} The owner cannot be demoted."),
+                client, message.chat.id, cards.locked_card("The owner cannot be demoted."),
                 reply_to=message.id,
             )
             return
@@ -566,12 +558,10 @@ def register(client: Client) -> None:
         await rich.send(
             client,
             message.chat.id,
-            B.note(
-                f"{E('cross')} <code>{target}</code> lost bot access."
+            cards.error_card(f"<code>{target}</code> lost bot access."
                 if removed
                 else f"{E('info')} <code>{target}</code> isn't a runtime sudoer "
-                "(env SUDO_USERS can only change in .env)."
-            ),
+                "(env SUDO_USERS can only change in .env)."),
             reply_to=message.id,
         )
 
@@ -595,7 +585,7 @@ def register(client: Client) -> None:
                 pass
             rows.append((f"<code>{user_id}</code>", f"{role}{name}"))
         markup = (
-            B.heading(f"{E('shield')} who can operate", 3)
+            B.banner("who can operate", glyph="shield")
             + B.kv(rows or [("—", "nobody")])
             + B.note(
                 f"{E('bolt')} {len(runtime_ids)} granted from Telegram · "
@@ -619,7 +609,7 @@ def register(client: Client) -> None:
         await rich.send(
             client,
             message.chat.id,
-            B.heading(f"{E('rocket')} thanks for adding me", 3)
+            B.banner("thanks for adding me", glyph="rocket")
             + B.note(
                 f"Added by <b>{rich.esc(by)}</b>.\n"
                 "Start a voice chat, then <code>/play your song</code>."
@@ -647,10 +637,8 @@ def register(client: Client) -> None:
                 await rich.send(
                     client,
                     settings.logger_id,
-                    B.note(
-                        f"{E('info')} removed from <b>{rich.esc(truncate(message.chat.title or 'chat', 40))}</b> "
-                        f"(<code>{message.chat.id}</code>)"
-                    ),
+                    cards.info_card(f"removed from <b>{rich.esc(truncate(message.chat.title or 'chat', 40))}</b> "
+                        f"(<code>{message.chat.id}</code>)"),
                 )
             except Exception:
                 pass

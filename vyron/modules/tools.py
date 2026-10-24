@@ -8,6 +8,7 @@ from pyrogram.types import Message
 
 from vyron.core.lyrics import split_title
 from vyron.runtime import runtime
+from vyron.ui import blocks as B
 from vyron.ui import cards, rich
 from vyron.ui.progress import truncate
 from vyron.ui.theme import E
@@ -64,10 +65,36 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                f"{E('favorite')} <b>Saved</b> {rich.esc(truncate(state.current.title, 48))}",
+                cards.change_card(
+                    "saved to favourites",
+                    glyph="favorite",
+                    label="track",
+                    value=f"<b>{rich.esc(truncate(str(state.current.title), 48))}</b>",
+                    note="It is one tap away from now on — <code>/favorites</code> opens the shelf.",
+                    actions=B.row(
+                        B.btn(f"{E('favorite')} Favourites", data="v:fav:list", style="primary"),
+                        B.btn(f"{E('close')} Close", data="v:close"),
+                    ),
+                ),
+                reply_to=message.id,
             )
         else:
-            await rich.send(client, message.chat.id, cards.warn_card("Already in your favourites."))
+            await rich.send(
+                client,
+                message.chat.id,
+                cards.change_card(
+                    "already in favourites",
+                    glyph="favorite",
+                    label="track",
+                    value=f"<b>{rich.esc(truncate(str(state.current.title), 48))}</b>",
+                    note="You saved this one before — nothing was duplicated.",
+                    actions=B.row(
+                        B.btn(f"{E('favorite')} Favourites", data="v:fav:list", style="primary"),
+                        B.btn(f"{E('close')} Close", data="v:close"),
+                    ),
+                ),
+                reply_to=message.id,
+            )
 
     @client.on_message(cmd(["favorites"]))
     async def _favs(_: Client, message: Message) -> None:

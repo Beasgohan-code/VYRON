@@ -24,9 +24,9 @@ from pyrogram.types import Message
 from vyron.config import settings
 from vyron.core.resolvers import HEALTH
 from vyron.runtime import runtime
-from vyron.ui import blocks as B
+from vyron.ui import blocks as B, cards
 from vyron.ui import rich
-from vyron.ui.theme import E
+from vyron.ui.theme import BULLET, E
 from vyron.utils.helpers import is_owner
 from vyron.utils.commands import cmd
 
@@ -145,7 +145,7 @@ def register(client: Client) -> None:
             await rich.send(
                 client,
                 message.chat.id,
-                B.note(f"{E('shield')} /sources probes this server's resolvers — owner only."),
+                cards.locked_card("/sources probes this server's resolvers — owner only."),
                 reply_to=message.id,
             )
             return
@@ -170,14 +170,14 @@ def register(client: Client) -> None:
         took = (time.perf_counter() - started)
 
         rows = ytdlp + mirrors
-        head = B.heading(f"{E('download')} resolvers · <code>{rich.esc(video_id)}</code>", 2)
+        head = B.banner(f"resolvers {BULLET} <code>{rich.esc(video_id)}</code>", glyph="download")
         body = (
             B.table(["source", "result"], rows)
             + B.divider()
-            + B.heading(f"{E('bolt')} scored from live traffic", 3)
+            + B.banner("scored from live traffic", glyph="bolt")
             + B.table(["source", "wins"], _scoreboard_rows() or [("—", "no traffic yet")])
             + B.divider()
-            + B.heading(f"{E('settings')} configuration", 3)
+            + B.banner("configuration", glyph="settings")
             + B.kv(_env_rows())
             + B.note(_verdict(rows))
             + B.footer(f"probe took {took:.1f}s · /doctor for the deployment check")
