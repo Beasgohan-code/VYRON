@@ -27,6 +27,41 @@ curl -s https://<your-app>.onrender.com/ready | jq
 
 The `problems` array in `/health` lists what failed, in words.
 
+## "Failed to extract any player response" — every track, every client
+
+This one is specific: yt-dlp says the *same thing* for `default`, `tv_simply`,
+`web_embedded`, `android_vr`, `ios` and `tv`, and the id changes every time. It
+is not a broken video and it is not a stale extractor — **YouTube has blocked the
+server's IP**. Free hosts (Render, Koyeb, Fly) sit in datacentre ranges YouTube
+distrusts, and the refusal is not something a player client or a PO token can
+work around.
+
+What VYRON does about it, in order:
+
+1. **Substitution (`ALTERNATE_SOURCES`).** The same song — matched on title,
+   artist and length — is streamed from JioSaavn, Audius or SoundCloud, which
+   serve their own audio over a plain API. A wrong length or a rematch that is
+   not clearly the same recording is refused, so a miss is an honest error, not
+   the wrong song.
+2. **A circuit breaker.** Two identical refusals arm it for
+   `YOUTUBE_WALL_WINDOW` (15 min). While it is armed, playback and search skip
+   YouTube entirely, so a tap answers in about a second instead of twenty. A
+   successful YouTube resolve clears it immediately — the bot heals by itself
+   when the block lifts.
+3. **The catalogue owns search too.** While walled, search results and the Home
+   shelves come from the direct sources, so the app is never an empty screen.
+
+`/doctor` shows the tier (`substitution → jiosaavn → audius → soundcloud`) and,
+when the breaker is armed, how many seconds are left on it. If all three
+catalogues fail as well, the cause is egress (see below) rather than YouTube.
+
+The permanent fixes, if you want YouTube itself back:
+
+* `PROXY=http://…` in a residential region — the one thing that reliably works;
+* `COOKIES_FILE` (or `YOUTUBE_COOKIES`) from a real account — YouTube is far
+  kinder to a signed-in session;
+* `COBALT_URLS` pointing at a self-hosted Cobalt on a different IP.
+
 ## "MongoDB unavailable — falling back to JSON"
 
 The bot keeps running; nothing is lost. The cause is almost always Atlas →

@@ -7,6 +7,34 @@ Two version numbers move independently:
 
 ## Bot
 
+### 1.9.1 — 2026-10-24
+
+* **A walled server still plays music.** `Failed to extract any player response`
+  on every client means YouTube has blocked this host's IP, which no extractor
+  option fixes. When that happens VYRON now plays the *same song* from a
+  catalogue that serves its own audio — JioSaavn, then Audius, then SoundCloud —
+  matching on title, artist and length, and refusing anything that looks like a
+  different cut. `ALTERNATE_SOURCES=off` turns it off.
+* **It stops retrying a known wall.** Two identical refusals arm a circuit
+  breaker (`YOUTUBE_WALL_WINDOW`, 15 min by default) so playback and search go
+  straight to the catalogues instead of spending ~20 s per tap re-proving it. A
+  successful YouTube resolve clears it immediately.
+* **Search works while walled.** Results come from the direct sources (with real
+  audio URLs) instead of timing out, and Home shelves are built from them.
+* **Shared links still work.** When yt-dlp cannot read a video id, the title is
+  read from an Invidious/Piped mirror, which is enough for the substitution
+  tier to find that song somewhere that plays.
+* **`/song` downloads substitute too**, and `/api/audio` reports `served_by` so
+  the app can say which engine is actually streaming.
+* **Small caps fixed.** `q` rendered as a literal `Q`, so every card read `ᴘQʀ`.
+* **Search tolerates how people type.** When a query returns nothing, one
+  relaxed retry runs: accents stripped, bracketed credits dropped, a held final
+  letter squeezed (`Kesariyaa` → `Kesariya`). Real words are never mangled.
+* **Lint and types.** `pyright` is part of the release sweep; the real bugs it
+  found are fixed (an unbound `artist` that broke duplicate detection in the
+  ranker, and a missing `rich.blockquote`).
+* **Repo hygiene.** Unreferenced `assets/raw/` originals removed (2.3 MB).
+
 ### 1.9.0 — 2026-10-24
 
 * **Queue warming.** The next two tracks are prepared ahead of time, inside a

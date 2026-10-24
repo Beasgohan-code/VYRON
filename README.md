@@ -265,7 +265,7 @@ and translated instead of being flattened into "nothing could be extracted":
 
 | You see | It means | Fix |
 |---|---|---|
-| *YouTube thinks this server is a bot* | the anti-bot wall, not the video | impersonation (`curl_cffi`), Cobalt, or cookies |
+| *YouTube thinks this server is a bot* | the anti-bot wall, not the video | impersonation (`curl_cffi`), Cobalt, cookies, or `ALTERNATE_SOURCES` (the song from another engine) |
 | *the video is gone* | deleted or privated | pick another result |
 | *age-restricted* | needs a signed-in session | `COOKIES_FILE` |
 | *geo-blocked* | wrong country | `PROXY` in an allowed region |
@@ -273,7 +273,7 @@ and translated instead of being flattened into "nothing could be extracted":
 | *cannot reach YouTube* | egress/DNS on the host | `PROXY` or a different region |
 
 `/doctor` prints the same sentence, and its first row is the **build**
-(`v1.9.0 · 2026-10-24`): if it still shows an older one, the deploy did not
+(`v1.9.1 · 2026-10-24`): if it still shows an older one, the deploy did not
 land — that is a different problem from a broken track.
 
 ### Every source, and how they back each other up
@@ -943,6 +943,8 @@ The interesting optional ones:
 | `STREAM_FALLBACK` | `on` | ask Invidious/Piped for a direct URL when every yt-dlp client fails |
 | `STREAM_FALLBACK_HOSTS` | built-in list | comma-separated mirrors to use instead of the defaults |
 | `STREAM_FALLBACK_TIMEOUT` | `9` | seconds per mirror before moving on |
+| `ALTERNATE_SOURCES` | `jiosaavn,audius,soundcloud` | when YouTube refuses the server itself, play the **same song** from an engine that serves its own audio (matched on title, artist and length); `off` disables |
+| `YOUTUBE_WALL_WINDOW` | `900` | how long "YouTube is blocking this IP" is trusted — while it lasts, playback and search skip YouTube instead of retrying it per request |
 | `PLAY_FROM_DISK` | `on` | download the track first and stream the local file (falls back to the URL on failure) |
 | `VYRON_API` | `on` | mount the download API at `/vyron` |
 | `YT_DLP_FORMAT` / `YT_DLP_RETRIES` / `YT_DLP_SOCKET_TIMEOUT` | `bestaudio/best` / `3` / `20` | download engine tuning |
