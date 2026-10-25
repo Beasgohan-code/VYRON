@@ -1,5 +1,5 @@
 import { ArrowUpRight, Compass, Download, Lock, WifiOff } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Avatar } from "./components/Avatar";
 import { BootScreen } from "./components/BootScreen";
 import { Dock } from "./components/Dock";
@@ -8,6 +8,7 @@ import { Shortcuts } from "./components/Shortcuts";
 import { Rail, Tabs } from "./components/Nav";
 import { Sheet } from "./components/Sheet";
 import { setOwnerToken } from "./lib/api";
+import { guardClose, lockSwipes, useBackButton } from "./lib/telegram";
 import { SEEK_STEP, VOLUME_STEP, shortcutFor } from "./lib/keys";
 import { useConnection, useUpdateReady } from "./lib/pwa";
 import { useApp } from "./lib/store";
@@ -31,7 +32,18 @@ const TITLES: Record<string, string> = {
 };
 
 export default function App() {
-  const { view, setView, access, toastMessage, toastTone, audio, state, refreshState } = useApp();
+  const {
+    view,
+    setView,
+    access,
+    toastMessage,
+    toastTone,
+    audio,
+    state,
+    refreshState,
+    modal,
+    closeModal,
+  } = useApp();
   const [retrying, setRetrying] = useState(false);
   const { online } = useConnection();
   const update = useUpdateReady();
@@ -39,14 +51,51 @@ export default function App() {
   const [shortcuts, setShortcuts] = useState(false);
   const { toggleLike } = useApp();
 
+  /*
+   * One "back" for the whole app, in the order a person expects it: close what
+   * is on top, then walk home. Without this the Android back gesture leaves the
+   * Mini App — and leaving it stops the song.
+   */
+  const back = useCallback(() => {
+    if (shortcuts) {
+      setShortcuts(false);
+      return;
+    }
+    if (audio.expanded) {
+      audio.setExpanded(false);
+      return;
+    }
+    if (modal) {
+      closeModal();
+      return;
+    }
+    if (view !== "home") setView("home");
+  }, [shortcuts, audio, modal, closeModal, view, setView]);
+
+  const canGoBack = shortcuts || audio.expanded || Boolean(modal) || view !== "home";
+  useBackButton(canGoBack, back);
+
+  /* Ask before the app is swiped away — only while it would cost something. */
+  useEffect(() => {
+    guardClose(audio.playing);
+    return () => guardClose(false);
+  }, [audio.playing]);
+
+  /* In the full-screen player a vertical drag means "close the player", not
+     "close the app", so the client's own gesture gets out of the way. */
+  useEffect(() => {
+    lockSwipes(audio.expanded);
+    return () => lockSwipes(false);
+  }, [audio.expanded]);
+
   /* Keyboard: one table (lib/keys) decides, this only routes. */
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const action = shortcutFor(event, event.target);
       if (!action) return;
       if (action === "escape") {
-        setShortcuts(false);
-        if (audio.expanded) audio.setExpanded(false);
+        // the same stack the back button walks
+        back();
         return;
       }
       if (shortcuts) return; // the overlay owns the keyboard while it is open
@@ -106,7 +155,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [audio, setView, shortcuts, toggleLike]);
+  }, [audio, setView, shortcuts, toggleLike, back]);
 
   const page = (() => {
     switch (view) {
@@ -241,6 +290,15 @@ export default function App() {
       <Shortcuts open={shortcuts} onClose={() => setShortcuts(false)} />
       {audio.expanded && <Player />}
 
+      {/*
+        Track changes are announced, not just drawn: nothing else in the app
+        tells a screen reader that the song changed, and the dock is a picture
+        and two truncating lines.
+      */}
+      <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        <NowPlayingAnnouncement />
+      </p>
+
       {toastMessage && (
         <div className={`toast toast-${toastTone}`} role="status" aria-live="polite">
           {toastMessage}
@@ -248,6 +306,16 @@ export default function App() {
       )}
     </div>
   );
+}
+
+
+/** The sentence a screen reader gets when the track changes. */
+function NowPlayingAnnouncement() {
+  const { audio } = useApp();
+  const track = audio.track;
+  if (!track) return null;
+  const by = track.uploader ? ` by ${track.uploader}` : "";
+  return <>{`${audio.playing ? "Now playing" : "Paused"}: ${track.title}${by}`}</>;
 }
 
 

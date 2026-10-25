@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, telegram } from "./api";
-import { artworkHiRes } from "./format";
+import { thumbFor } from "./format";
 import { enqueue as enqueueTrack, keyOf, move as moveInQueue, nextIndex } from "./queueops";
 import type { Repeat } from "./queueops";
 import { buildSession, clearSession, readSession, writeSession, type SavedSession } from "./session";
@@ -540,13 +540,20 @@ export function useAudioEngine(toast?: (message: string, tone?: "info" | "error"
   useEffect(() => {
     const media = navigator.mediaSession;
     if (!media || !track) return;
+    // The lock screen asks for artwork by URL and fetches it without our
+    // headers, so it must be a public, cacheable URL on our own origin — the
+    // same `/api/art` the tiles use, at the widest size we render.
+    const art = thumbFor(track);
     try {
       media.metadata = new MediaMetadata({
         title: track.title,
         artist: track.uploader || "VYRON",
         album: "VYRON",
-        artwork: artworkHiRes(track.thumbnail)
-          ? [{ src: artworkHiRes(track.thumbnail) as string, sizes: "1280x720", type: "image/jpeg" }]
+        artwork: art
+          ? [
+              { src: `${art}?s=600`, sizes: "600x600", type: "image/webp" },
+              { src: `${art}?s=300`, sizes: "300x300", type: "image/webp" },
+            ]
           : [],
       });
       media.setActionHandler("play", () => {

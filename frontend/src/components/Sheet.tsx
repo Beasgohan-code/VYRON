@@ -1,5 +1,6 @@
 import { Check, Download, Plus, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useFocusTrap } from "../lib/a11y";
 import { useApp } from "../lib/store";
 import type { Track } from "../lib/types";
 import { Cover } from "./Cover";
@@ -14,6 +15,8 @@ export function Sheet() {
   const [kind, setKind] = useState<"audio" | "video">("audio");
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
+  const sheet = useRef<HTMLDivElement>(null);
+  useFocusTrap(sheet, Boolean(modal));
 
   useEffect(() => {
     if (!modal) return;
@@ -88,7 +91,7 @@ export function Sheet() {
         if (event.target === event.currentTarget) closeModal();
       }}
     >
-      <div className="sheet">
+      <div className="sheet" ref={sheet}>
         <span className="grabber" aria-hidden="true" />
         <div className="sheet-head">
           <h3>{titles[modal.type]}</h3>

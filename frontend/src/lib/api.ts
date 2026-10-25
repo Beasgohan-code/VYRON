@@ -1,3 +1,4 @@
+import { telegram } from "./telegram";
 import type {
   ApiKeyUpdate,
   ActionResult,
@@ -12,30 +13,13 @@ import type {
   Track,
 } from "./types";
 
-declare global {
-  interface Window {
-    Telegram?: {
-      WebApp?: {
-        initData?: string;
-        ready?: () => void;
-        expand?: () => void;
-        close?: () => void;
-        requestFullscreen?: () => void;
-        exitFullscreen?: () => void;
-        setHeaderColor?: (color: string) => void;
-        setBackgroundColor?: (color: string) => void;
-        openTelegramLink?: (url: string) => void;
-        openLink?: (url: string) => void;
-        HapticFeedback?: {
-          impactOccurred?: (style: "light" | "medium" | "heavy" | "rigid" | "soft") => void;
-          notificationOccurred?: (type: "error" | "success" | "warning") => void;
-        };
-      };
-    };
-  }
-}
-
-export const telegram = () => window.Telegram?.WebApp;
+/*
+ * The Telegram client lives in `./telegram` — this module only builds requests.
+ * Both names are re-exported because a dozen call sites already import them
+ * from here, and a widowed `window.Telegram?.WebApp` cast in a view is exactly
+ * what the newer module was written to remove.
+ */
+export { haptic, notify, shareLink, telegram, webApp } from "./telegram";
 
 const TOKEN_KEY = "vyron:token";
 const OWNER_KEY = "vyron:owner-token";
@@ -142,6 +126,31 @@ async function request<T>(path: string, body?: unknown): Promise<T> {
   return payload as T;
 }
 
+/**
+ * The cheap poll.
+ *
+ * `/api/state` rebuilds favourites, history, playlists and counters; a 5-second
+ * timer that does that is 700+ documents an hour for data that only changes on
+ * a tap. `/api/now` answers with the live part alone, and `304` when that has
+ * not moved either — in which case `null` comes back and the store keeps what
+ * it has.
+ */
+let nowTag = "";
+
+export async function pollNow(): Promise<Partial<AppState> | null> {
+  const headers: Record<string, string> = {
+    "X-Init-Data": telegram()?.initData ?? "",
+    "X-Vyron-Token": token(),
+  };
+  if (ownerToken()) headers["X-Owner-Token"] = ownerToken();
+  if (nowTag) headers["If-None-Match"] = nowTag;
+  const response = await fetch("/api/now", { headers, credentials: "same-origin", cache: "no-store" });
+  if (response.status === 304) return null;
+  if (!response.ok) throw new ApiError(`poll failed (${response.status})`, response.status);
+  nowTag = response.headers.get("ETag") ?? "";
+  return (await response.json()) as Partial<AppState>;
+}
+
 export const api = {
   state: () => request<AppState>("/api/state"),
 
@@ -228,18 +237,3 @@ export const api = {
   },
 };
 
-export function haptic(style: "light" | "medium" | "heavy" | "soft" = "light"): void {
-  try {
-    telegram()?.HapticFeedback?.impactOccurred?.(style);
-  } catch {
-    /* Telegram may not expose haptics on every platform */
-  }
-}
-
-export function notify(type: "error" | "success" | "warning"): void {
-  try {
-    telegram()?.HapticFeedback?.notificationOccurred?.(type);
-  } catch {
-    /* noop */
-  }
-}

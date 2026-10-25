@@ -8,8 +8,16 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ApiError, api, haptic, notify, setToken, telegram } from "./api";
+import { ApiError, api, haptic, notify, pollNow, setToken } from "./api";
 import { primeAvatar } from "./avatar";
+import {
+  applyViewport,
+  bootShell,
+  paintChrome,
+  startTarget,
+  syncScheme,
+  watchClient,
+} from "./telegram";
 import { resolveTrack, useAudioEngine, type AudioEngine } from "./audio";
 import type { AppState, HomePayload, Playlist, Room, Track, View } from "./types";
 
@@ -134,6 +142,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     document.documentElement.dataset.accent = accent;
+    // "Telegram" is a real theme now, not a label: the client's own colours
+    // arrive as CSS variables, and the header must follow them.
+    syncScheme();
+    paintChrome();
   }, [theme, accent]);
 
   const setTheme = useCallback((next: ThemeName) => {
@@ -225,16 +237,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    // Ready before the first request: the client owns the spinner until then.
+    bootShell();
+    const stop = watchClient({
+      onChange: () => {
+        // a theme flip while the app is open must not need a reload
+        applyViewport();
+      },
+    });
     const boot = async () => {
-      const tg = telegram();
-      tg?.ready?.();
-      tg?.expand?.();
-      try {
-        tg?.setHeaderColor?.("#08080e");
-        tg?.setBackgroundColor?.("#08080e");
-      } catch {
-        /* older clients */
-      }
       await Promise.allSettled([
         refreshState(),
         api
@@ -246,14 +257,41 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ]);
     };
     void boot();
+    return stop;
   }, [refreshState, refreshRooms, refreshPlaylists]);
+
+  /**
+   * The live poll: queue, clock and settings, nothing else.
+   *
+   * Merged into the existing state so the heavy lists stay put — replacing the
+   * whole document every five seconds was throwing away the favourites the
+   * user was looking at, and re-rendering every list on screen.
+   */
+  const poll = useCallback(async () => {
+    try {
+      const live = await pollNow();
+      if (!live) return; // 304: nothing moved
+      setState((previous) => (previous ? { ...previous, ...live } : (live as AppState)));
+      setAccess("ok");
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) setAccess("locked");
+    }
+  }, []);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible") void refreshState();
+      if (document.visibilityState === "visible") void poll();
     }, 5000);
-    return () => window.clearInterval(timer);
-  }, [refreshState]);
+    // Coming back to the tab should be instant, not up to five seconds late.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void poll();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [poll]);
 
   useEffect(() => {
     if (view !== "rooms" && view !== "home") return undefined;
@@ -445,6 +483,42 @@ export function AppProvider({ children }: { children: ReactNode }) {
         .catch(() => undefined);
     }
   }, []);
+
+  /**
+   * `?startapp=` — a menu link like `t.me/VyronMusicBot?startapp=playlist_abc`
+   * is the only way a bot message can deep-link without printing a URL, so it
+   * is worth honouring. Acted on once, after the first state arrives, and only
+   * when the user has not already navigated somewhere themselves.
+   */
+  const deepLinked = useRef(false);
+  useEffect(() => {
+    if (deepLinked.current || !state) return;
+    const target = startTarget();
+    deepLinked.current = true;
+    if (!target) return;
+    if (target.kind === "view") {
+      setView(target.view as View);
+      return;
+    }
+    if (target.kind === "search") {
+      setQuery(target.query);
+      void runSearch(target.query);
+      return;
+    }
+    if (target.kind === "mix") {
+      void loadMix(target.key);
+      return;
+    }
+    // the playlist is not in the first payload yet, so ask for it by id
+    void api
+      .playlists()
+      .then((payload) => {
+        const found = (payload.playlists ?? []).find((item) => item.id === target.id);
+        if (found) openPlaylist(found);
+        else toast("That playlist is no longer saved", "error");
+      })
+      .catch(() => undefined);
+  }, [state, setView, runSearch, loadMix, openPlaylist, toast]);
 
   const value = useMemo<Store>(
     () => ({

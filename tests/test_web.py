@@ -126,6 +126,64 @@ def test_the_state_payload_points_at_a_real_avatar_route():
     asyncio.run(_with_client(scenario))
 
 
+def test_the_light_poll_answers_the_live_half_and_then_304s():
+    """`/api/now` exists so a 5-second timer is not a full document each time."""
+
+    async def scenario(client):
+        assert (await client.get("/api/now")).status == 401
+
+        token = auth.make_token(-100999, 424242, TOKEN)
+        headers = {"X-Vyron-Token": token}
+        first = await client.get("/api/now", headers=headers)
+        assert first.status == 200
+        body = await first.json()
+        assert body["ok"] is True and body["chat"]["id"] == -100999
+        assert body["now"] is None and body["queue"] == []
+        assert "version" in body and "settings" in body
+        # the heavy lists are deliberately absent
+        assert "favorites" not in body and "playlists" not in body and "history" not in body
+
+        tag = first.headers["ETag"]
+        assert tag
+        again = await client.get("/api/now", headers={**headers, "If-None-Match": tag})
+        assert again.status == 304
+        assert await again.read() == b""
+
+    asyncio.run(_with_client(scenario))
+
+
+def test_the_light_poll_reports_playback_once_there_is_some(monkeypatch):
+    from vyron.core.queue import ChatState, Track
+    from vyron.runtime import runtime
+
+    class Queues:
+        def get(self, _chat):
+            state = ChatState(
+                chat_id=-100999,
+                current=Track(id="now1", title="Believer", duration=200),
+                playing=True,
+                offset=30,
+            )
+            state.queue = [Track(id="now2", title="Next", duration=100)]
+            return state
+
+    class Player:
+        queues = Queues()
+
+    monkeypatch.setattr(runtime, "player", Player(), raising=False)
+
+    async def scenario(client):
+        token = auth.make_token(-100999, 424242, TOKEN)
+        response = await client.get("/api/now", headers={"X-Vyron-Token": token})
+        body = await response.json()
+        assert body["now"]["title"] == "Believer"
+        assert body["now"]["elapsed"] == 30
+        assert body["now"]["progress"] == 0.15
+        assert len(body["queue"]) == 1
+
+    asyncio.run(_with_client(scenario))
+
+
 def test_the_avatar_endpoint_serves_the_picture(monkeypatch):
     from vyron.web import avatars
 

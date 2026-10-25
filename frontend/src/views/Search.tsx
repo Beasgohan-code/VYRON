@@ -226,7 +226,7 @@ export function Search() {
                   className="artist-card"
                   onClick={() => void runSearch(artist.name)}
                 >
-                  <Cover track={{ title: artist.name, thumbnail: artist.cover }} monogram />
+                  <Cover track={{ title: artist.name, thumbnail: artist.cover }} monogram width={150} />
                   <b>{artist.name}</b>
                   <span>{artist.count} tracks</span>
                 </button>

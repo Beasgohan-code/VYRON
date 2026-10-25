@@ -9,6 +9,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import time
 from pathlib import Path
@@ -255,6 +257,79 @@ async def state(request: web.Request) -> web.Response:
             },
         }
     )
+
+
+def _etag(body: bytes) -> str:
+    return f'"{hashlib.sha256(body).hexdigest()[:20]}"'
+
+
+def _json_etag(payload: dict, request: web.Request) -> web.Response:
+    """A JSON response that costs nothing when nothing changed.
+
+    The Mini App polls while it is open, and most polls are identical to the
+    previous one — a song does not move between two ticks in the same second.
+    An `ETag` turns those into an empty 304 instead of a fresh document.
+    """
+    body = json.dumps(payload, separators=(",", ":")).encode()
+    tag = _etag(body)
+    headers = {"ETag": tag, "Cache-Control": "private, no-cache"}
+    if request.headers.get("If-None-Match") == tag:
+        return web.Response(status=304, headers=headers)
+    return web.Response(body=body, content_type="application/json", headers=headers)
+
+
+async def now_state(request: web.Request) -> web.Response:
+    """The cheap half of `/api/state` — everything a 5-second poll needs.
+
+    The full payload rebuilds favourites, history, playlists and counters on
+    every tick, which is 700+ documents an hour per open app for data that
+    changes when the user taps something, not while a song plays. This answers
+    with the live part only, and a 304 when even that has not moved.
+    """
+    user = await _identify(request)
+    denied = _denied(user)
+    if denied:
+        return denied
+    player = runtime.player
+    chat_id = _chat_id(user)
+    played = player.queues.get(chat_id) if player else None
+    current = played.current if played else None
+
+    now = _track_json(current)
+    if now and played:
+        elapsed = played.elapsed()
+        now.update(
+            elapsed=round(elapsed, 1),
+            paused=played.paused,
+            volume=played.volume,
+            loop=played.loop.value,
+            progress=(round(min(1.0, elapsed / current.duration), 4) if current.duration else 0),
+        )
+
+    payload = {
+        "ok": True,
+        "version": runtime.version,
+        "streaming": runtime.streaming_ready,
+        "chat": {
+            "id": chat_id,
+            "title": await _chat_title(user.chat_id) if user.chat_id else None,
+            "is_group": bool(user.chat_id) and chat_id < 0,
+        },
+        "now": now,
+        "queue": [
+            _track_json(track, index=index + 1)
+            for index, track in enumerate(played.queue if played else [])
+        ],
+        "settings": {
+            "volume": played.volume if played else settings.default_volume,
+            "loop": played.loop.value if played else "off",
+            "autoplay": played.autoplay if played else settings.autoplay_default,
+            "always_on": played.always_on if played else False,
+            "shuffle": played.shuffle if played else False,
+            "effects": played.effects if played else [],
+        },
+    }
+    return _json_etag(payload, request)
 
 
 _OFFLINE_HINTS = (
@@ -1367,6 +1442,7 @@ def register(app: web.Application) -> None:
     app.router.add_get("/api/playlists", playlists_route)
     app.router.add_get("/api/mix", mix)
     app.router.add_get("/api/state", state)
+    app.router.add_get("/api/now", now_state)
     app.router.add_get("/api/avatar", avatar)
     app.router.add_post("/api/state", state)
     app.router.add_post("/api/search", search)
@@ -1380,6 +1456,9 @@ def register(app: web.Application) -> None:
     app.router.add_get("/logs/live", logs_live)
     app.router.add_post("/api/logs", logs_action)
     audio.register(app)
+    from vyron.web import artwork
+
+    artwork.register(app)
     logger.info("web app mounted from %s", WEB_DIR)
 
 

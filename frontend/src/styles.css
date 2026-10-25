@@ -14,7 +14,9 @@
   --line-strong: rgba(255, 255, 255, 0.16);
   --text: #f4f3f8;
   --muted: #a5a2b6;
-  --dim: #74708a;
+  /* 5.3:1 on the page, 4.9:1 on a panel — the old #74708a was 4.24 / 3.86 and
+     it is the colour of every 11–13 px meta line (#7 in the review). */
+  --dim: #8b87a0;
   --accent: #8b5cf6;
   --accent-2: #fb7185;
   --accent-ink: #0a0713;
@@ -45,12 +47,41 @@
 [data-accent="pink"] { --accent: #f472b6; --accent-2: #fb923c; }
 [data-accent="amber"] { --accent: #fbbf24; --accent-2: #fb7185; }
 
+/* ── the client's own theme ────────────────────────────────────────────────
+   Telegram injects `--tg-theme-*` on :root for the signed-in user; "Telegram"
+   as a theme means *use them*, not "be dark with a purple button". Light
+   clients need the surface tokens flipped too (`--panel`/`--line` are white
+   overlays, which vanish on a light background), which is what
+   `[data-scheme="light"]` below does.
+   ---------------------------------------------------------------------- */
 [data-theme="telegram"] {
   --bg: var(--tg-theme-bg-color, #0f1117);
-  --bg-elev: color-mix(in srgb, var(--tg-theme-bg-color, #0f1117) 84%, white);
+  --bg-elev: var(--tg-theme-secondary-bg-color, color-mix(in srgb, var(--tg-theme-bg-color, #0f1117) 84%, white));
   --text: var(--tg-theme-text-color, #f4f3f8);
-  --muted: var(--tg-theme-hint-color, #a5a2b6);
+  --muted: var(--tg-theme-subtitle-text-color, var(--tg-theme-hint-color, #a5a2b6));
+  --dim: var(--tg-theme-hint-color, #8b87a0);
   --accent: var(--tg-theme-button-color, #8b5cf6);
+  --accent-2: var(--tg-theme-accent-text-color, var(--tg-theme-link-color, #fb7185));
+  --accent-ink: var(--tg-theme-button-text-color, #0a0713);
+  --error: var(--tg-theme-destructive-text-color, #fb7185);
+  --line: color-mix(in srgb, var(--tg-theme-text-color, #fff) 10%, transparent);
+  --line-strong: color-mix(in srgb, var(--tg-theme-text-color, #fff) 20%, transparent);
+  --panel: color-mix(in srgb, var(--tg-theme-text-color, #fff) 5%, transparent);
+  --panel-2: color-mix(in srgb, var(--tg-theme-text-color, #fff) 9%, transparent);
+}
+[data-theme="telegram"] .topbar,
+[data-theme="telegram"] .rail,
+[data-theme="telegram"] .tabs,
+[data-theme="telegram"] .dock {
+  background: color-mix(in srgb, var(--tg-theme-bg-color, #0f1117) 92%, transparent);
+}
+[data-scheme="light"][data-theme="telegram"] {
+  --panel: color-mix(in srgb, var(--tg-theme-text-color, #000) 4%, transparent);
+  --panel-2: color-mix(in srgb, var(--tg-theme-text-color, #000) 7%, transparent);
+  --line: color-mix(in srgb, var(--tg-theme-text-color, #000) 10%, transparent);
+  --line-strong: color-mix(in srgb, var(--tg-theme-text-color, #000) 18%, transparent);
+  --shadow: 0 30px 70px -40px rgba(0, 0, 0, 0.35);
+  --shadow-sm: 0 12px 30px -20px rgba(0, 0, 0, 0.3);
 }
 
 [data-theme="system"] { color-scheme: dark light; }
@@ -268,6 +299,22 @@ body::after {
 .tabs { display: none; }
 
 /* ── primitives ─────────────────────────────────────────────────────────── */
+/* Announcements for screen readers: present in the accessibility tree, absent
+   from the layout (not `display: none`, which would un-announce them). */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* A tap should not also zoom the page, and should not wait 300 ms. */
+button, .btn, a, [role="button"] { touch-action: manipulation; }
+
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   padding: 11px 18px;
@@ -2268,8 +2315,25 @@ body::after {
   max-width: 520px;
   margin-inline: auto;
   min-height: 100vh;
-  min-height: 100dvh;
+  min-height: var(--tg-stable-vh, 100dvh);
   background: var(--bg);
+}
+
+/* ── the keyboard ──────────────────────────────────────────────────────────
+   Telegram's webview does not always honour `100dvh` while the keyboard is up,
+   and the dock/tabs are `position: fixed`, so they land underneath it. When
+   `data-keyboard="open"` the chrome steps aside and the content keeps its
+   scroll position.
+   ---------------------------------------------------------------------- */
+html[data-keyboard="open"] .tabs,
+html[data-keyboard="open"] .dock {
+  transform: translateX(-50%) translateY(120%);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.2s var(--ease), opacity 0.2s var(--ease);
+}
+html[data-keyboard="open"] .main {
+  padding-bottom: 24px;
 }
 @media (min-width: 560px) {
   .app {
@@ -2445,3 +2509,17 @@ kbd {
   overflow-x: auto;
 }
 .crash-actions { display: flex; gap: 8px; }
+
+/* ── reduced transparency ──────────────────────────────────────────────────
+   The dock, topbar and sheets are heavy blurs; a user who asks the system for
+   less transparency gets flat surfaces instead. Cheap, and it makes long
+   scrolls on a low-end phone noticeably smoother.
+   ---------------------------------------------------------------------- */
+@media (prefers-reduced-transparency: reduce) {
+  .topbar, .rail, .dock, .tabs, .sheet, .hero-scrim {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+  .topbar, .dock, .tabs { background: var(--bg); }
+  .sheet { background: var(--bg-elev); }
+}

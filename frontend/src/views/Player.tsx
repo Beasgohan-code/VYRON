@@ -27,6 +27,7 @@ import { Reactor } from "../components/Reactor";
 import { Seek } from "../components/Seek";
 import { Sparks } from "../components/Sparks";
 import { TrackRow } from "../components/TrackRow";
+import { useFocusTrap } from "../lib/a11y";
 import { reveal, useTilt } from "../lib/anim";
 import { api } from "../lib/api";
 import { activeLyricLine, fmtDuration, hashOf } from "../lib/format";
@@ -56,6 +57,9 @@ export function Player() {
   const [lyrics, setLyrics] = useState<{ lines: LyricLine[]; text: string } | null>(null);
   const [showLyrics, setShowLyrics] = useState(false);
   const [showQueue, setShowQueue] = useState(false);
+  const stage = useRef<HTMLDivElement>(null);
+  useFocusTrap(stage, Boolean(audio.track));
+
   const [sleepMinutes, setSleepMinutes] = useState(0);
   const [sleepLeft, setSleepLeft] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -177,6 +181,7 @@ export function Player() {
       role="dialog"
       aria-label="Player"
       aria-modal="true"
+      ref={stage}
       style={tint}
       /* Swipe down to close: the gesture every phone music player has, and the
          thumb reaches it without hunting for the chevron. */

@@ -7,6 +7,58 @@ Two version numbers move independently:
 
 ## Bot
 
+### 1.10.0 — 2026-10-25
+
+The Mini App now behaves like a client of Telegram rather than a page inside
+one, and it stops hammering the server for data that has not changed.
+
+* **Back goes back.** The Android back gesture used to leave the Mini App — and
+  leaving it stops the song. It now walks the stack (keyboard overlay → player →
+  sheet → home) and steps out only at the top. `Escape` runs the same function,
+  so the two cannot drift.
+* **Swiping away asks first, while it would cost something.** Closing
+  confirmation is on only while audio plays; the player also takes over the
+  vertical gesture, so "drag down to close the player" no longer closes the app.
+* **The client's own colours.** "Telegram" as a theme used to mean four
+  variables; it now maps the whole palette (`bg`, `secondary_bg`, `text`,
+  `hint`, `link`, `button`, `accent`, `destructive`, `section`) from the
+  `--tg-theme-*` variables the client injects, flips the surface overlays for a
+  light client, and re-syncs on `themeChanged` without a reload. The header and
+  bottom bar are painted through `setHeaderColor` / `setBottomBarColor`.
+* **The keyboard stops covering the app.** `viewportChanged` (and
+  `visualViewport` in a browser) now publish the visible height as CSS
+  variables; when the keyboard opens the dock and tabs step aside instead of
+  sitting on top of the search field.
+* **Deep links.** `t.me/<bot>?startapp=playlist_<id>`, `mix_<key>`,
+  `search_<words>` and a plain view name are honoured once, after the first
+  state arrives — the only way a bot message can open the app on something
+  without printing a URL.
+* **Covers come from our own origin.** Every `<img>` pointed at
+  `i.ytimg.com`: a third party saw every listener's IP, the first paint waited
+  on an outside TLS handshake, and a deleted video became a grey tile. New
+  `GET /api/art/<id>?s=96|300|600` serves the picture from the app's own host —
+  resized to WebP with Pillow, cached in memory, `immutable` for 30 days, `304`
+  on a repeat, and a `srcset` in the UI so a phone downloads 96 px, not 600.
+  Collection sleeves (a playlist, an artist card) go through the same route by
+  URL, restricted to a fixed list of picture CDNs — never an open proxy.
+* **The poll got cheap.** `/api/state` rebuilt favourites, history, playlists
+  and counters every five seconds — 700+ documents an hour per open app for
+  data that changes on a tap. `/api/now` answers with the live half only and a
+  `304` when even that has not moved; the app merges it into what it already
+  has instead of replacing the screen.
+* **Dialogs trap focus.** `Sheet` and `Player` move focus in, keep Tab inside,
+  and put focus back on the trigger when they close.
+* **Screen readers hear the track change.** The dock is a picture and two
+  truncated lines; a polite live region now announces "Now playing: title by
+  artist".
+* **Contrast.** `--dim` (every 11–13 px meta line) was 4.24:1 on the page and
+  3.86:1 on a panel; it is 5.3:1 / 4.9:1 now.
+* **Pinch-zoom is back.** `maximum-scale=1` was taking it away from anyone who
+  needs it; `touch-action: manipulation` keeps the fast taps it was added for.
+* **Less blur when asked.** `prefers-reduced-transparency` flattens the dock,
+  topbar and sheets.
+* Version 1.10.0.
+
 ### 1.9.6 — 2026-10-25
 
 * **The Mini App shows your Telegram profile picture.** It used to draw a

@@ -2,13 +2,18 @@ import { useState } from "react";
 import { hashOf, initials, thumbFor } from "../lib/format";
 
 interface Props {
-  track?: { title?: string; id?: string; thumbnail?: string | null } | null;
+  track?: { title?: string; id?: string | number; thumbnail?: string | null } | null;
   className?: string;
   /** Corner radius in px, or any CSS length. */
   rounded?: number | string;
   /** Show the first letter of the title on top of the artwork. */
   monogram?: boolean;
+  /** Roughly how wide this cover is drawn, for `sizes` (a srcset hint). */
+  width?: number;
 }
+
+/** The three widths `/api/art` renders; the browser picks by rendered size. */
+const WIDTHS = [96, 300, 600];
 
 /**
  * Album artwork that never fails.
@@ -18,10 +23,11 @@ interface Props {
  * palette derived from the same hash. No image requests, no broken tiles, and
  * the same track always looks the same.
  */
-export function Cover({ track, className = "", rounded, monogram = false }: Props) {
+export function Cover({ track, className = "", rounded, monogram = false, width = 300 }: Props) {
   const [broken, setBroken] = useState(false);
   const seed = hashOf(String(track?.id ?? track?.title ?? "vyron"));
   const src = thumbFor(track);
+  const srcSet = src ? WIDTHS.map((size) => `${src}?s=${size} ${size}w`).join(", ") : undefined;
   const style = seed % 4;
   const hue = seed % 360;
   const hue2 = (hue + 48 + (seed % 60)) % 360;
@@ -128,10 +134,15 @@ export function Cover({ track, className = "", rounded, monogram = false }: Prop
       {src && !broken && (
         <img
           className="cover-img"
-          src={src}
+          src={`${src}?s=300`}
+          srcSet={srcSet}
+          sizes={`${Math.max(48, Math.min(width, 640))}px`}
           alt=""
           loading="lazy"
           decoding="async"
+          // Covers are public and cached for a month; the request carries no
+          // credentials, so nothing about the session leaks with the picture.
+          referrerPolicy="no-referrer"
           onError={() => setBroken(true)}
         />
       )}

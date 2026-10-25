@@ -31,11 +31,24 @@ export function hashOf(value: string): number {
 }
 
 /**
- * Real artwork only. When a track has no thumbnail the UI draws its own
- * (see `Cover`), so there is no placeholder folder to ship or keep in sync.
+ * Where a track's artwork comes from.
+ *
+ * Not the URL in the payload: that points at `i.ytimg.com`, which means every
+ * listener's IP goes to Google, a third-party handshake sits in front of the
+ * first paint, and the picture 404s as soon as a video is taken down. The
+ * server proxies it (`/api/art/<id>`), so the app asks its own origin.
+ *
+ * A track with no id (or no thumbnail) gets `null` and the generated art in
+ * `Cover`, exactly as before.
  */
-export function thumbFor(track?: { thumbnail?: string | null } | null): string | null {
-  return track?.thumbnail || null;
+export function thumbFor(track?: { id?: string | number; thumbnail?: string | null } | null): string | null {
+  if (!track?.thumbnail) return null;
+  if (track.id !== undefined && track.id !== null && track.id !== "") {
+    return `/api/art/${encodeURIComponent(String(track.id))}`;
+  }
+  // A collection sleeve (playlist, artist card) has only the URL. It still goes
+  // through our origin; the server refuses any host that is not a picture CDN.
+  return `/api/art?u=${encodeURIComponent(track.thumbnail)}`;
 }
 
 export function initials(name: string | undefined): string {
