@@ -7,6 +7,34 @@ Two version numbers move independently:
 
 ## Bot
 
+### 1.10.5 — 2026-10-25
+
+"What I typed did work yesterday." Three separate faults in one report:
+
+* **A misspelt name is not a failed search.** `.play wrong cheris grey` (Chris
+  Grey) and `.play let the world burn` both answered "No results" although the
+  right row was in the results: relevance was exact word overlap, so "cheris"
+  never matched "chris" and the filter threw the song away before it was ever
+  offered. Words now match within one typo (same first letter, ≥78% similar) in
+  the confidence score, the relevance gate and the ranking — "love" still does
+  not become "live".
+* **One refused lane no longer discards the others.** A refused `ytsearch`
+  raised out of the YouTube half and took YouTube Music's results with it. Each
+  lane fails on its own now, and there is a fourth one: Invidious/Piped keyword
+  search, which answers even on an IP whose *streams* YouTube refuses — no new
+  dependency, the same instances VYRON already uses for streams.
+* **A file on disk beats a URL that can expire.** A cached or prefetched file
+  is streamed instead of the resolved URL, and the prefetch behind the current
+  song now fetches the *next track's file* inside its existing budget, so the
+  hand-off after a song or a skip is instant and cannot 403 halfway through.
+
+Also in this build: mastheads are real headings in the rich lane and a quoted
+line (not a wall of `━`) in the classic one, a refused rich card is retried
+without its optional tags instead of falling back to plain HTML, `/doctor` says
+whether rich cards are working, the download card shows live progress, and the
+mirror and the catalogue copy download in parallel instead of one after the
+other.
+
 ### 1.10.4 — 2026-10-25
 
 The bug that made the bot look broken: **`.play Wrong` searched for the literal
