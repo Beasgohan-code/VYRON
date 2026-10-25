@@ -191,6 +191,67 @@ def test_command_args():
     assert command_args(message) == "faded"
 
 
+def test_command_args_strips_whichever_prefix_was_typed():
+    """The multi-prefix filter accepted `.play`; the parser did not.
+
+    Production: `.play Wrong` reached the search engine as the query
+    ".play Wrong", so the bot played five songs whose titles happened to
+    contain the word "play" and told the listener it had searched for
+    ".play". Every command with arguments was affected in chats that used a
+    non-slash prefix.
+    """
+    from vyron.utils.commands import configured
+
+    assert "." in configured(), "the dot prefix is on by default — that is the case that broke"
+    for typed in (".play Wrong", "!play Wrong", "?play Wrong", "/play Wrong", "$play Wrong"):
+        message = SimpleNamespace(text=typed, caption=None)
+        assert command_args(message) == "Wrong", typed
+
+    # …and the same for every other command shape: @botname, casing, spacing.
+    assert command_args(SimpleNamespace(text=".play@VyronMusicBot Wrong", caption=None)) == "Wrong"
+    assert command_args(SimpleNamespace(text=".PLAY Wrong", caption=None)) == "Wrong"
+    assert command_args(SimpleNamespace(text=".play   Wrong  ", caption=None)) == "Wrong"
+    assert command_args(SimpleNamespace(text=".seek 1:30", caption=None)) == "1:30"
+
+
+def test_a_query_that_is_not_a_command_is_left_alone():
+    """`.` is also just punctuation: `#1 hit` and `.nothing` are not commands."""
+    assert command_args(SimpleNamespace(text="#1 hit parade", caption=None)) == "#1 hit parade"
+    assert command_args(SimpleNamespace(text=".nothing Wrong", caption=None)) == ".nothing Wrong"
+
+
+def test_a_command_with_no_arguments_is_empty():
+    for typed in (".play", "/play", "/play@VyronMusicBot", ".PLAY"):
+        assert command_args(SimpleNamespace(text=typed, caption=None)) == "", typed
+
+
+def test_a_song_called_play_still_plays():
+    """`.play .play` is "play the song called .play", not an empty query."""
+    assert command_args(SimpleNamespace(text=".play .play", caption=None)) == ".play"
+
+
+def test_the_commands_lock_covers_every_prefix():
+    """A group that locked "commands" could still be spammed with `.play`."""
+    from vyron.utils.helpers import is_command_text
+
+    for typed in ("/play x", ".play x", "!play x", "?play x"):
+        assert is_command_text(typed) is True, typed
+    for typed in ("hello there", "#1 hit parade", ".nothing", "play"):
+        assert is_command_text(typed) is False, typed
+
+
+def test_prefixless_mode_strips_a_bare_command_word():
+    from vyron.utils import commands
+
+    commands.override(("/", ""))
+    try:
+        assert command_args(SimpleNamespace(text="play Wrong", caption=None)) == "Wrong"
+        # A message that is not a command is untouched.
+        assert command_args(SimpleNamespace(text="Wrong", caption=None)) == "Wrong"
+    finally:
+        commands.override(None)
+
+
 # ── single-instance lease ───────────────────────────────────────────────────
 def _lease_fresh():
     from vyron.core import lease

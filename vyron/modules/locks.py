@@ -107,8 +107,11 @@ def _matches_lock(name: str, message: Message) -> bool:
         text = message.text or message.caption or ""
         return bool(_NSFW_RE.search(text))
     if name == "commands":
-        text = message.text or ""
-        return text.startswith("/")
+        # `.play` and `!play` are commands too: a lock that only stopped `/`
+        # let a group be spammed through any other prefix.
+        from vyron.utils.helpers import is_command_text
+
+        return is_command_text(message.text or "")
     if name == "bots":
         return bool(message.via_bot)
     return False

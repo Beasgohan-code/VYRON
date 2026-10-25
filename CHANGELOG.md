@@ -7,6 +7,25 @@ Two version numbers move independently:
 
 ## Bot
 
+### 1.10.4 — 2026-10-25
+
+The bug that made the bot look broken: **`.play Wrong` searched for the literal
+string ".play Wrong"**.
+
+* **Arguments are parsed for every prefix, not just `/`.** The filter accepted
+  `.play`, `!play`, `?play` and the rest — that is a feature the bot advertises —
+  but the argument parser only stripped `/command`. So in any chat that typed a
+  dot, the query reached the search engine with the command still attached:
+  five results whose titles happened to contain "play", a header reading
+  "results · .play", and nothing that was actually asked for. `command_args()`
+  now strips whichever configured prefix was typed, with or without
+  `@botname`, in any case, and only when the word after it is a real command —
+  so a query that legitimately starts with punctuation (`#1 hit`) is left
+  alone. `".play .play"` still plays the song called ".play".
+* **The `commands` moderation lock covers every prefix.** It tested
+  `text.startswith("/")`, so a locked group could still be driven with `.play`.
+* Version 1.10.4.
+
 ### 1.10.3 — 2026-10-25
 
 Three complaints, three causes, all in the parts that decide what plays and

@@ -19,14 +19,97 @@ _ADMIN_STATES = {
     ChatMemberStatus.ADMINISTRATOR,
     ChatMemberStatus.OWNER,
 }
-_BOT_COMMAND_RE = re.compile(r"^/\w+(?:@\w+)?\s*", re.I)
-
-
 # ── query parsing ───────────────────────────────────────────────────────────
+#: Compiled "leading command" patterns, keyed by the prefix set they were built
+#: for. The set can be overridden at runtime, so it is re-checked on each use
+#: rather than frozen into one module-level regex.
+_COMMAND_RE_CACHE: tuple[tuple[str, ...], re.Pattern[str]] | None = None
+
+def _command_re() -> re.Pattern[str]:
+    global _COMMAND_RE_CACHE
+    from vyron.utils.commands import configured
+
+    prefixes = tuple(prefix for prefix in configured() if prefix)
+    if _COMMAND_RE_CACHE is not None and _COMMAND_RE_CACHE[0] == prefixes:
+        return _COMMAND_RE_CACHE[1]
+    # Longest first, so ".." wins over "." when both are configured.
+    alternatives = "|".join(
+        re.escape(prefix) for prefix in sorted(prefixes, key=len, reverse=True)
+    ) or "/"
+    pattern = re.compile(
+        rf"^\s*(?P<prefix>{alternatives})(?P<name>[A-Za-z0-9_]{{1,64}})"
+        r"(?:@[A-Za-z0-9_]{1,64})?[\s\u00a0\u200b]*",
+        re.UNICODE,
+    )
+    _COMMAND_RE_CACHE = (prefixes, pattern)
+    return pattern
+
+
+def strip_command(text: str, *, names: Iterable[str] | None = None) -> str:
+    """Remove the command the handler was called for, whatever its prefix.
+
+    This is the half of the multi-prefix feature that was missing. The filter
+    in `utils.commands` accepted `.play`, `!play` and the rest, but the
+    argument parser only knew about `/`, so `.play Wrong` reached the search
+    engine as the query **".play Wrong"** — and the bot dutifully played
+    results for that instead of the song. Every command with arguments had the
+    same bug; it only showed up in chats that typed a non-slash prefix.
+    """
+    raw = text or ""
+    match = _command_re().match(raw)
+    if match:
+        candidate = raw[: match.start()] + raw[match.end() :]
+        # Only trust the match when the word after the prefix is a real
+        # command. `.` and `?` are ordinary punctuation, and a query that
+        # happens to begin with one must not be shortened.
+        if not _looks_like_command(match.group("name").lower(), names):
+            return raw.strip()
+        return candidate.strip()
+
+    # Prefix-less mode (`COMMAND_PREFIXES` contains an empty entry): the
+    # command is a bare word, and it is only stripped when it *is* one.
+    if "" in _prefixes_including_empty():
+        head, _, rest = raw.partition(" ")
+        if _looks_like_command(head.strip().lower(), names):
+            return rest.strip()
+    return raw.strip()
+
+
+def _prefixes_including_empty() -> tuple[str, ...]:
+    from vyron.utils.commands import configured
+
+    return configured()
+
+
+def _looks_like_command(word: str, names: Iterable[str] | None = None) -> bool:
+    """Is *word* one of ours? Cheap to answer, and cached by the registry."""
+    if not word:
+        return False
+    if names is not None:
+        return word in {str(name).lower() for name in names}
+    from vyron.core.commandlist import command_names
+
+    return word in command_names()
+
+
+def is_command_text(text: str) -> bool:
+    """Does this read as one of our commands, with any prefix?
+
+    Used by moderation: a group that locks "commands" means every prefix the
+    bot answers to, not only the slash one.
+    """
+    match = _command_re().match(text or "")
+    if match:
+        return _looks_like_command(match.group("name").lower())
+    if "" in _prefixes_including_empty():
+        head = (text or "").strip().partition(" ")[0]
+        return _looks_like_command(head.lower())
+    return False
+
+
 def command_args(message: Message) -> str:
-    """Everything after ``/command[@bot]``."""
-    text = message.text or message.caption or ""
-    return _BOT_COMMAND_RE.sub("", text).strip()
+    """Everything after the command, for every prefix the bot accepts."""
+    return strip_command(message.text or message.caption or "")
 
 
 def first_word(text: str) -> str:
