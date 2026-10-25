@@ -828,7 +828,7 @@ def search_card(
     quick_buttons.append(B.btn(f"{E('close')} cancel", data="v:close", style="danger"))
     quick = B.row(*quick_buttons)
     header = (
-        f"<b>{E('play')} <mark>{esc(truncate(top.title, 52))}</mark></b>\n"
+        f"<b>{E('play')} <mark>{first + 1}. {esc(truncate(top.title, 52))}</mark></b>\n"
         f"<i>{_meta_line(top)}</i>"
     )
     hint = (
