@@ -176,3 +176,43 @@ def test_the_bot_source_downloads_the_biggest_picture(monkeypatch):
     picture = asyncio.run(avatars.from_bot(11))
     assert picture is not None and picture.content_type == "image/jpeg"
     assert asked == ["big"]
+
+
+def test_the_photos_endpoint_is_used_when_a_chat_has_no_photo(monkeypatch):
+    """Kurigram names it `get_chat_photos`; older clients `get_profile_photos`."""
+    from vyron.runtime import runtime
+
+    class EmptyChat:
+        photo = None
+
+    class Size:
+        file_id = "photo-file"
+
+    class Entry:
+        file_id = ""
+        sizes = [Size()]
+
+    asked: list[str] = []
+
+    class Bot:
+        async def get_chat(self, _user):
+            return EmptyChat()
+
+        async def get_chat_photos(self, _user, limit=1):
+            return [Entry()]
+
+        async def download_media(self, file_id, **_kwargs):
+            asked.append(file_id)
+            return io.BytesIO(JPEG)
+
+    monkeypatch.setattr(runtime, "bot", Bot(), raising=False)
+    picture = asyncio.run(avatars.from_bot(12))
+    assert picture is not None
+    assert asked == ["photo-file"]
+
+
+def test_a_client_without_either_method_is_not_a_crash(monkeypatch):
+    from vyron.runtime import runtime
+
+    monkeypatch.setattr(runtime, "bot", object(), raising=False)
+    assert asyncio.run(avatars.from_bot(13)) is None

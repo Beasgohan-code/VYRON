@@ -140,6 +140,57 @@ async def from_url(url: str) -> Avatar | None:
         return None
 
 
+def _photo_file_id(obj) -> str:
+    """The biggest file id on a `Chat`, `User` or photo object (or ``""``)."""
+    photo = getattr(obj, "photo", None)
+    if photo is not None:
+        found = str(getattr(photo, "big_file_id", "") or getattr(photo, "small_file_id", ""))
+        if found:
+            return found
+    found = str(getattr(obj, "file_id", "") or "")
+    if found:
+        return found
+    sizes = getattr(obj, "sizes", None) or []
+    # Telegram lists sizes smallest-first; the last one is the one to show.
+    return str(getattr(sizes[-1], "file_id", "") or "") if sizes else ""
+
+
+async def _file_id_for(bot, user_id: int) -> str:
+    """Ask the client, across the two or three method names it may have.
+
+    A client with a picture attached answers immediately; the photos endpoint
+    is the fallback for the rest. Method names differ between Pyrogram and
+    Kurigram (`get_chat_photos` / `get_profile_photos`), so both are tried —
+    this is not a place to crash over an attribute.
+    """
+    for name in ("get_chat", "get_users"):
+        method = getattr(bot, name, None)
+        if method is None:
+            continue
+        try:
+            answer = await asyncio.wait_for(method(int(user_id)), FETCH_TIMEOUT)
+        except Exception:
+            continue
+        for candidate in answer if isinstance(answer, list) else [answer]:
+            found = _photo_file_id(candidate)
+            if found:
+                return found
+
+    for name in ("get_chat_photos", "get_profile_photos"):
+        method = getattr(bot, name, None)
+        if method is None:
+            continue
+        try:
+            photos = await asyncio.wait_for(method(int(user_id), limit=1), FETCH_TIMEOUT)
+        except Exception:
+            continue
+        for entry in photos or []:
+            found = _photo_file_id(entry)
+            if found:
+                return found
+    return ""
+
+
 async def from_bot(user_id: int) -> Avatar | None:
     """Ask Telegram for the user's current picture. Never raises."""
     from vyron.runtime import runtime
@@ -147,32 +198,7 @@ async def from_bot(user_id: int) -> Avatar | None:
     bot = getattr(runtime, "bot", None)
     if bot is None or not user_id:
         return None
-    file_id = ""
-    try:
-        chat = await asyncio.wait_for(bot.get_chat(int(user_id)), FETCH_TIMEOUT)
-    except Exception as exc:
-        logger.debug("get_chat(%s) for a profile picture failed: %s", user_id, exc)
-        return None
-    photo = getattr(chat, "photo", None)
-    if photo is not None:
-        file_id = str(getattr(photo, "big_file_id", "") or getattr(photo, "small_file_id", ""))
-    if not file_id:
-        # `get_chat` only carries the *current* picture for some chat types;
-        # the photos endpoint is the reliable one for a plain user.
-        try:
-            photos = await asyncio.wait_for(
-                bot.get_profile_photos(int(user_id), limit=1), FETCH_TIMEOUT
-            )
-        except Exception:
-            photos = []
-        for entry in photos or []:
-            file_id = str(getattr(entry, "file_id", "") or "")
-            if not file_id:
-                sizes = getattr(entry, "sizes", None) or []
-                if sizes:
-                    file_id = str(getattr(sizes[-1], "file_id", "") or "")
-            if file_id:
-                break
+    file_id = await _file_id_for(bot, int(user_id))
     if not file_id:
         return None
     try:
