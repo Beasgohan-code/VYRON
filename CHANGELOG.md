@@ -7,6 +7,24 @@ Two version numbers move independently:
 
 ## Bot
 
+### 1.10.10 — 2026-10-25
+
+**The first `/play` in a group streamed with no now-playing card at all.** When
+the assistant had to be invited before it could stream, the retry path returned
+from `_start_stream()` *before* the bookkeeping — so `state.current` was never
+set. Audio started, and the chat got no poster, no elapsed clock and no play
+counted, because as far as the rest of the bot was concerned nothing was
+playing. The retry now falls through to the same success path as every other
+play, which also means the first play in a new group is counted, saved and
+mirrored like the rest. A test pins it: with the old code the state was empty
+after a successful invite.
+
+**Joining is spelled the way every client accepts.** An exported invite link of
+the `t.me/+Hash` form is rewritten to `t.me/joinchat/Hash` before the assistant
+tries it, and a `USER_BANNED` failure is reported as a ban in the owner journal
+instead of the generic "could not join" that sent people hunting for a network
+fault.
+
 ### 1.10.9 — 2026-10-25
 
 **Autoplay stopped drifting out of the lane, and stopped being slow.** Two

@@ -397,12 +397,28 @@ class Player:
             return False
         try:
             link = await bot.export_chat_invite_link(chat_id)
+            # Some clients reject the short `t.me/+Hash` form outright; the
+            # `joinchat` spelling is the one every pyrogram/kurigram build
+            # accepts, so normalise before trying.
+            if link.startswith("https://t.me/+"):
+                link = link.replace("https://t.me/+", "https://t.me/joinchat/", 1)
             await assistant.join_chat(link)
             logger.info("assistant joined %s via invite link", chat_id)
             return True
         except Exception as exc:
-            logger.info("assistant could not join %s: %s", chat_id, exc)
-            journal.warn("voice", f"assistant could not join {chat_id}", error=str(exc))
+            if "BANNED" in str(exc).upper():
+                # A ban is the one join failure the operator has to fix by
+                # hand: saying "could not join" and leaving it there sent
+                # people looking for a network problem that did not exist.
+                logger.warning("the assistant is banned in %s", chat_id)
+                journal.warn(
+                    "voice",
+                    f"the assistant account is banned in {chat_id} — unban it to play here",
+                    chat=chat_id,
+                )
+            else:
+                logger.info("assistant could not join %s: %s", chat_id, exc)
+                journal.warn("voice", f"assistant could not join {chat_id}", error=str(exc))
             return False
 
     # ── streaming primitives ───────────────────────────────────────────────
@@ -552,26 +568,28 @@ class Player:
                 )
         except NotInCallError as exc:
             # The assistant is not in the chat: invite it, then try once more.
-            if await self.ensure_assistant(chat_id):
-                try:
-                    await self.calls.play(
-                        chat_id,
-                        stream,
-                        config=GroupCallConfig(auto_start=True),
-                    )
-                    self._in_call.add(int(chat_id))
-                    return
-                except Exception as retry_exc:
-                    logger.info("retry after joining failed in %s: %s", chat_id, retry_exc)
-                    raise StreamError(
-                        f"Playback failed: {retry_exc}"
-                    ) from None
-            raise StreamError("The assistant could not join the voice chat.") from exc
+            # The retry must *fall through* to the state update below — it used
+            # to `return` here, so the first play in a chat where the assistant
+            # had just been invited streamed audio with no current track: no
+            # poster, no elapsed clock, no play counted.
+            if not await self.ensure_assistant(chat_id):
+                raise StreamError("The assistant could not join the voice chat.") from exc
+            try:
+                await self.calls.play(
+                    chat_id,
+                    stream,
+                    config=GroupCallConfig(auto_start=True),
+                )
+            except Exception as retry_exc:
+                logger.info("retry after joining failed in %s: %s", chat_id, retry_exc)
+                raise StreamError(f"Playback failed: {retry_exc}") from None
         except NoActiveGroupCall as exc:
             raise StreamError("Start a voice chat in this group first, then try again.") from exc
         except Exception as exc:
             # A missing assistant usually surfaces as a channel/peer error, so
-            # try the invite path once before giving up.
+            # try the invite path once before giving up (same rule: fall
+            # through on success, never skip the bookkeeping).
+            recovered = False
             if await self.ensure_assistant(chat_id):
                 try:
                     await self.calls.play(
@@ -579,13 +597,13 @@ class Player:
                         stream,
                         config=GroupCallConfig(auto_start=True),
                     )
-                    self._in_call.add(int(chat_id))
-                    return
+                    recovered = True
                 except Exception:
-                    pass
-            logger.warning("stream start failed in %s: %s", chat_id, exc)
-            journal.error("player", f"stream start failed in {chat_id}", exc, track=track.id)
-            raise StreamError(f"Playback failed: {exc}") from exc
+                    recovered = False
+            if not recovered:
+                logger.warning("stream start failed in %s: %s", chat_id, exc)
+                journal.error("player", f"stream start failed in {chat_id}", exc, track=track.id)
+                raise StreamError(f"Playback failed: {exc}") from exc
 
         self._in_call.add(int(chat_id))
         journal.ok(

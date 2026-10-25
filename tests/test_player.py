@@ -634,7 +634,8 @@ def test_assistant_join_falls_back_to_an_invite_link(monkeypatch):
 
     player, _, _, _ = make_player()
     assert run(player.ensure_assistant(-100)) is True
-    assert calls["join"] == [-100, "https://t.me/+invite"]
+    # The `t.me/+Hash` form is rewritten to the spelling every client accepts.
+    assert calls["join"] == [-100, "https://t.me/joinchat/invite"]
     assert calls["export"] == 1
 
 
@@ -955,3 +956,42 @@ def test_an_effects_change_with_nothing_playing_does_not_touch_the_call():
 
     assert run(player.reapply_effects(10)) is False
     assert calls.played == []
+
+
+# ── the first play in a group that has never met the assistant ──────────────
+def test_inviting_the_assistant_still_makes_the_track_current(monkeypatch):
+    """The invite retry used to `return` before the bookkeeping.
+
+    That is the path where audio started but `state.current` was never set: no
+    poster, no clock, no play counted — the "the picture is not there when it
+    plays" report, on the very first `/play` in a group.
+    """
+    from pytgcalls.exceptions import NotInCallError
+
+    from vyron.runtime import runtime
+
+    player, calls, _, storage = make_player()
+    calls.fail_first_with = NotInCallError()
+
+    class Assistant:
+        def __init__(self):
+            self.joined: list[object] = []
+
+        async def get_chat_member(self, chat_id, user):
+            raise RuntimeError("USER_NOT_PARTICIPANT")
+
+        async def join_chat(self, target):
+            self.joined.append(target)
+
+    assistant = Assistant()
+    monkeypatch.setattr(runtime, "assistant", assistant, raising=False)
+
+    run(player.play_track(10, track("abc")))
+
+    state = player.queues.get(10)
+    assert assistant.joined, "the assistant is invited into the chat"
+    assert calls.played == ["https://cdn/abc.m4a"]
+    assert state.current is not None and state.current.id == "abc"
+    assert state.playing is True
+    assert state.started_at > 0
+    assert storage.counters["tracks"] == 1
