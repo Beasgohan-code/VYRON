@@ -271,3 +271,21 @@ def test_the_cover_is_sent_when_the_poster_cannot_be_drawn(monkeypatch):
     assert bot.photos, "the cover is still a picture"
     assert bot.photos[0]["caption"]
     assert state.np_message_id == 501
+
+
+def test_bytes_become_a_file_pointer_the_client_accepts():
+    """The upload path takes a path or a *binary* file object — never `bytes`.
+
+    `as_file` is the single conversion, so every picture handed to Telegram
+    (poster, cover, /song thumbnail) is already in the shape it accepts.
+    """
+    from vyron.utils.net import as_file
+
+    pointer = as_file(b"\xff\xd8jpeg", "cover.jpg")
+    assert pointer is not None and hasattr(pointer, "read")
+    assert pointer.name == "cover.jpg"
+    assert pointer.read() == b"\xff\xd8jpeg"
+
+    assert as_file(None) is None and as_file(b"") is None
+    # Already a file object: handed back untouched.
+    assert as_file(pointer) is pointer

@@ -1204,3 +1204,94 @@ def test_a_revocation_only_kills_tokens_minted_before_it(tmp_path):
     finally:
         runtime.storage = previous
         tokens.reset_cache()
+
+
+def test_a_lookup_miss_is_not_asked_twice(monkeypatch):
+    """One tap used to cost a storage round trip *and* an 8 s catalogue call,
+    every single time, for an id that will never resolve.
+
+    The Mini App asks `/api/audio/<id>` then `/api/stream/<id>`, and each poll
+    repeated the whole fan-out: Render measured 29.7 s on a request that
+    returned 404 in the end.
+    """
+    import vyron.core.jiosaavn as saavn
+    from vyron.web import stream as audio
+
+    audio._REGISTRY.clear()
+    audio._LOOKUPS.clear()
+    asked: list[str] = []
+
+    async def by_id(song_id):
+        asked.append(song_id)
+        return None
+
+    monkeypatch.setattr(saavn, "by_id", by_id)
+    monkeypatch.setattr(audio.runtime, "youtube", None)
+    monkeypatch.setattr(audio.runtime, "storage", None)
+
+    assert asyncio.run(audio.lookup_playable("5dAAl81", user_id=7)) is None
+    assert asyncio.run(audio.lookup_playable("5dAAl81", user_id=7)) is None
+    assert asked == ["5dAAl81"], "a cached miss must not be asked again"
+
+    # …but a song that is in the registry always wins, even over a cached miss.
+    from vyron.core.queue import Track
+
+    audio.remember(Track(id="5dAAl81", title="Now Known"))
+    assert asyncio.run(audio.lookup_playable("5dAAl81", user_id=7)).title == "Now Known"
+    audio._LOOKUPS.clear()
+    audio._REGISTRY.clear()
+
+
+def test_the_title_lookup_never_addresses_peer_zero(monkeypatch):
+    """`Peer id invalid: 0` came from asking Telegram for chat 0.
+
+    A token minted without a chat context resolves to peer 0, and Telegram
+    answers that with an error. There is no title to fetch, so it is not
+    fetched — and a failed lookup is remembered, so a polling app does not
+    re-pay a 3-second timeout on every tick.
+    """
+    from vyron.web import server
+    from vyron.runtime import runtime
+
+    calls: list[int] = []
+
+    class Bot:
+        async def get_chat(self, chat_id):
+            calls.append(chat_id)
+            raise RuntimeError(f"Peer id invalid: {chat_id}")
+
+    monkeypatch.setattr(runtime, "bot", Bot())
+    server._TITLE_CACHE.clear()
+
+    assert asyncio.run(server._chat_title(0)) == ""
+    assert calls == [], "peer 0 must never be asked for"
+
+    assert asyncio.run(server._chat_title(-100123)) == ""
+    assert asyncio.run(server._chat_title(-100123)) == ""
+    assert calls == [-100123], "a known-bad chat is retried in a minute, not per poll"
+    server._TITLE_CACHE.clear()
+
+
+def test_state_answers_a_degraded_app_instead_of_a_500(monkeypatch):
+    """The Mini App's whole first paint comes from one endpoint.
+
+    Whatever goes wrong inside it — this monkeypatch stands in for any of the
+    fan-out's parts misbehaving — the app must still get a document to render,
+    not a blank screen and a console error.
+    """
+    from vyron.web import server
+
+    async def boom(request):
+        raise RuntimeError("a bug in the payload")
+
+    monkeypatch.setattr(server, "_state_response", boom)
+    token = auth.make_token(-100999, 424242, TOKEN)
+
+    async def scenario(client):
+        response = await client.get("/api/state", headers={"X-Vyron-Token": token})
+        assert response.status == 200, await response.text()
+        body = await response.json()
+        assert body["ok"] is True and body["degraded"] is True
+        assert body["now"] is None and body["queue"] == []
+
+    asyncio.run(_with_client(scenario))

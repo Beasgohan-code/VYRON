@@ -13,9 +13,24 @@ import time
 
 from aiohttp import web
 
+try:  # aiohttp ≥ 3.10 names this class explicitly
+    from aiohttp import ClientConnectionResetError as _ClientReset
+except Exception:  # pragma: no cover - older aiohttp
+    _ClientReset = ConnectionResetError  # type: ignore[assignment,misc]
+
 from vyron.core.journal import journal
 
 logger = logging.getLogger(__name__)
+
+# The browser seeked, closed the tab, or the phone locked mid-stream. aiohttp
+# raises its own class for this since 3.10, and it is *not* a ConnectionResetError
+# subclass, so every `except ConnectionResetError` in the codebase missed it and
+# the noise landed in the owner journal as a crash.
+CLIENT_GONE: tuple[type[BaseException], ...] = (
+    ConnectionResetError,
+    ConnectionError,
+    _ClientReset,
+)
 
 _SLOW_MS = 4000
 _MAX_MESSAGE = 400
@@ -32,6 +47,12 @@ async def record_errors(request: web.Request, handler) -> web.StreamResponse:
         response = await handler(request)
     except web.HTTPException:
         raise
+    except CLIENT_GONE as exc:
+        # The browser seeked, closed the tab, or the phone locked. That is a
+        # normal end to a stream request, not a server fault — logging it as an
+        # error buried the requests that really were broken.
+        logger.debug("%s %s: client went away (%s)", request.method, request.path, exc)
+        return web.Response(status=499)
     except Exception as exc:
         # The type and message go in the *message*, not only in the metadata:
         # Render's log stream shows messages, so a bare "crashed" line forced a
@@ -64,4 +85,4 @@ async def record_errors(request: web.Request, handler) -> web.StreamResponse:
     return response
 
 
-__all__ = ["record_errors"]
+__all__ = ["CLIENT_GONE", "record_errors"]

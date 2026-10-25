@@ -186,3 +186,46 @@ def test_deliver_accepts_an_explicit_video_choice(monkeypatch, tmp_path):
     track = Track(id="v3", title="clip", url="https://x/v.mp4")
     asyncio.run(play_module.deliver(client, -100, track, True))
     assert "video" in client.sent
+
+
+def test_the_song_cover_is_handed_over_as_a_file_not_raw_bytes(monkeypatch, tmp_path):
+    """`/song` lost the *whole* file when the cover had downloaded.
+
+    The client's upload path accepts a path or a binary file object; raw
+    ``bytes`` in `thumb` raise "Invalid file. Expected a file path as string or
+    a binary (not text) file pointer" inside `send_audio`, which took the audio
+    down with it. This pins the conversion at the call site.
+    """
+    audio_path = tmp_path / "song.mp3"
+    audio_path.write_bytes(b"\x00" * 32)
+
+    class Downloader:
+        def cached(self, track, *, video=False):
+            return None
+
+        async def audio(self, track, *, on_progress=None):
+            return audio_path
+
+        async def video(self, track, *, on_progress=None):  # pragma: no cover
+            raise AssertionError("the audio file was fine, video must not be tried")
+
+    async def cover(url):
+        return b"\xff\xd8\xff" + b"jpeg-bytes" * 4
+
+    _patch_runtime(monkeypatch, Downloader())
+    monkeypatch.setattr(play_module, "fetch_bytes", cover)
+    client = _Client()
+    track = Track(
+        id="a9",
+        title="s",
+        url="https://x/s",
+        thumbnail="https://i.ytimg.com/vi/a9/hqdefault.jpg",
+    )
+
+    asyncio.run(play_module.deliver(client, -100, track))
+
+    assert "audio" in client.sent
+    thumb = client.sent["audio"][2].get("thumb")
+    assert thumb is not None and hasattr(thumb, "read"), "thumb must be a file pointer"
+    assert getattr(thumb, "name", "").endswith(".jpg")
+    assert thumb.read(2) == b"\xff\xd8"

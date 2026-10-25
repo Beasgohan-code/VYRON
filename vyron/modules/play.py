@@ -30,7 +30,7 @@ from vyron.utils.helpers import (
     media_suffix,
     track_from_message,
 )
-from vyron.utils.net import fetch_bytes
+from vyron.utils.net import as_file, fetch_bytes
 from vyron.utils.commands import cmd
 
 logger = logging.getLogger(__name__)
@@ -865,7 +865,7 @@ async def deliver(
 
     thumb = None
     try:
-        thumb = await thumb_task
+        thumb = as_file(await thumb_task, f"{track.id or 'cover'}.jpg")
     except Exception:  # the picture is a nicety, the file is the answer
         thumb = None
     caption = (

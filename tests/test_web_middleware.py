@@ -67,3 +67,32 @@ def test_boot_wait_is_configurable_and_never_negative():
 
     assert dataclasses.replace(settings, boot_wait=3).boot_wait == 3
     assert settings.boot_wait >= 0
+
+
+def test_a_client_that_hangs_up_is_not_a_crash(quiet_journal):
+    """iOS closing the audio stream used to be journalled as a webapp error.
+
+    Every seek and every locked phone produced a red line in `/logs`, so the
+    entries that really mattered were buried. A disconnect is the *normal* end
+    of a stream request.
+    """
+    from vyron.web.middleware import CLIENT_GONE
+
+    async def hangs_up(request):
+        raise CLIENT_GONE[0]("Cannot write to closing transport")
+
+    async def also_hangs_up(request):
+        raise ConnectionResetError("peer reset")
+
+    app = web.Application(middlewares=[record_errors])
+    app.router.add_get("/api/stream/abc", hangs_up)
+    app.router.add_get("/api/audio/abc", also_hangs_up)
+
+    async def scenario():
+        async with TestClient(TestServer(app)) as client:
+            for path in ("/api/stream/abc", "/api/audio/abc"):
+                response = await client.get(path)
+                assert response.status == 499
+        assert quiet_journal == [], "a disconnect must stay out of the journal"
+
+    asyncio.run(scenario())

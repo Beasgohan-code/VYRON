@@ -30,4 +30,24 @@ async def fetch_bytes(url: str | None, *, limit: int = _MAX_THUMB) -> bytes | No
         return None
 
 
-__all__ = ["fetch_bytes"]
+def as_file(data: bytes | None, name: str = "cover.jpg"):
+    """Bytes → a *binary* file pointer Telegram will accept.
+
+    The client's upload path only takes a path or an ``io.IOBase``; raw
+    ``bytes`` raises "Invalid file. Expected a file path as string or a binary
+    (not text) file pointer" — which is exactly how `/song` lost the *whole*
+    file whenever the cover had downloaded: the artwork took the upload down
+    with it.
+    """
+    if not data:
+        return None
+    import io as _io
+
+    if isinstance(data, (bytes, bytearray)):
+        pointer = _io.BytesIO(bytes(data))
+        pointer.name = name          # type: ignore[attr-defined]
+        return pointer
+    return data
+
+
+__all__ = ["as_file", "fetch_bytes"]

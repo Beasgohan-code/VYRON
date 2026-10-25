@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 from collections import OrderedDict
 from pathlib import Path
 from urllib.parse import quote
@@ -37,10 +38,23 @@ from vyron.core.search import MediaError, StreamInfo
 from vyron.runtime import runtime
 from vyron.web.auth import WebUser
 from vyron.web.budget import BUDGET, BudgetExceeded, identity_key
+from vyron.web.middleware import CLIENT_GONE
 
 logger = logging.getLogger(__name__)
 
 MAX_REGISTRY = 600
+# A lookup that failed used to be repeated on every `/api/audio` and
+# `/api/stream` hit for the same id — and each one paid a full storage round
+# trip plus an 8-second catalogue call. On Render that turned one tap into a
+# 30-second request. Remember the answer, miss included, for a short while.
+_LOOKUP_TTL = 300.0
+_LOOKUP_MISS_TTL = 60.0
+_MAX_LOOKUPS = 512
+# Storage is a network hop too. When Mongo is cold or unreachable the driver
+# waits its own server-selection timeout (30 s); a failed idempotent lookup must
+# not hold an audio request that long.
+_STORAGE_BUDGET = 4.0
+_LOOKUPS: OrderedDict[str, tuple[float, Track | None]] = OrderedDict()
 _REGISTRY: OrderedDict[str, Track] = OrderedDict()
 _RANGE_RE = re.compile(r"bytes=(\d*)-(\d*)", re.I)
 _CHUNK = 64 * 1024
@@ -87,10 +101,31 @@ def lookup(media_id: str, *, user_id: int = 0) -> Track | None:
     return None
 
 
-async def lookup_async(media_id: str, *, user_id: int = 0) -> Track | None:
-    found = lookup(media_id, user_id=0)
-    if found is not None:
-        return found
+def _lookup_cached(key: str) -> tuple[bool, Track | None]:
+    """``(found, track)`` from the answer cache — the track may legitimately be None."""
+    hit = _LOOKUPS.get(key)
+    if hit is None:
+        return False, None
+    expires, track = hit
+    if time.monotonic() >= expires:
+        _LOOKUPS.pop(key, None)
+        return False, None
+    _LOOKUPS.move_to_end(key)
+    return True, track
+
+
+def _lookup_store(key: str, track: Track | None) -> None:
+    _LOOKUPS[key] = (
+        time.monotonic() + (_LOOKUP_TTL if track is not None else _LOOKUP_MISS_TTL),
+        track,
+    )
+    _LOOKUPS.move_to_end(key)
+    while len(_LOOKUPS) > _MAX_LOOKUPS:
+        _LOOKUPS.popitem(last=False)
+
+
+async def _lookup_storage(media_id: str, user_id: int) -> Track | None:
+    """The slow half of `lookup_async`: history → favourites → playlists."""
     storage = runtime.storage
     if storage is None or not user_id:
         return None
@@ -112,6 +147,19 @@ async def lookup_async(media_id: str, *, user_id: int = 0) -> Track | None:
     return None
 
 
+async def lookup_async(media_id: str, *, user_id: int = 0) -> Track | None:
+    found = lookup(media_id, user_id=0)
+    if found is not None:
+        return found
+    if runtime.storage is None or not user_id:
+        return None
+    try:
+        return await asyncio.wait_for(_lookup_storage(media_id, user_id), timeout=_STORAGE_BUDGET)
+    except asyncio.TimeoutError:
+        logger.info("storage lookup for %s took longer than %.0fs — skipping", media_id, _STORAGE_BUDGET)
+    return None
+
+
 _DIRECT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 
 
@@ -127,8 +175,20 @@ async def lookup_playable(media_id: str, *, user_id: int = 0) -> Track | None:
     That allowlist is the whole point: resolving *any* id turned this endpoint
     into an open proxy for the entire internet's audio, billed to the host.
     """
+    # The registry is free and always current: a song that was just searched
+    # must never be shadowed by a cached miss.
+    live = lookup(media_id)
+    if live is not None:
+        return live
+
+    key = f"{user_id}:{media_id}"
+    seen, cached = _lookup_cached(key)
+    if seen:
+        return cached
+
     found = await lookup_async(media_id, user_id=user_id)
     if found is not None:
+        _lookup_store(key, found)
         return found
 
     # A catalogue id is self-describing too: JioSaavn's own API can hand back
@@ -145,19 +205,24 @@ async def lookup_playable(media_id: str, *, user_id: int = 0) -> Track | None:
             track = None
         if track is not None:
             remember(track)
+            _lookup_store(key, track)
             return track
 
     youtube = runtime.youtube
     if youtube is None or not _DIRECT_ID_RE.match(media_id):
+        _lookup_store(key, None)
         return None
     if not settings.webapp_direct_ids:
+        _lookup_store(key, None)
         return None
     try:
         track = await youtube.resolve(f"https://youtu.be/{media_id}")
     except Exception as exc:
         logger.info("direct resolve failed for %s: %s", media_id, exc)
+        _lookup_store(key, None)
         return None
     remember(track)
+    _lookup_store(key, track)
     return track
 
 
@@ -243,14 +308,18 @@ async def _proxy_range(
             for header in ("Content-Range", "Content-Length"):
                 if header in upstream.headers:
                     response.headers[header] = upstream.headers[header]
-            await response.prepare(request)
             try:
+                await response.prepare(request)
                 async for chunk in upstream.content.iter_chunked(_CHUNK):
                     await response.write(chunk)
-            except (ConnectionResetError, asyncio.CancelledError):
-                # the browser seeked away or closed the tab — not an error
-                raise
-            await response.write_eof()
+                await response.write_eof()
+            except asyncio.CancelledError:
+                raise  # the task itself was cancelled: let that unwind
+            except CLIENT_GONE as exc:
+                # The browser seeked, closed the tab, or the phone locked. The
+                # bytes are gone and nobody is listening — that is a normal way
+                # for audio to end, so it must not be journalled as a crash.
+                logger.debug("stream reader went away: %s", exc)
             return response
         finally:
             upstream.release()

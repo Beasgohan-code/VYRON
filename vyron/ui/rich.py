@@ -408,6 +408,13 @@ async def send(
     """
     if not markup:
         return None
+    if not chat_id:
+        # "Peer id invalid: 0" — a card addressed to nobody. It happens when a
+        # caller derives the chat from a token that carries no chat (anonymous
+        # Mini App session, a queue restored without its chat) and then sends
+        # anyway; nothing can be delivered, so nothing is attempted.
+        logger.debug("card send skipped: no chat id (%s)", type(chat_id).__name__)
+        return None
     keyboard = markup_keyboard or reply_markup
     # Cards that carry their own <tg-button> rows must not also receive a
     # reply_markup in the rich lane — that would render two button sets.
@@ -489,7 +496,7 @@ async def send_photo(
     real inline keyboard.  If the photo cannot be uploaded at all (bad file, no
     network) we fall back to the ordinary card so the user still gets `/start`.
     """
-    if not markup:
+    if not markup or not chat_id:
         return None
     keyboard = markup_keyboard or reply_markup
     caption = to_caption(markup)

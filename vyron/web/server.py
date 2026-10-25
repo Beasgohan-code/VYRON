@@ -33,6 +33,7 @@ from vyron.core.musicapi import (
 )
 from vyron.web import stream as audio
 from vyron.web.auth import WebUser, make_token
+from vyron.web.middleware import CLIENT_GONE
 
 logger = logging.getLogger(__name__)
 
@@ -166,20 +167,44 @@ async def _none(value=None):
     return value
 
 
+_TITLE_MISS_TTL = 60.0  # a failure is retried in a minute, not on every poll
+_MAX_TITLES = 500
+
+
 async def _chat_title(chat_id: int) -> str:
-    """Chat title with a 10-minute cache and a hard timeout."""
-    cached = _TITLE_CACHE.get(chat_id)
-    if cached and time.time() - cached[0] < 600:
-        return cached[1]
-    if runtime.bot is None:
+    """Chat title with a 10-minute cache and a hard timeout.
+
+    A token without a chat context resolves to peer ``0``, and Telegram answers
+    that with ``Peer id invalid: 0`` — the error that turned `/api/state` into a
+    500 for owner sessions. There is no title to fetch, so it is not fetched.
+    """
+    if not chat_id:
+        # 0 is not a peer — groups and channels are *negative*, so the check is
+        # "falsy", never "<= 0".
         return ""
+    cached = _TITLE_CACHE.get(chat_id)
+    if cached:
+        ttl = 600.0 if cached[1] else _TITLE_MISS_TTL
+        if time.time() - cached[0] < ttl:
+            return cached[1]
+    if runtime.bot is None:
+        return cached[1] if cached else ""
     try:
         chat = await asyncio.wait_for(runtime.bot.get_chat(chat_id), timeout=3)
         title = chat.title or chat.first_name or ""
     except Exception:
+        # Remember the failure too: an unanswerable peer used to cost a 3-second
+        # timeout on every poll for the whole life of the process.
+        _remember_title(chat_id, cached[1] if cached else "")
         return cached[1] if cached else ""
-    _TITLE_CACHE[chat_id] = (time.time(), title)
+    _remember_title(chat_id, title)
     return title
+
+
+def _remember_title(chat_id: int, title: str) -> None:
+    _TITLE_CACHE[chat_id] = (time.time(), title)
+    while len(_TITLE_CACHE) > _MAX_TITLES:
+        _TITLE_CACHE.pop(next(iter(_TITLE_CACHE)))
 
 
 # ── static shell ────────────────────────────────────────────────────────────
@@ -224,6 +249,56 @@ async def service_worker(_: web.Request) -> web.StreamResponse:
 
 # ── state ───────────────────────────────────────────────────────────────────
 async def state(request: web.Request) -> web.Response:
+    """`/api/state` — the payload the whole Mini App is built from.
+
+    It is a fan-out over the player, storage and Telegram, and every part of it
+    is individually guarded. This outer guard is the last line: a bug in one of
+    those guards must cost the user a blank section, never a blank app.
+    """
+    try:
+        return await _state_response(request)
+    except web.HTTPException:
+        raise
+    except Exception as exc:
+        journal.error(
+            "webapp",
+            f"/api/state degraded: {type(exc).__name__}: {exc}"[:300],
+            exc,
+            status=500,
+        )
+        return _state_degraded()
+
+
+def _state_degraded() -> web.Response:
+    return _json(
+        {
+            "ok": True,
+            "version": runtime.version,
+            "bot": settings.bot_username,
+            "streaming": runtime.streaming_ready,
+            "degraded": True,
+            "user": {"id": 0, "name": "", "username": "", "owner": False, "photo": "", "avatar": "/api/avatar"},
+            "owner": False,
+            "chat": {"id": 0, "title": "", "is_group": False},
+            "now": None,
+            "queue": [],
+            "settings": {
+                "volume": settings.default_volume,
+                "loop": "off",
+                "autoplay": settings.autoplay_default,
+                "always_on": False,
+                "shuffle": False,
+                "effects": [],
+            },
+            "favorites": [],
+            "history": [],
+            "playlists": [],
+            "stats": {"tracks": 0, "downloads": 0, "chats": 0},
+        }
+    )
+
+
+async def _state_response(request: web.Request) -> web.Response:
     user = await _identify(request)
     denied = _denied(user)
     if denied:
@@ -1415,8 +1490,12 @@ async def logs_stream(request: web.Request) -> web.StreamResponse:
             "X-Accel-Buffering": "no",
         },
     )
-    await response.prepare(request)
-    await response.write(b"retry: 3000\n\n")
+    try:
+        await response.prepare(request)
+        await response.write(b"retry: 3000\n\n")
+    except CLIENT_GONE as exc:
+        logger.debug("log stream closed before it started: %s", exc)
+        return web.Response(status=499)
 
     subscription = journal.subscribe(limit=600)
     loop = asyncio.get_running_loop()
@@ -1444,8 +1523,10 @@ async def logs_stream(request: web.Request) -> web.StreamResponse:
             if not _passes(payload, levels, scope):
                 continue
             await _sse(response, "log", payload)
-    except (ConnectionResetError, asyncio.CancelledError):
-        pass
+    except asyncio.CancelledError:
+        raise
+    except CLIENT_GONE as exc:
+        logger.debug("log stream closed: %s", exc)
     finally:
         journal.unsubscribe(subscription)
     return response

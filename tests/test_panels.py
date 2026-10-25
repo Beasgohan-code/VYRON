@@ -73,3 +73,38 @@ def test_caption_edits_are_guarded_too():
     asyncio.run(rich.edit(client, -100, 11, "<b>x</b>"))
     asyncio.run(rich.edit(client, -100, 11, "<b>x</b>"))
     assert len(client.calls) == 1
+
+
+class _Recording:
+    """A client that records every send — and would raise like Telegram does."""
+
+    def __init__(self):
+        self.calls: list[tuple[str, dict]] = []
+
+    async def send_rich_message(self, **kwargs):  # pragma: no cover - must not run
+        self.calls.append(("rich", kwargs))
+        raise AssertionError("a card addressed to peer 0 must not be sent")
+
+    async def send_message(self, **kwargs):  # pragma: no cover - must not run
+        self.calls.append(("html", kwargs))
+        raise AssertionError("a card addressed to peer 0 must not be sent")
+
+    async def send_photo(self, **kwargs):  # pragma: no cover - must not run
+        self.calls.append(("photo", kwargs))
+        raise AssertionError("a picture addressed to peer 0 must not be sent")
+
+
+def test_a_card_addressed_to_nobody_is_not_sent_at_all():
+    """"Peer id invalid: 0" was a card sent to chat 0.
+
+    An owner token, or a queue restored without its chat, resolves to chat 0 —
+    and the client answers that with an error on the log line, after the
+    bitmap/poster was already built. Nothing can arrive at peer 0, so nothing
+    is attempted, and the caller keeps its normal `None`.
+    """
+    card = "<b>Hello</b>"
+    client = _Recording()
+    assert asyncio.run(rich.send(client, 0, card)) is None
+    assert asyncio.run(rich.send(client, None, card)) is None
+    assert asyncio.run(rich.send_photo(client, 0, b"jpg-bytes", card)) is None
+    assert client.calls == []
