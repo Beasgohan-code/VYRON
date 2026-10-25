@@ -151,6 +151,31 @@ export async function pollNow(): Promise<Partial<AppState> | null> {
   return (await response.json()) as Partial<AppState>;
 }
 
+/**
+ * Tell the owner's journal that the Mini App crashed.
+ *
+ * Fire-and-forget on purpose: this runs while the UI is already broken, so it
+ * must not throw, must not block, and must not email anyone. The server writes
+ * one journal line and answers `{ok:true}` regardless.
+ */
+export async function reportCrash(detail: { message: string; stack?: string; scope?: string }): Promise<void> {
+  try {
+    await fetch("/api/client-error", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      keepalive: true,
+      body: JSON.stringify({
+        message: detail.message.slice(0, 300),
+        stack: (detail.stack ?? "").slice(0, 1200),
+        scope: detail.scope ?? "webapp",
+      }),
+    });
+  } catch {
+    /* the network is the least of our problems here */
+  }
+}
+
 export const api = {
   state: () => request<AppState>("/api/state"),
 

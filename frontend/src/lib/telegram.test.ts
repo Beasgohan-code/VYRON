@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   applyViewport,
   bootClient,
+  copyText,
   guardClose,
   insideTelegram,
   lockSwipes,
@@ -234,6 +235,47 @@ describe("sharing", () => {
     expect((app.openTelegramLink as ReturnType<typeof vi.fn>).mock.calls[0][0]).toContain(
       encodeURIComponent("https://t.me/VyronMusicBot")
     );
+  });
+});
+
+describe("copying a link", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    Reflect.deleteProperty(navigator, "clipboard");
+  });
+
+  it("uses the async clipboard when the webview has one", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    await expect(copyText("https://t.me/VyronMusicBot")).resolves.toBe(true);
+    expect(writeText).toHaveBeenCalledWith("https://t.me/VyronMusicBot");
+  });
+
+  it("falls back to a hidden textarea when the clipboard is refused", async () => {
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: vi.fn().mockRejectedValue(new Error("denied")) },
+      configurable: true,
+    });
+    const exec = vi.fn().mockReturnValue(true);
+    Object.defineProperty(document, "execCommand", { value: exec, configurable: true });
+    await expect(copyText("https://t.me/VyronMusicBot")).resolves.toBe(true);
+    expect(exec).toHaveBeenCalledWith("copy");
+    // The scratch element must not be left behind in the sheet.
+    expect(document.querySelector("textarea")).toBeNull();
+  });
+
+  it("reports failure instead of throwing when both routes are closed", async () => {
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: vi.fn().mockRejectedValue(new Error("denied")) },
+      configurable: true,
+    });
+    Object.defineProperty(document, "execCommand", {
+      value: vi.fn().mockImplementation(() => {
+        throw new Error("nope");
+      }),
+      configurable: true,
+    });
+    await expect(copyText("x")).resolves.toBe(false);
   });
 });
 

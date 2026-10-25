@@ -66,7 +66,9 @@ interface Store {
   /* actions */
   act: <T = Record<string, unknown>>(action: string, value?: unknown) => Promise<(T & { preview?: boolean }) | null>;
   play: (value: string | Track | undefined, mode?: "play" | "play_now") => Promise<void>;
-  runSearch: (query: string, remember?: boolean) => Promise<void>;
+  runSearch: (query: string, remember?: boolean, more?: boolean) => Promise<void>;
+  /** True while this query has more results than the rows on screen. */
+  canSearchMore: boolean;
   searching: boolean;
   /** "ok" · "locked" (no Telegram session) · "offline" (server unreachable) */
   access: "ok" | "locked" | "offline";
@@ -93,6 +95,11 @@ interface Store {
 
 const AppContext = createContext<Store | null>(null);
 
+/** One page of results, and how much more each "More" adds. The ceiling is
+ *  what `/api/search` will hand back in a single answer. */
+const SEARCH_STEP = 12;
+const SEARCH_LIMIT_MAX = 36;
+
 const readLocal = (key: string, fallback: string): string => {
   try {
     return localStorage.getItem(key) ?? fallback;
@@ -116,6 +123,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [results, setResults] = useState<Track[]>([]);
   const [searching, setSearching] = useState(false);
+  const [canSearchMore, setCanSearchMore] = useState(false);
   const [access, setAccess] = useState<"ok" | "locked" | "offline">("ok");
   const [view, setViewState] = useState<View>("home");
   const [query, setQuery] = useState("");
@@ -425,9 +433,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const searchSeq = useRef(0);
+  /** How many results the current query has asked for — "More" widens it. */
+  const searchLimit = useRef(SEARCH_STEP);
 
   const runSearch = useCallback(
-    async (value: string, remember = true) => {
+    async (value: string, remember = true, more = false) => {
       const clean = value.trim();
       if (!clean) return;
       setQuery(clean);
@@ -435,8 +445,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const seq = (searchSeq.current += 1);
       setSearching(true);
       try {
-        const payload = await api.search(clean);
-        if (seq === searchSeq.current) setResults(payload.results ?? []);
+        // "More" widens the same query rather than starting a new one: the rows
+        // already on screen stay, and the endpoint answers with the longer list.
+        const limit = more ? Math.min(SEARCH_LIMIT_MAX, searchLimit.current + SEARCH_STEP) : SEARCH_STEP;
+        const payload = await api.search(clean, limit);
+        if (seq !== searchSeq.current) return;
+        searchLimit.current = limit;
+        const found = payload.results ?? [];
+        setResults(found);
+        // A short answer means the source has nothing more to give, so the
+        // button stops promising another page.
+        setCanSearchMore(found.length >= limit && limit < SEARCH_LIMIT_MAX);
       } catch (error) {
         if (seq === searchSeq.current) {
           toast(error instanceof Error ? error.message : "Search failed", "error");
@@ -528,6 +547,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       playlists,
       results,
       searching,
+      canSearchMore,
       access,
       view,
       setView,
@@ -574,7 +594,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       selectedPlaylist, openPlaylist, theme, setTheme, accent, setAccent, normalise, setNormalise,
       toastMessage, toast, toastTone, modal, openModal, closeModal, act, play, runSearch, loadMix,
       refreshState, refreshHome, refreshRooms, attachRoom, refreshPlaylists, recent, rememberSearch,
-      searching, access,
+      searching, canSearchMore, access,
       dragging, isLiked, toggleLike,
       audio, cast,
     ]

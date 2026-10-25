@@ -1,6 +1,7 @@
-import { Check, Download, Plus, X } from "lucide-react";
+import { Check, Disc3, Download, Link as LinkIcon, Plus, Share2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useFocusTrap } from "../lib/a11y";
+import { copyText, shareLink } from "../lib/telegram";
 import { useApp } from "../lib/store";
 import type { Track } from "../lib/types";
 import { Cover } from "./Cover";
@@ -10,7 +11,8 @@ import { Cover } from "./Cover";
  * playlist creation. One sheet, one place, dismissible by tapping the scrim.
  */
 export function Sheet() {
-  const { modal, closeModal, openModal, act, play, cast, toast, refreshPlaylists, playlists } = useApp();
+  const { modal, closeModal, openModal, act, play, cast, toast, refreshPlaylists, playlists, runSearch } =
+    useApp();
   const [query, setQuery] = useState("");
   const [kind, setKind] = useState<"audio" | "video">("audio");
   const [name, setName] = useState("");
@@ -267,6 +269,70 @@ export function Sheet() {
                     </span>
                   </button>
                 </li>
+                {/* A song is something you send to a friend, so the sheet knows
+                    how to hand it over — through Telegram's own share sheet, or
+                    the link itself when it is going somewhere else. */}
+                {modal.track.url && (
+                  <li>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        trackAction("share", () =>
+                          shareLink(
+                            modal.track.url as string,
+                            `${modal.track.title}${modal.track.uploader ? ` — ${modal.track.uploader}` : ""}`
+                          )
+                        )
+                      }
+                    >
+                      <span className="sheet-icon">
+                        <Share2 size={14} />
+                      </span>
+                      <span className="sheet-li-text">
+                        <b>Share</b>
+                        <span>send it to a chat</span>
+                      </span>
+                    </button>
+                  </li>
+                )}
+                {modal.track.url && (
+                  <li>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const copied = await copyText(modal.track.url as string);
+                        toast(copied ? "Link copied" : "Could not copy the link", copied ? "success" : "error");
+                      }}
+                    >
+                      <span className="sheet-icon">
+                        <LinkIcon size={14} />
+                      </span>
+                      <span className="sheet-li-text">
+                        <b>Copy link</b>
+                        <span>paste it anywhere</span>
+                      </span>
+                    </button>
+                  </li>
+                )}
+                {modal.track.uploader && (
+                  <li>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        closeModal();
+                        void runSearch(modal.track.uploader as string);
+                      }}
+                    >
+                      <span className="sheet-icon">
+                        <Disc3 size={14} />
+                      </span>
+                      <span className="sheet-li-text">
+                        <b>More from {modal.track.uploader}</b>
+                        <span>every track by this artist</span>
+                      </span>
+                    </button>
+                  </li>
+                )}
               </ul>
             </>
           )}

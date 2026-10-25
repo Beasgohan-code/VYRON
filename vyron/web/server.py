@@ -405,7 +405,8 @@ async def search(request: web.Request) -> web.Response:
             status=503,
             headers={"Retry-After": "5"},
         )
-    limit = min(20, max(4, int(body.get("limit") or 10)))
+    # 40 covers the Mini App's "show more" (12 → 24 → 36) in three answers.
+    limit = min(40, max(4, int(body.get("limit") or 10)))
     try:
         tracks = await runtime.youtube.search(
             query, limit=limit, requester=(user.user_id, user.name or "")
@@ -1425,6 +1426,24 @@ async def logs_action(request: web.Request) -> web.Response:
     return web.json_response({"ok": False, "error": "unknown action"}, status=400)
 
 
+async def client_error(request: web.Request) -> web.Response:
+    """The Mini App reporting a crash from inside the browser.
+
+    A React error boundary has nowhere to send a stack trace; without this the
+    only evidence of a broken screen is the listener saying "it went blank".
+    Deliberately unauthenticated — a crash can happen before a session exists —
+    and deliberately small: it writes one journal line and never echoes
+    anything back that could be probed.
+    """
+    body = await _read_json(request)
+    message = str(body.get("message") or "unknown error")[:300]
+    scope = str(body.get("scope") or "webapp")[:40]
+    stack = str(body.get("stack") or "")[:1200]
+    ua = (request.headers.get("User-Agent") or "")[:160]
+    journal.error("webapp", f"mini app crashed: {message}", stack=stack, ua=ua, at=scope)
+    return web.json_response({"ok": True})
+
+
 def register(app: web.Application) -> None:
     if not settings.webapp:
         return
@@ -1455,6 +1474,7 @@ def register(app: web.Application) -> None:
     app.router.add_get("/api/logs/stream", logs_stream)
     app.router.add_get("/logs/live", logs_live)
     app.router.add_post("/api/logs", logs_action)
+    app.router.add_post("/api/client-error", client_error)
     audio.register(app)
     from vyron.web import artwork
 

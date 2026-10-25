@@ -1,8 +1,17 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
+import { Boundary } from "./components/Boundary";
 import { registerApp } from "./lib/pwa";
 import { AppProvider } from "./lib/store";
+/* Self-hosted variable fonts, replacing three `fonts.googleapis.com` requests
+   that cost two extra connections before first paint, told a third party about
+   every listener, and were sometimes blocked outright by a webview. Each family
+   ships as unicode-range subsets, so a launch still downloads one file per
+   family — the same files a CDN would have served, from our own origin. */
+import "@fontsource-variable/bricolage-grotesque";
+import "@fontsource-variable/inter-tight";
+import "@fontsource-variable/jetbrains-mono";
 import "./styles.css";
 
 const container = document.getElementById("root");
@@ -14,8 +23,10 @@ registerApp(() => window.dispatchEvent(new Event("vyron:update-ready")));
 
 createRoot(container).render(
   <StrictMode>
-    <AppProvider>
-      <App />
-    </AppProvider>
+    <Boundary>
+      <AppProvider>
+        <App />
+      </AppProvider>
+    </Boundary>
   </StrictMode>
 );

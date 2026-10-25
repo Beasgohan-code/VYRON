@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 import sys
 
-__version__ = "1.10.0"
+__version__ = "1.10.1"
 # Shown by /doctor and /health: the fastest way to answer "did my deploy land?"
 __build__ = "2026-10-25"
 __author__ = "Beasgohan-code"

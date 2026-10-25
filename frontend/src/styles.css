@@ -32,9 +32,9 @@
   --pill: 999px;
   --shadow: 0 30px 70px -34px rgba(0, 0, 0, 0.9);
   --shadow-sm: 0 12px 30px -18px rgba(0, 0, 0, 0.85);
-  --font-display: "Bricolage Grotesque", "Inter Tight", system-ui, sans-serif;
-  --font-ui: "Inter Tight", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, monospace;
+  --font-display: "Bricolage Grotesque Variable", "Bricolage Grotesque", "Inter Tight", system-ui, sans-serif;
+  --font-ui: "Inter Tight Variable", "Inter Tight", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
   --safe: env(safe-area-inset-bottom, 0px);
   --motion: 1;
@@ -363,6 +363,9 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chips.tight { gap: 5px; }
 .row.gap { display: flex; gap: 6px; align-items: center; }
+
+/* The tail of a result list: the button to widen it, and how much is shown. */
+.search-more { gap: 10px; margin-top: 12px; color: var(--dim); }
 .chips.scroll { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
 .chips.scroll::-webkit-scrollbar { display: none; }
 
@@ -1716,6 +1719,68 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
   }
+}
+
+/* ── crash screen ──────────────────────────────────────────────────────────
+   Reached only when a render threw. It cannot lean on the app's chrome, so it
+   is deliberately plain: a card, a sentence an ordinary listener understands,
+   the raw message for the owner, and two buttons that work without the store. */
+.crash {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.crash-card {
+  width: min(440px, 100%);
+  display: grid;
+  gap: 12px;
+  padding: 22px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-sm);
+}
+
+.crash-mark {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  font-size: 22px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+}
+
+.crash-card h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 20px;
+  letter-spacing: -0.01em;
+}
+
+.crash-card p {
+  margin: 0;
+  color: var(--dim);
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.crash-detail {
+  display: block;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--dim);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
 }
 
 /* ==========================================================================

@@ -7,6 +7,28 @@ Two version numbers move independently:
 
 ## Bot
 
+### 1.10.1 — 2026-10-25
+
+The last four items from the review, and a floor under the whole app.
+
+* **A crashed screen no longer means a blank one.** React unmounts the entire
+  tree when a render throws, which inside Telegram is a white rectangle with no
+  message and no way out. An error boundary now catches it, says in plain words
+  that the bot and the queue are unaffected, and offers a reload — and posts the
+  message and stack to the owner journal through `POST /api/client-error`, so
+  the next report is a diagnosis instead of a guess.
+* **No third-party font requests.** Bricolage Grotesque, Inter Tight and
+  JetBrains Mono are self-hosted as variable woff2 (`@fontsource-variable`),
+  latin subsets only — three fewer connections before first paint, no Google
+  request on every launch, and type that still renders when a webview blocks
+  the stylesheet. The display picture is preloaded with it.
+* **Search has a floor and a "show more".** The window starts at twelve rows
+  and widens to 48 in place, so a vague query no longer means retyping it more
+  cleverly.
+* **The track sheet grew the actions people actually reach for**: share through
+  Telegram's own sheet, copy the link, and jump to everything else by the same
+  artist.
+
 ### 1.10.0 — 2026-10-25
 
 The Mini App now behaves like a client of Telegram rather than a page inside

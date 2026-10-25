@@ -1,7 +1,7 @@
 {
   "name": "vyron-player",
   "private": true,
-  "version": "1.5.0",
+  "version": "1.5.1",
   "type": "module",
   "description": "VYRON Player — the Telegram Mini App for the VYRON music bot",
   "scripts": {

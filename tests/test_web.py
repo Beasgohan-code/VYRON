@@ -726,6 +726,48 @@ def test_logs_endpoint_records_and_filters():
     asyncio.run(_with_client(scenario))
 
 
+def test_client_error_is_journalled_without_a_session():
+    """A crash can happen before a Mini App has a session, so this one route
+    stays open — but it only ever writes a line and answers `{ok}`."""
+    from vyron.core.journal import journal
+
+    journal.clear()
+
+    async def scenario(client):
+        crashed = await client.post(
+            "/api/client-error",
+            json={
+                "message": "cannot read properties of undefined",
+                "stack": "TypeError at Player.tsx:42",
+                "scope": "render",
+            },
+            headers={"User-Agent": "TelegramBot unit-test"},
+        )
+        assert crashed.status == 200
+        assert (await crashed.json())["ok"] is True
+
+        events = journal.events(levels=["error"], limit=50)
+        matching = [event for event in events if "cannot read properties" in event["message"]]
+        assert matching, "the crash should be in the journal"
+        assert matching[0]["scope"] == "webapp"
+        assert "TypeError at Player.tsx:42" in str(matching[0]["meta"]["stack"])
+        assert matching[0]["meta"]["at"] == "render"
+
+    asyncio.run(_with_client(scenario))
+
+
+def test_client_error_survives_a_broken_body():
+    async def scenario(client):
+        empty = await client.post("/api/client-error", data=b"not json")
+        assert empty.status == 200
+        assert (await empty.json())["ok"] is True
+
+        huge = await client.post("/api/client-error", json={"message": "x" * 5000, "stack": "y" * 9000})
+        assert huge.status == 200
+
+    asyncio.run(_with_client(scenario))
+
+
 def test_logs_action_clear_is_owner_only():
     from vyron.web.auth import make_owner_token
 

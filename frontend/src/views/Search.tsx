@@ -37,6 +37,7 @@ export function Search() {
     playlists,
     openPlaylist,
     searching,
+    canSearchMore,
   } = useApp();
   const [value, setValue] = useState(query);
   const input = useRef<HTMLInputElement>(null);
@@ -207,6 +208,26 @@ export function Search() {
               <TrackRow key={`${track.id ?? track.title}-${index}`} track={track} index={index + 1} />
             ))}
           </ul>
+          {/* A search is a window, not a list: twelve rows is what fits the
+              first screen, and "more" widens the same query instead of asking
+              the user to retype it more cleverly. */}
+          {results.length > 0 && (
+            <div className="row gap search-more">
+              {canSearchMore ? (
+                <button
+                  type="button"
+                  className="btn btn-ghost sm"
+                  disabled={searching}
+                  onClick={() => void runSearch(query, false, true)}
+                >
+                  {searching ? "Loading…" : "Show more"}
+                </button>
+              ) : (
+                <span className="fine">That is everything for this search</span>
+              )}
+              <span className="fine">{results.length} shown</span>
+            </div>
+          )}
         </section>
       )}
 
