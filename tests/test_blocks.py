@@ -195,19 +195,48 @@ def test_owner_access_is_surfaced_without_leaking_it_into_the_ui():
 # ── the shared card language ────────────────────────────────────────────────
 def test_a_card_is_a_masthead_fields_and_sections():
     """Every screen in the bot is these four primitives in this order."""
-    top = B.banner("vyron · player")
-    lines = top.splitlines()
-    assert lines[0] == lines[2] == B.rule()
-    assert "ᴘʟᴀʏᴇʀ" in lines[1] and lines[1].startswith(B.E("brand"))
-    assert top.endswith("\n")  # so the next block starts on its own line
+    from vyron.ui import rich
+
+    rich.set_rich_enabled(False)
+    try:
+        top = B.banner("vyron · player")
+        lines = top.splitlines()
+        assert lines[0] == lines[2] == B.rule()
+        assert "ᴘʟᴀʏᴇʀ" in lines[1] and lines[1].startswith(B.E("brand"))
+        assert top.endswith("\n")  # so the next block starts on its own line
+    finally:
+        rich.set_rich_enabled(None)
 
     fields = B.fields([("check", "status", "Online"), ("clock", "uptime", "3d 8h")])
     assert fields.splitlines()[0] == "◈ ✅ <b>ꜱᴛᴀᴛᴜꜱ</b>: Online"
     assert "<b>ᴜᴘᴛɪᴍᴇ</b>: 3d 8h" in fields
 
-    section = B.section_title("what i can do")
-    assert section.strip() == "✦ <b>ᴡʜᴀᴛ ɪ ᴄᴀɴ ᴅᴏ</b> ✦"
+    rich.set_rich_enabled(False)
+    try:
+        section = B.section_title("what i can do")
+        assert section.strip() == "✦ <b>ᴡʜᴀᴛ ɪ ᴄᴀɴ ᴅᴏ</b> ✦"
+    finally:
+        rich.set_rich_enabled(None)
     assert B.items([("download", "save", "MP3 320")]).strip().endswith("MP3 320")
+
+
+def test_the_rich_lane_makes_the_masthead_a_real_heading():
+    """The whole point of the rich lane: structure, not bold text."""
+    from vyron.ui import rich
+
+    rich.set_rich_enabled(True)
+    try:
+        top = B.banner("vyron · player")
+        assert top.startswith("<h2>") and "<hr/>" in top
+        assert "<b>" not in top.splitlines()[0], "a heading is already bold"
+        assert rich.has_rich_tags(top)
+        section = B.section_title("what i can do")
+        assert "<h3>" in section
+        # and the classic lane still gets readable text out of it
+        plain = rich.to_html(B.banner("vyron · player") + B.context("hi"))
+        assert "ᴘʟᴀʏᴇʀ" in plain and "──────────" in plain
+    finally:
+        rich.set_rich_enabled(None)
 
 
 def test_fields_skip_the_glyph_cleanly():

@@ -106,7 +106,7 @@ class Player:
         # reason a first /play fails.
         self.assistant = assistant
         # optional: when set (and PLAY_FROM_DISK is on) tracks are downloaded
-        # once and streamed from the cache — the ShizuMusic model
+        # once and streamed from the cache
         self.downloader = downloader
         self.queues = QueueManager(settings.default_volume, settings.autoplay_default)
 
@@ -356,7 +356,7 @@ class Player:
     async def ensure_assistant(self, chat_id: int) -> bool:
         """Invite the assistant into *chat_id* if it is not there yet.
 
-        Ported from ShizuMusic: without this, the first `/play` in an old group
+        Without this, the first `/play` in an old group
         fails with "the assistant could not join the voice chat" and the person
         has to add the account by hand. A public chat is joined by id; a private
         one needs an invite link, which the *bot* exports (it has the rights
@@ -419,7 +419,7 @@ class Player:
             and self.downloader is not None
             and not (video is False and self._substitute_first(track))
         ):
-            # ShizuMusic's model: fetch the file once, then hand ntgcalls a
+            # Fetch the file once, then hand ntgcalls a
             # local path. A local stream cannot 403, expire or be throttled
             # mid-song, which is what makes playback reliable on a datacenter
             # IP — the cache makes the second play of a track instant.

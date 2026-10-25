@@ -138,7 +138,7 @@ class Settings:
     # yt-dlp is CPU-bound: two extractions at a time keeps the event loop (and
     # therefore the Mini App) responsive on a small host.
     extract_concurrency: int = field(default_factory=lambda: max(1, _int("EXTRACT_CONCURRENCY", 2)))
-    # ShizuMusic's core idea: download the track first, then stream the local
+    # Download the track first, then stream the local
     # file. Immune to 403s, expiring URLs and mid-song drops — the usual reason
     # a hosted deployment "plays nothing". Costs the first few seconds.
     play_from_disk: bool = field(default_factory=lambda: _flag("PLAY_FROM_DISK", True))

@@ -24,7 +24,7 @@ from vyron.utils.filters import owner
 from vyron.utils.commands import cmd
 
 
-# ── /broadcast flags (ported from ShizuMusic) ────────────────────────────────
+# ── /broadcast flags ─────────────────────────────────────────────────────────
 def _parse_flags(raw: str) -> tuple[bool, bool, bool, bool]:
     """`-pin` must not match inside `-pinloud` (a real bug in the original)."""
     pin = bool(re.search(r"-pin(?!loud)", raw))

@@ -170,7 +170,7 @@ def test_unknown_command_hints_point_at_live_commands():
 
 
 def test_channel_controls_are_registered():
-    """The channel-side control set ported from ShizuMusic stays complete."""
+    """The channel-side control set stays complete."""
     names = set(_commands())
     expected = {
         "cplay", "cstop", "cpause", "cresume", "cskip",

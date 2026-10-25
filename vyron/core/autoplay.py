@@ -6,7 +6,7 @@
 # neighbours and sounds like a random shuffle for anything else — a Malayalam
 # melody followed by a gaming montage, a lofi loop followed by a podcast.
 #
-# This module is the missing half, ported from ShizuMusic's autoplay engine:
+# This module is the missing half. What it adds, in the order it matters:
 #
 #   · **clean titles**  "Song (Official Video) ft. X [4K]" → "Song"
 #   · **mood + language** per chat, so a queue stays in one lane
@@ -169,7 +169,7 @@ def _soft_shuffle(items: list[Track], group: int = 3) -> list[Track]:
     Straight `random.choice` over the whole pool turns autoplay into a lottery;
     taking the top result every time walks the same chain forever. Shuffling in
     threes keeps the search's relevance ranking and drops the predictability
-    (the idea comes from ShizuMusic's autoplay buffer).
+    (a small buffer of scored candidates, refreshed as the queue drains).
     """
     out: list[Track] = []
     for start in range(0, len(items), max(1, group)):

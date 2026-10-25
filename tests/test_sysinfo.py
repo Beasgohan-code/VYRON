@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-#  Host telemetry ported from ShizuMusic's /stats card (MIT).
+#  Host telemetry behind the /stats card.
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 

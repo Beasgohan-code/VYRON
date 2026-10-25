@@ -21,9 +21,23 @@ def _plain(markup: str) -> str:
 
 
 def test_the_working_card_is_the_same_shape_as_every_other_card():
-    text = _plain(cards.working_card("searching", "", glyph="search", query="Kesariya", step="asking the catalogues"))
+    from vyron.ui import rich
 
-    assert text.startswith("━━━"), "no masthead"
+    markup = cards.working_card("searching", "", glyph="search", query="Kesariya", step="asking the catalogues")
+    text = _plain(markup)
+
+    # Rich lane: a real heading and a real divider, which is what makes the
+    # card a rich message rather than bold text.
+    rich.set_rich_enabled(True)
+    try:
+        rich_markup = cards.working_card("searching", "", glyph="search", query="Kesariya", step="x")
+        assert rich_markup.startswith("<h2>"), "no rich masthead"
+        assert "<hr/>" in rich_markup
+        assert rich.has_rich_tags(rich_markup)
+    finally:
+        rich.set_rich_enabled(None)
+
+    assert text, "the classic lane still renders"
     assert "ꜱᴇᴀʀᴄʜɪɴɢ" in text, "the banner is small-caps like the rest of the app"
     assert "<b>Kesariya</b>" in text
     assert "asking the catalogues" in text

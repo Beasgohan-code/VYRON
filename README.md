@@ -1078,9 +1078,8 @@ owner-only `/sysstats` card.
 MIT © [Beasgohan-code](https://github.com/Beasgohan-code) — fork it, improve it, ship it.
 
 Third-party code under its own MIT licence (the notice sits above the code it
-covers): the download engine in `vyron/engine/youtube.py`, derived from
-[Eldian Music API](https://github.com/Eldian-Network/eldian-music-api), and
-queue/playback ideas from ShizuMusic.
+covers): the download engine in `vyron/engine/youtube.py`. Everything else —
+the player, the queue, the cards, the Mini App — is written for VYRON.
 
 <div align="center">
 

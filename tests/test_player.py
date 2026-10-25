@@ -536,7 +536,7 @@ def test_autoplay_mood_and_language_survive_a_persist_round_trip():
     assert storage.saved[10]["language"] == "hindi"
 
 
-# ── disk playback (the ShizuMusic model) ────────────────────────────────────
+# ── disk playback ───────────────────────────────────────────────────────────
 class FakeDownloader:
     def __init__(self, path, *, fail=False):
         self.path = path
@@ -588,7 +588,7 @@ def test_disk_playback_can_be_switched_off(tmp_path):
     assert youtube.stream_url_calls == ["abc12345678"]
 
 
-# ── assistant membership (ported from ShizuMusic) ───────────────────────────
+# ── assistant membership ────────────────────────────────────────────────────
 def test_assistant_join_falls_back_to_an_invite_link(monkeypatch):
     from vyron import runtime as runtime_module
 

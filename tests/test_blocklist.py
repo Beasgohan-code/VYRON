@@ -1,6 +1,6 @@
 # ---------------------------------------------------------------------------
 #  /block — users *and* chats, persisted and restored at boot
-#  (the chat half is the part ShizuMusic's block module does that we did not).
+#  (the chat half is the part a blocklist module needs that the ids alone do not).
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 

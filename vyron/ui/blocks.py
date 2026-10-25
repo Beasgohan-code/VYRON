@@ -169,7 +169,7 @@ def stat_pairs(pairs: Sequence[tuple[str, str, str]]) -> str:
 
 def powered_line(version: str = "") -> str:
     tail = f" · v{version}" if version else ""
-    return footer(f"{SPARK} VYRON{tail} · built on Kurigram + PyTgCalls · UI by richgram")
+    return footer(f"{SPARK} VYRON{tail}")
 
 
 # ── design kit ─────────────────────────────────────────────────────────────
@@ -209,18 +209,41 @@ def rule(width: int = RULE_WIDTH, char: str = RULE_CHAR) -> str:
     return char * max(3, int(width))
 
 
-def banner(title: str, *, glyph: str = "brand", meta: str = "", width: int = RULE_WIDTH) -> str:
-    """The top of a card: hairline, glyph + SMALL-CAPS title, hairline.
+def rich_lane() -> bool:
+    """Is the rich renderer available *and* on for this process?
 
-        ━━━━━━━━━━━━━━
-        🎧 ᴠʏʀᴏɴ · ᴘʟᴀʏᴇʀ
-        ━━━━━━━━━━━━━━
+    Cards ask this at build time so the same source can produce either lane:
+    a real rich message when the server supports it, or the classic HTML
+    equivalent that `rich.to_html` derives from it.
+    """
+    from vyron.ui import rich as _rich
+
+    return bool(_rich.RICH_AVAILABLE and _rich.rich_enabled())
+
+
+def banner(title: str, *, glyph: str = "brand", meta: str = "", width: int = RULE_WIDTH) -> str:
+    """The top of a card: a heading, then a hairline.
+
+        <h2>🎧 ᴠʏʀᴏɴ · ᴘʟᴀʏᴇʀ</h2>
+        <hr/>
 
     This is the one element that makes every screen recognisably the same
     product, so it is a primitive rather than something each card retypes.
+
+    In the rich lane it is a real heading and a real divider — that is what
+    turns 90-odd cards from "bold text with a line of ━" into rich messages.
+    Without rich support the same card falls back to the character rule, so
+    nothing has to know which lane it is in.
     """
     from vyron.ui.theme import small_caps
 
+    plain = f"{E(glyph)} {small_caps(title)}"
+    if meta:
+        plain += f"  {meta}"
+    if rich_lane():
+        # A heading is already bold; nesting <b> inside it makes Telegram's
+        # classic fallback emit "<b><b>…</b></b>".
+        return f"<h2>{plain}</h2>\n<hr/>\n"
     line = f"{E(glyph)} <b>{small_caps(title)}</b>"
     if meta:
         line += f"  {meta}"
@@ -261,6 +284,8 @@ def section_title(label: str, *, glyph: str | None = None) -> str:
     from vyron.ui.theme import small_caps
 
     prefix = f"{E(glyph)} " if glyph else ""
+    if rich_lane():
+        return f"\n<h3>{SECTION_MARK} {prefix}{small_caps(label)}</h3>\n"
     return f"\n{SECTION_MARK} {prefix}<b>{small_caps(label)}</b> {SECTION_MARK}\n"
 
 

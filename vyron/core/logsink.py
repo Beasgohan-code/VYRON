@@ -1,7 +1,7 @@
 # ---------------------------------------------------------------------------
 #  VYRON — the log channel
 #
-#  Shizu-style live logging, wired to the journal instead of a second printer:
+#  Live logging, wired to the journal instead of a second printer:
 #  with /logger on, every warning and error is mirrored into LOGGER_ID as a
 #  compact card, so an owner sees trouble on their phone without opening
 #  /logs. Off by default, persisted, rate limited, and silent when the bot has

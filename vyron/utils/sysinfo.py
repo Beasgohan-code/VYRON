@@ -1,6 +1,6 @@
 # ---------------------------------------------------------------------------
 #  VYRON — host telemetry for /stats
-#  Ported from ShizuMusic's /stats card (MIT). psutil is optional: every value
+#  The /stats card. psutil is optional: every value
 #  degrades to None so a minimal install still renders the card.
 # ---------------------------------------------------------------------------
 from __future__ import annotations

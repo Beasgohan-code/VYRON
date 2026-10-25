@@ -6,8 +6,6 @@
 #                     *coloured* in-message buttons (Bot API 10.3 / richgram)
 #    · live cards   — classic HTML that is edited in place every few seconds
 #
-#  UI building blocks adapted from richgram by BadmundaXd
-#  (https://github.com/Badmunda05/richgram, MIT) — credited in README.
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 

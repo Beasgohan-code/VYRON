@@ -193,7 +193,7 @@ def register(client: Client) -> None:
             ),
             reply_to=message.id,
         )
-    # ── /pcreate · /padd · /pview · /premove (Shizu command names) ─────────
+    # ── /pcreate · /padd · /pview · /premove ────────────────────────────────
     @client.on_message(cmd(["pcreate"]))
     async def _pcreate(_: Client, message: Message) -> None:
         name = store.clean_name(command_args(message) or "")

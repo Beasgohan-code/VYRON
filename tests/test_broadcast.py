@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-#  /broadcast — flags ported from ShizuMusic (MIT).
+#  /broadcast — the flags, and what each one posts.
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 
