@@ -244,10 +244,10 @@ def user_of(source: Message | CallbackQuery) -> User | None:
 
 
 async def answer(callback: CallbackQuery, text: str = "", *, show_alert: bool = False) -> None:
-    try:
-        await callback.answer(text[:190], show_alert=show_alert)
-    except Exception:
-        pass
+    """Answer a button tap; a stale query is an old tap, not a failure."""
+    from vyron.ui import rich
+
+    await rich.answer(callback, text[:190], show_alert=show_alert)
 
 
 async def reply_card(message: Message, markup: str, *, keyboard: InlineKeyboardMarkup | None = None,

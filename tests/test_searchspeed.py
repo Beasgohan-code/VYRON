@@ -222,3 +222,87 @@ def test_a_walled_youtube_gets_a_glance_not_the_deadline(monkeypatch):
 
     assert [track.id for track in result] == ["a"]
     assert elapsed < search_module.WALLED_GLANCE + 1.0, f"took {elapsed:.1f}s"
+
+
+# ── a walled IP must not re-prove the wall on every track ──────────────────
+class WalledYouTube(YouTube):
+    """The IP is refused: yt-dlp cannot work, a mirror and a catalogue can."""
+
+    def __init__(self, *, mirror=None, substitute=None, mirror_delay=0.0, sub_delay=0.0):
+        self.settings = type(
+            "S", (), {"video_quality": "720p", "stream_failure_ttl": 60}
+        )()
+        self._mirror = mirror
+        self._substitute_result = substitute
+        self.mirror_delay = mirror_delay
+        self.sub_delay = sub_delay
+        self.mirror_calls = 0
+        self.sub_calls = 0
+        self.ladder_calls = 0
+        self._stream_cache = {}
+        self._failures = {}
+        self._failure_reasons = {}
+        self._client_hint = None
+        self._wall_until = 0.0
+        self._wall_logged = False
+
+    def walled(self) -> bool:
+        return True
+
+    async def _public_fallback(self, track, *, video=False):  # type: ignore[override]
+        self.mirror_calls += 1
+        if self.mirror_delay:
+            await asyncio.sleep(self.mirror_delay)
+        return self._mirror
+
+    async def _substitute(self, track, *, video=False, fresh=False):  # type: ignore[override]
+        self.sub_calls += 1
+        if self.sub_delay:
+            await asyncio.sleep(self.sub_delay)
+        return self._substitute_result
+
+    async def _async_extract(self, *args, **kwargs):  # type: ignore[override]
+        self.ladder_calls += 1
+        raise RuntimeError("Failed to extract any player response")
+
+
+def _stream(source: str):
+    from vyron.core.search import StreamInfo
+
+    return StreamInfo(url=f"https://cdn/{source}.m4a", source=source, expires_at=time.time() + 600)
+
+
+def test_a_walled_ip_asks_the_mirror_before_the_yt_dlp_ladder():
+    engine = WalledYouTube(mirror=_stream("invidious"))
+    result = asyncio.run(engine._resolve_stream(_track("yt-1", "Song")))
+
+    assert result.source == "invidious"
+    assert engine.mirror_calls == 1
+    # The whole point: proving the wall again costs two socket timeouts, and it
+    # is the difference between a 2-second tap and a 15-second one.
+    assert engine.ladder_calls == 0
+
+
+def test_the_catalogue_and_the_mirror_are_asked_together():
+    # Mirror is slow, the catalogue is quick: the quick one answers, and the
+    # slow lane is cancelled instead of being awaited for the rest of the budget.
+    engine = WalledYouTube(
+        mirror=_stream("invidious"), substitute=_stream("jiosaavn"),
+        mirror_delay=5.0, sub_delay=0.0,
+    )
+    started = time.perf_counter()
+    result = asyncio.run(engine._resolve_stream(_track("yt-2", "Song")))
+    took = time.perf_counter() - started
+
+    assert result.source == "jiosaavn"
+    assert took < 2.0, f"both lanes were not raced ({took:.1f}s)"
+    assert engine.mirror_calls == 1 and engine.sub_calls == 1
+
+
+def test_when_neither_lane_answers_the_ladder_is_still_tried():
+    from vyron.core.search import MediaError
+
+    engine = WalledYouTube(mirror=None, substitute=None)
+    with pytest.raises(MediaError):
+        asyncio.run(engine._resolve_stream(_track("yt-3", "Song")))
+    assert engine.ladder_calls >= 1

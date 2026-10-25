@@ -844,7 +844,7 @@ async def verify_captcha(client: Client, query, chat_id: int, arg: str) -> None:
     if user is None:
         return
     if arg not in {"", "self"} and str(user.id) != str(arg):
-        await query.answer("That button is not for you.", show_alert=True)
+        await rich.answer(query, "That button is not for you.", show_alert=True)
         return
     try:
         await client.restrict_chat_member(
@@ -858,7 +858,7 @@ async def verify_captcha(client: Client, query, chat_id: int, arg: str) -> None:
             ),
         )
     except Exception as exc:
-        await query.answer(f"Could not verify: {truncate(str(exc), 60)}", show_alert=True)
+        await rich.answer(query, f"Could not verify: {truncate(str(exc), 60)}", show_alert=True)
         return
     message = getattr(query, "message", None)
     if message is not None:
@@ -872,7 +872,7 @@ async def verify_captcha(client: Client, query, chat_id: int, arg: str) -> None:
                 icon="check",
             ),
         )
-    await query.answer("Verified — welcome!")
+    await rich.answer(query, "Verified — welcome!")
 
 
 async def _log(client: Client, text: str) -> None:

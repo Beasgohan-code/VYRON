@@ -65,11 +65,13 @@ def register(client: Client) -> None:
         try:
             await _dispatch(client, cq)
         except Exception as exc:  # never let a button break the bot
+            if "QUERY_ID_INVALID" in str(exc).upper().replace(" ", "_"):
+                # The tap was older than Telegram's answer window: nothing to
+                # report, and nothing to fix — the user simply tapped again.
+                logger.debug("stale button tap: %s", exc)
+                return
             logger.exception("callback failed: %s", exc)
-            try:
-                await cq.answer("Something went wrong — try again.", show_alert=True)
-            except Exception:
-                pass
+            await rich.answer(cq, "Something went wrong — try again.", show_alert=True)
 
     async def _dispatch(client: Client, cq: CallbackQuery) -> None:
         parts = (cq.data or "").split(":")
@@ -80,7 +82,7 @@ def register(client: Client) -> None:
             return
 
         if not await _authorized(client, cq, action):
-            await cq.answer("Only group admins can control playback.", show_alert=True)
+            await rich.answer(cq, "Only group admins can control playback.", show_alert=True)
             return
 
         # These prefixes have their own routers (extras.py, logs_cmd.py). Answer
@@ -103,10 +105,10 @@ def register(client: Client) -> None:
 
             actor = cq.from_user.id if cq.from_user else 0
             if not is_owner(actor) or not is_private_chat(chat):
-                await cq.answer("Owner only, in a private chat.", show_alert=True)
+                await rich.answer(cq, "Owner only, in a private chat.", show_alert=True)
                 return
             if not settings.bot_token:
-                await cq.answer("BOT_TOKEN is not set.", show_alert=True)
+                await rich.answer(cq, "BOT_TOKEN is not set.", show_alert=True)
                 return
 
             if arg == "revoke":
@@ -123,7 +125,7 @@ def register(client: Client) -> None:
                         danger=True,
                     ),
                 )
-                await cq.answer()
+                await rich.answer(cq)
                 return
 
             if arg == "cancel":
@@ -136,13 +138,13 @@ def register(client: Client) -> None:
                         tone="info",
                     ),
                 )
-                await cq.answer()
+                await rich.answer(cq)
                 return
 
             if arg == "confirm":
                 epoch = await tokens.revoke_all(actor)
                 await _show(client, cq, cards.token_revoked_card(epoch=epoch))
-                await cq.answer("Revoked")
+                await rich.answer(cq, "Revoked")
                 return
 
             if arg == "rotate":
@@ -163,7 +165,7 @@ def register(client: Client) -> None:
                         active_keys=len([key for key in roster if key.get("active")]),
                     ),
                 )
-                await cq.answer("New token issued — the old one is dead")
+                await rich.answer(cq, "New token issued — the old one is dead")
                 return
 
             if arg == "keys":
@@ -173,10 +175,10 @@ def register(client: Client) -> None:
                     cq,
                     cards.api_keys_card(roster, base=settings.webapp_url or ""),
                 )
-                await cq.answer()
+                await rich.answer(cq)
                 return
 
-            await cq.answer()
+            await rich.answer(cq)
             return
 
         # ── API keys: revoke / rotate from the card ────────────────────────
@@ -185,31 +187,31 @@ def register(client: Client) -> None:
 
             actor = cq.from_user.id if cq.from_user else 0
             if not is_owner(actor):
-                await cq.answer("Owner only.", show_alert=True)
+                await rich.answer(cq, "Owner only.", show_alert=True)
                 return
             identifier = ":".join(parts[3:])
             if not identifier:
-                await cq.answer("Which key?", show_alert=True)
+                await rich.answer(cq, "Which key?", show_alert=True)
                 return
             api = get_music_api()
             roster = await api.keys(reveal=False)
             target = find_key(roster, identifier)
             if target is None:
-                await cq.answer("That key is gone already.", show_alert=True)
+                await rich.answer(cq, "That key is gone already.", show_alert=True)
                 return
 
             if arg == "revoke":
                 done = await api.revoke(None, str(target.get("id") or identifier), force=True)
                 roster = await api.keys(reveal=False)
                 await _show(client, cq, cards.api_keys_card(roster, base=settings.webapp_url or ""))
-                await cq.answer("Key revoked" if done else "Could not revoke")
+                await rich.answer(cq, "Key revoked" if done else "Could not revoke")
                 return
 
             if arg == "rotate":
                 record, error = await api.rotate(actor, str(target.get("id") or identifier))
                 roster = await api.keys(reveal=False)
                 if record is None:
-                    await cq.answer(error or "Could not rotate", show_alert=True)
+                    await rich.answer(cq, error or "Could not rotate", show_alert=True)
                     return
                 await _show(
                     client,
@@ -225,10 +227,10 @@ def register(client: Client) -> None:
                         key_id=str(record.get("id") or ""),
                     ),
                 )
-                await cq.answer("Rotated — copy the new key")
+                await rich.answer(cq, "Rotated — copy the new key")
                 return
 
-            await cq.answer()
+            await rich.answer(cq)
             return
 
         # ── group manager panel (admins only) ──────────────────────────────
@@ -238,7 +240,7 @@ def register(client: Client) -> None:
 
             actor = cq.from_user.id if cq.from_user else 0
             if not actor or not (is_owner(actor) or await is_chat_admin(client, chat.id, actor)):
-                await cq.answer("Admins only.", show_alert=True)
+                await rich.answer(cq, "Admins only.", show_alert=True)
                 return
 
             if arg == "locks" or arg == "flood":
@@ -247,9 +249,9 @@ def register(client: Client) -> None:
                 if arg == "flood":
                     flood_cfg["enabled"] = not flood_cfg.get("enabled", True)
                     await chatcfg.set(chat.id, "flood", flood_cfg)
-                    await cq.answer("Anti-flood " + ("on" if flood_cfg["enabled"] else "off"))
+                    await rich.answer(cq, "Anti-flood " + ("on" if flood_cfg["enabled"] else "off"))
                 else:
-                    await cq.answer()
+                    await rich.answer(cq)
                 await _show(client, cq, locks_panel(locks_cfg, flood_cfg))
                 return
 
@@ -269,53 +271,53 @@ def register(client: Client) -> None:
                         can_edit=True,
                     ),
                 )
-                await cq.answer()
+                await rich.answer(cq)
                 return
 
             if arg == "approved":
                 ids = await chatcfg.get(chat.id, "approved", []) or []
                 entries = [(f"user {index + 1}", str(uid)) for index, uid in enumerate(ids)]
                 await _show(client, cq, cards.approved_card(entries))
-                await cq.answer()
+                await rich.answer(cq)
                 return
 
-            await cq.answer("This tool needs a group.", show_alert=True)
+            await rich.answer(cq, "This tool needs a group.", show_alert=True)
             return
 
         player = runtime.player
         if player is None:
-            await cq.answer("Player is still starting up…")
+            await rich.answer(cq, "Player is still starting up…")
             return
         state = player.queues.get(chat.id)
 
         # ── navigation ─────────────────────────────────────────────────────
         if action == "noop":
-            await cq.answer()
+            await rich.answer(cq)
             return
 
         if action == "close":
             try:
                 await cq.message.delete()
             except Exception:
-                await cq.answer()
+                await rich.answer(cq)
             return
 
         if action == "help":
             section = arg or "main"
             await _show(client, cq, cards.help_card(section), keyboards.help_nav(section))
-            await cq.answer()
+            await rich.answer(cq)
             return
 
         if action == "about":
             await _show(client, cq, cards.about_card(), keyboards.back_close("v:help:main"))
-            await cq.answer()
+            await rich.answer(cq)
             return
 
         # ── entry buttons (welcome card, quick actions) ────────────────────
         if action == "play":
             query = ":".join(parts[2:]).strip()
             if not query or runtime.youtube is None:
-                await cq.answer("Nothing to play.", show_alert=True)
+                await rich.answer(cq, "Nothing to play.", show_alert=True)
                 return
             try:
                 from vyron.modules.play import begin
@@ -331,7 +333,7 @@ def register(client: Client) -> None:
                 if outcome == "streamed":
                     # The poster is the message now; this button card is spent.
                     await _drop(client, chat.id, cq.message.id)
-                await cq.answer(
+                await rich.answer(cq, 
                     {
                         "streamed": f"Playing · {truncate(track.title, 26)}",
                         "queued": f"Queued · {truncate(track.title, 26)}",
@@ -339,14 +341,14 @@ def register(client: Client) -> None:
                     }.get(outcome, "Done")
                 )
             except Exception as exc:
-                await cq.answer(f"Could not play that: {truncate(str(exc), 60)}", show_alert=True)
+                await rich.answer(cq, f"Could not play that: {truncate(str(exc), 60)}", show_alert=True)
             return
 
         if action == "forget":
             # Two taps, always: the confirm card carries `v:forget:yes`.
             actor = cq.from_user.id if cq.from_user else 0
             if not actor or runtime.storage is None:
-                await cq.answer("Nothing to delete", show_alert=True)
+                await rich.answer(cq, "Nothing to delete", show_alert=True)
                 return
             if arg != "yes":
                 await _show(
@@ -361,13 +363,13 @@ def register(client: Client) -> None:
                         confirm_label="Yes, delete it",
                     ),
                 )
-                await cq.answer()
+                await rich.answer(cq)
                 return
             try:
                 removed = await runtime.storage.forget_user(actor)
             except Exception as exc:  # pragma: no cover - a broken backend
                 logger.warning("forget_user failed: %s", exc)
-                await cq.answer("Could not delete right now — try again.", show_alert=True)
+                await rich.answer(cq, "Could not delete right now — try again.", show_alert=True)
                 return
             total = sum(int(value) for value in removed.values())
             from vyron.ui import blocks as B
@@ -389,7 +391,7 @@ def register(client: Client) -> None:
                 )
                 + B.actions(B.row(B.btn("Close", data="v:close", style="primary"))),
             )
-            await cq.answer(f"Deleted {total} item(s)")
+            await rich.answer(cq, f"Deleted {total} item(s)")
             return
 
         if action == "start":
@@ -408,12 +410,12 @@ def register(client: Client) -> None:
                 else await group_card(client, chat, cq.from_user),
                 keyboards.start_panel(player=private),
             )
-            await cq.answer("Home")
+            await rich.answer(cq, "Home")
             return
 
         if action == "app":
             if not keyboards.app_url():
-                await cq.answer("Set WEBAPP_URL first.", show_alert=True)
+                await rich.answer(cq, "Set WEBAPP_URL first.", show_alert=True)
                 return
             if is_private_chat(chat):
                 await _show(
@@ -429,7 +431,7 @@ def register(client: Client) -> None:
                     cards.webapp_group_card(settings.bot_username),
                     keyboards.dm_markup(),
                 )
-            await cq.answer()
+            await rich.answer(cq)
             return
 
         if action == "ui":
@@ -437,11 +439,11 @@ def register(client: Client) -> None:
 
             actor = cq.from_user.id if cq.from_user else 0
             if not is_owner(actor):
-                await cq.answer("Owner only", show_alert=True)
+                await rich.answer(cq, "Owner only", show_alert=True)
                 return
             chosen = await uistyle.set_style(arg)
             await _show(client, cq, uistyle.card(), keyboards.back_close("v:help:main"))
-            await cq.answer(f"Interface: {uistyle.STYLES.get(chosen, chosen)}")
+            await rich.answer(cq, f"Interface: {uistyle.STYLES.get(chosen, chosen)}")
             return
 
         if action == "settings":
@@ -455,7 +457,7 @@ def register(client: Client) -> None:
                 cards.settings_card(cfg, chat.title or ""),
                 keyboards.settings_panel(cfg),
             )
-            await cq.answer()
+            await rich.answer(cq)
             return
 
         if action == "log":
@@ -464,11 +466,11 @@ def register(client: Client) -> None:
 
             actor = cq.from_user.id if cq.from_user else 0
             if not is_owner(actor):
-                await cq.answer("Owner only", show_alert=True)
+                await rich.answer(cq, "Owner only", show_alert=True)
                 return
             state = await logsink.set_enabled(runtime.storage, arg == "on")
             await _show(client, cq, logger_card(), _logger_kb())
-            await cq.answer("Log channel on" if state else "Log channel off")
+            await rich.answer(cq, "Log channel on" if state else "Log channel off")
             return
 
         if action == "lang":
@@ -481,16 +483,16 @@ def register(client: Client) -> None:
             if not code or code == "menu":
                 current = str(await chatcfg.get(chat.id, "lang", "") or "")
                 await _show(client, cq, language_card(current), lang_keyboard(current))
-                await cq.answer()
+                await rich.answer(cq)
                 return
             if not i18n.is_known(code):
-                await cq.answer(catalog.t("lang.unknown"), show_alert=True)
+                await rich.answer(cq, catalog.t("lang.unknown"), show_alert=True)
                 return
             actor = cq.from_user.id if cq.from_user else 0
             if not is_private_chat(chat) and not (
                 is_owner(actor) or await is_chat_admin(client, chat.id, actor)
             ):
-                await cq.answer(catalog.t("lang.admin_only"), show_alert=True)
+                await rich.answer(cq, catalog.t("lang.admin_only"), show_alert=True)
                 return
             chosen = await i18n.set_for_chat(chat.id, code)
             fresh = i18n.catalog(chosen)
@@ -500,32 +502,32 @@ def register(client: Client) -> None:
                 language_card(chosen, text_key="lang.saved"),
                 lang_keyboard(chosen),
             )
-            await cq.answer(fresh.t("lang.saved"))
+            await rich.answer(cq, fresh.t("lang.saved"))
             return
 
         if action == "vote":
             from vyron.modules.power import cast_vote
 
             if cq.from_user is None:
-                await cq.answer()
+                await rich.answer(cq)
                 return
             outcome, tally, needed, _state = await cast_vote(chat.id, cq.from_user.id)
             if outcome == "disabled":
-                await cq.answer("Vote-skip is off — an admin can enable it.", show_alert=True)
+                await rich.answer(cq, "Vote-skip is off — an admin can enable it.", show_alert=True)
                 return
             if outcome == "duplicate":
-                await cq.answer(f"You already voted · {tally.remaining} more needed")
+                await rich.answer(cq, f"You already voted · {tally.remaining} more needed")
                 return
             if outcome == "passed":
                 skipped = await player.skip(chat.id, count=1)
-                await cq.answer("Skipped by vote!" if skipped else "Queue is empty")
+                await rich.answer(cq, "Skipped by vote!" if skipped else "Queue is empty")
                 return
-            await cq.answer(f"Vote counted · {tally.count}/{needed}")
+            await rich.answer(cq, f"Vote counted · {tally.count}/{needed}")
             return
 
         if action == "np":
             if not state or not state.current:
-                await cq.answer("Nothing is playing.", show_alert=True)
+                await rich.answer(cq, "Nothing is playing.", show_alert=True)
                 return
             # the card follows the message it is edited into: a poster takes a
             # caption, a text card takes full markup
@@ -535,7 +537,7 @@ def register(client: Client) -> None:
                 else cards.player_panel(state)
             )
             await _show(client, cq, markup, keyboards.now_playing(state))
-            await cq.answer()
+            await rich.answer(cq)
             return
 
         # ── queue ──────────────────────────────────────────────────────────
@@ -543,20 +545,20 @@ def register(client: Client) -> None:
             page = int(arg) if arg.isdigit() else 0
             markup, pages = cards.queue_card(state, page)
             await _show(client, cq, markup, keyboards.queue(state, min(page, pages - 1), pages))
-            await cq.answer()
+            await rich.answer(cq)
             return
 
         if action == "clearqueue":
             removed = player.queues.clear(chat.id, keep_current=True)
             await player.refresh_now_playing(chat.id)
-            await cq.answer(f"Cleared {removed} tracks")
+            await rich.answer(cq, f"Cleared {removed} tracks")
             return
 
         # ── transport ──────────────────────────────────────────────────────
         catalog = await i18n.for_chat(chat.id)
 
         if action == "pause":
-            await cq.answer(
+            await rich.answer(cq, 
                 catalog.t("ctl.paused")
                 if await player.pause(chat.id)
                 else catalog.t("ctl.nothing_playing")
@@ -564,7 +566,7 @@ def register(client: Client) -> None:
             return
 
         if action == "resume":
-            await cq.answer(
+            await rich.answer(cq, 
                 catalog.t("ctl.resumed")
                 if await player.resume(chat.id)
                 else catalog.t("ctl.nothing_paused")
@@ -573,14 +575,14 @@ def register(client: Client) -> None:
 
         if action == "skip":
             track = await player.skip(chat.id)
-            await cq.answer(
+            await rich.answer(cq, 
                 f"⏭ {truncate(track.title, 40)}" if track else catalog.t("ctl.queue_empty")
             )
             return
 
         if action == "stop":
             await player.stop(chat.id, leave=True)
-            await cq.answer(catalog.t("ctl.stopped"))
+            await rich.answer(cq, catalog.t("ctl.stopped"))
             try:
                 await cq.message.delete()
             except Exception:
@@ -590,7 +592,7 @@ def register(client: Client) -> None:
         if action == "seek":
             current = state.current
             if current is None:
-                await cq.answer("Nothing is playing")
+                await rich.answer(cq, "Nothing is playing")
                 return
             step = int(arg) if arg.lstrip("+-").isdigit() else 15
             target = max(0, int(state.elapsed()) + step)
@@ -598,25 +600,25 @@ def register(client: Client) -> None:
                 target = min(current.duration - 1, target)
             if await player.seek(chat.id, target):
                 mark = "⏩" if step > 0 else "⏪"
-                await cq.answer(f"{mark} {catalog.t('ctl.seek', time=fmt_duration(target))}")
+                await rich.answer(cq, f"{mark} {catalog.t('ctl.seek', time=fmt_duration(target))}")
             else:
-                await cq.answer("Could not seek")
+                await rich.answer(cq, "Could not seek")
             return
 
         # ── the end of a session: "again" and "keep going" ─────────────────
         if action == "replay":
             if not state or not state.history:
-                await cq.answer("Nothing to play again.", show_alert=True)
+                await rich.answer(cq, "Nothing to play again.", show_alert=True)
                 return
             track = state.history[-1]
             try:
                 await player.play_track(chat.id, track, video=track.is_video)
             except Exception as exc:
                 logger.info("replay failed for %s: %s", track.id, exc)
-                await cq.answer("Could not start it again — try /play.", show_alert=True)
+                await rich.answer(cq, "Could not start it again — try /play.", show_alert=True)
                 return
             await _drop(client, chat.id, cq.message.id)
-            await cq.answer(f"▶️ {truncate(track.title, 32)}")
+            await rich.answer(cq, f"▶️ {truncate(track.title, 32)}")
             return
 
         if action == "radio":
@@ -642,7 +644,7 @@ def register(client: Client) -> None:
                 except Exception as exc:  # pragma: no cover - network paths
                     logger.info("radio pick failed: %s", exc)
             if chosen is None:
-                await cq.answer(
+                await rich.answer(cq, 
                     "Radio is on — the next /play will keep going by itself.",
                     show_alert=True,
                 )
@@ -651,10 +653,10 @@ def register(client: Client) -> None:
                 await player.enqueue(chat.id, chosen, play_now=True)
             except Exception as exc:
                 logger.info("radio start failed: %s", exc)
-                await cq.answer("Radio is on, but that track would not start.", show_alert=True)
+                await rich.answer(cq, "Radio is on, but that track would not start.", show_alert=True)
                 return
             await _drop(client, chat.id, cq.message.id)
-            await cq.answer(f"📻 {truncate(chosen.title, 32)}")
+            await rich.answer(cq, f"📻 {truncate(chosen.title, 32)}")
             return
 
         if action == "video":
@@ -663,20 +665,20 @@ def register(client: Client) -> None:
             # picture — from where it is now, not from the start.
             current = state.current
             if current is None:
-                await cq.answer("Nothing is playing", show_alert=True)
+                await rich.answer(cq, "Nothing is playing", show_alert=True)
                 return
             resume_at = int(max(0, state.elapsed()))
             try:
                 await player.play_track(chat.id, current, video=True, seek=resume_at)
             except Exception as exc:
                 logger.info("video switch failed for %s: %s", current.id, exc)
-                await cq.answer(
+                await rich.answer(cq, 
                     "No video for this one on this server — the song keeps playing.",
                     show_alert=True,
                 )
                 return
             if getattr(state, "is_video", False):
-                await cq.answer("Video on")
+                await rich.answer(cq, "Video on")
                 await _show(
                     client,
                     cq,
@@ -684,7 +686,7 @@ def register(client: Client) -> None:
                     keyboards.now_playing(state),
                 )
             else:
-                await cq.answer(
+                await rich.answer(cq, 
                     "This server has no video for it — playing the song instead.",
                     show_alert=True,
                 )
@@ -694,22 +696,22 @@ def register(client: Client) -> None:
             state.loop = state.loop.next()
             await player.persist(chat.id)
             await player.refresh_now_playing(chat.id)
-            await cq.answer(catalog.t("ctl.loop", mode=state.loop.label))
+            await rich.answer(cq, catalog.t("ctl.loop", mode=state.loop.label))
             return
 
         if action == "shuffle":
             count = player.queues.shuffle(chat.id)
             await player.refresh_now_playing(chat.id)
-            await cq.answer(catalog.t("ctl.shuffled", count=count))
+            await rich.answer(cq, catalog.t("ctl.shuffled", count=count))
             return
 
         if action == "vol":
             if arg == "show":
-                await cq.answer(f"Volume: {state.volume}%")
+                await rich.answer(cq, f"Volume: {state.volume}%")
                 return
             delta = int(arg) if arg.lstrip("+-").isdigit() else 0
             volume = await player.set_volume(chat.id, state.volume + delta)
-            await cq.answer(catalog.t("ctl.volume", volume=volume))
+            await rich.answer(cq, catalog.t("ctl.volume", volume=volume))
             return
 
         # ── settings ───────────────────────────────────────────────────────
@@ -732,7 +734,7 @@ def register(client: Client) -> None:
                 # playmode): a member must not be able to lock the bot.
                 uid = cq.from_user.id if cq.from_user else 0
                 if not (is_owner(uid) or await is_chat_admin(client, chat.id, uid)):
-                    await cq.answer("Admins only", show_alert=True)
+                    await rich.answer(cq, "Admins only", show_alert=True)
                     return
                 await chatcfg.set(
                     chat.id,
@@ -747,7 +749,7 @@ def register(client: Client) -> None:
                 cards.settings_card(cfg, chat.title or ""),
                 keyboards.settings_panel(cfg),
             )
-            await cq.answer("Saved")
+            await rich.answer(cq, "Saved")
             return
 
         # ── favourites / lyrics ────────────────────────────────────────────
@@ -762,13 +764,13 @@ def register(client: Client) -> None:
                     cards.favorites_card(items),
                     keyboards.back_close("v:help:tools"),
                 )
-                await cq.answer(f"{len(items)} saved")
+                await rich.answer(cq, f"{len(items)} saved")
                 return
             if not state or not state.current:
-                await cq.answer("Nothing is playing.", show_alert=True)
+                await rich.answer(cq, "Nothing is playing.", show_alert=True)
                 return
             added = await runtime.storage.add_favorite(cq.from_user.id, state.current.to_dict())
-            await cq.answer("Saved to favourites" if added else "Already saved")
+            await rich.answer(cq, "Saved to favourites" if added else "Already saved")
             return
 
         if action == "lyrics":
@@ -779,7 +781,7 @@ def register(client: Client) -> None:
         if action in {"pick", "dl"}:
             entry = pending.get(chat.id, cq.message.id)
             if entry is None:
-                await cq.answer("That search expired — run the command again.", show_alert=True)
+                await rich.answer(cq, "That search expired — run the command again.", show_alert=True)
                 return
 
             # `v:pick:list` reopens the picker. /play already started the
@@ -796,7 +798,7 @@ def register(client: Client) -> None:
                     ),
                     keyboards.search_results(entry.tracks),
                 )
-                await cq.answer("Pick one")
+                await rich.answer(cq, "Pick one")
                 return
 
             # `v:pick:q2` queues result #3 and `v:pick:n2` puts it *next*,
@@ -804,7 +806,7 @@ def register(client: Client) -> None:
             queued = arg[:1] in {"q", "n"}
             digits = arg[1:] if queued else arg
             if not digits.isdigit() or int(digits) >= len(entry.tracks):
-                await cq.answer("That search expired — run the command again.", show_alert=True)
+                await rich.answer(cq, "That search expired — run the command again.", show_alert=True)
                 return
             index = int(digits)
             if queued and action == "pick":
@@ -828,11 +830,11 @@ def register(client: Client) -> None:
                     reply = "That is already in the queue"
                 else:
                     reply = "The queue is full — skip or clear something first"
-                await cq.answer(reply)
+                await rich.answer(cq, reply)
                 return
             if action == "dl":
                 await _show(client, cq, cards.download_choice_card(entry.tracks[index]))
-                await cq.answer()
+                await rich.answer(cq)
                 return
 
             from vyron.modules.play import begin
@@ -859,7 +861,7 @@ def register(client: Client) -> None:
                     cards.queued_card(track, 0),
                     keyboards.now_playing(state),
                 )
-            await cq.answer(
+            await rich.answer(cq, 
                 {"streamed": "Starting", "queued": "Queued", "error": "Could not stream that"}.get(
                     outcome, "Done"
                 )
@@ -870,18 +872,18 @@ def register(client: Client) -> None:
         if action == "p":
             entry = pending.get(chat.id, cq.message.id)
             if not entry or not arg.isdigit() or int(arg) >= len(entry.tracks):
-                await cq.answer("That list expired — run /suggest again.", show_alert=True)
+                await rich.answer(cq, "That list expired — run /suggest again.", show_alert=True)
                 return
             if runtime.player is None:
-                await cq.answer("Playback is not ready yet.", show_alert=True)
+                await rich.answer(cq, "Playback is not ready yet.", show_alert=True)
                 return
             track = entry.tracks[int(arg)]
             try:
                 position = await runtime.player.enqueue(chat.id, track)
             except Exception as exc:
-                await cq.answer(f"Could not queue that: {truncate(str(exc), 60)}", show_alert=True)
+                await rich.answer(cq, f"Could not queue that: {truncate(str(exc), 60)}", show_alert=True)
                 return
-            await cq.answer(
+            await rich.answer(cq, 
                 f"Queued · {truncate(track.title, 26)}"
                 if position > 0
                 else "Already in the queue"
@@ -893,7 +895,7 @@ def register(client: Client) -> None:
             from vyron.core import playlists as playlists_store
 
             if runtime.player is None:
-                await cq.answer("Playback is not ready yet.", show_alert=True)
+                await rich.answer(cq, "Playback is not ready yet.", show_alert=True)
                 return
             actor = cq.from_user.id if cq.from_user else 0
             name = ""
@@ -907,9 +909,9 @@ def register(client: Client) -> None:
                     except Exception:
                         continue
             if not name:
-                await cq.answer("That playlist is gone — send /playlists.", show_alert=True)
+                await rich.answer(cq, "That playlist is gone — send /playlists.", show_alert=True)
                 return
-            await cq.answer(
+            await rich.answer(cq, 
                 f"Queued {queued} from {truncate(name, 22)}" if queued else "Already queued"
             )
             return
@@ -919,11 +921,11 @@ def register(client: Client) -> None:
             kind = parts[2] if len(parts) > 2 else "audio"
             index = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else 0
             if not entry or index >= len(entry.tracks):
-                await cq.answer("That result expired.", show_alert=True)
+                await rich.answer(cq, "That result expired.", show_alert=True)
                 return
             from vyron.modules.play import deliver
 
-            await cq.answer("Downloading…")
+            await rich.answer(cq, "Downloading…")
             await deliver(
                 client,
                 chat.id,
@@ -947,7 +949,7 @@ def register(client: Client) -> None:
                 locks_cfg[arg] = not locks_cfg.get(arg)
                 await chatcfg.set(chat.id, "locks", locks_cfg)
             await _show(client, cq, locks_panel(locks_cfg, flood_cfg))
-            await cq.answer("Saved")
+            await rich.answer(cq, "Saved")
             return
 
         # ── audio effects ──────────────────────────────────────────────────
@@ -967,7 +969,7 @@ def register(client: Client) -> None:
             # switched on should be a filter you can already hear.
             live = await save_fx(chat.id, active)
             await _show(client, cq, fx_panel(active))
-            await cq.answer(
+            await rich.answer(cq, 
                 f"{'Live: ' if live else 'Next track: '}{audio_fx.labels(active)}"
             )
             return
@@ -975,7 +977,7 @@ def register(client: Client) -> None:
         # ── owner panel ────────────────────────────────────────────────────
         if action == "admin":
             if not is_owner(cq.from_user.id):
-                await cq.answer("Owner only.", show_alert=True)
+                await rich.answer(cq, "Owner only.", show_alert=True)
                 return
             if arg == "stats":
                 counters = await runtime.storage.counters()
@@ -995,7 +997,7 @@ def register(client: Client) -> None:
                     ),
                     keyboards.admin_panel(),
                 )
-                await cq.answer()
+                await rich.answer(cq)
                 return
             if arg == "active":
                 lines = [
@@ -1010,18 +1012,18 @@ def register(client: Client) -> None:
                     f"{E('live')} <b>Active sessions</b>\n<blockquote>{body}</blockquote>",
                     keyboards.admin_panel(),
                 )
-                await cq.answer()
+                await rich.answer(cq)
                 return
 
-        await cq.answer()
+        await rich.answer(cq)
 
     async def _lyrics(client: Client, cq: CallbackQuery, state) -> None:
         if not state or not state.current:
-            await cq.answer("Nothing is playing.", show_alert=True)
+            await rich.answer(cq, "Nothing is playing.", show_alert=True)
             return
         from vyron.core.lyrics import split_title
 
-        await cq.answer("Fetching lyrics…")
+        await rich.answer(cq, "Fetching lyrics…")
         track = state.current
         title, artist = split_title(track.title)
         result = await runtime.lyrics.timed(title, artist or track.uploader, track.duration)

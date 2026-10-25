@@ -1389,13 +1389,34 @@ class YouTube:
         else:
             selector = "bestaudio[ext=m4a]/bestaudio[acodec!=none]/best"
 
-        # Walled: skip the ladder entirely (it cannot succeed) and go straight
-        # to the copy of the song that will actually play.
+        # Walled: the client ladder cannot succeed, so do not spend two socket
+        # timeouts proving it again on every track. Two lanes *can* succeed and
+        # neither knows the other exists — somebody else's resolver (same video,
+        # signed URL) and a catalogue copy (same song, its own audio) — so they
+        # are asked together and the first real answer wins.
         if self.walled():
-            substituted = await self._substitute(track, video=False, fresh=refresh)
-            if substituted is not None:
-                self._stream_cache[key] = substituted
-                return substituted
+            lanes = {
+                "mirror": asyncio.ensure_future(self._public_fallback(track, video=video)),
+                "substitute": asyncio.ensure_future(
+                    self._substitute(track, video=False, fresh=refresh)
+                ),
+            }
+            pending = set(lanes.values())
+            try:
+                while pending:
+                    done, pending = await asyncio.wait(
+                        pending, return_when=asyncio.FIRST_COMPLETED
+                    )
+                    for task in done:
+                        if task.cancelled() or task.exception() is not None:
+                            continue
+                        found = task.result()
+                        if found is not None:
+                            self._stream_cache[key] = found
+                            return found
+            finally:
+                for task in pending:
+                    task.cancel()
 
         last_error: Exception | None = None
         same_error = 0

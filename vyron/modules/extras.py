@@ -277,16 +277,16 @@ def register(client: Client) -> None:
     @client.on_callback_query(filters.regex(r"^v:unblock:"))
     async def _unblock_cb(_: Client, cq) -> None:
         if not is_owner(cq.from_user.id):
-            await cq.answer("Owner only.", show_alert=True)
+            await rich.answer(cq, "Owner only.", show_alert=True)
             return
         try:
             target = int((cq.data or "").rsplit(":", 1)[-1])
         except ValueError:
-            await cq.answer("Bad id.")
+            await rich.answer(cq, "Bad id.")
             return
         BLOCKED_USERS.discard(target)
         await runtime.storage.set_chat_setting(0, "blocked_users", sorted(BLOCKED_USERS))
-        await cq.answer(f"{target} unblocked")
+        await rich.answer(cq, f"{target} unblocked")
         try:
             await cq.message.edit_text(
                 B.note(f"{E('check')} <code>{target}</code> is no longer blocked.")

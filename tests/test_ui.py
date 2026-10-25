@@ -1,6 +1,8 @@
 """UI-layer tests: rich ↔ HTML conversion, emoji fallbacks, card rendering."""
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 pytest.importorskip("pyrogram")
@@ -470,3 +472,35 @@ def test_the_progress_bar_is_drawn_with_box_rules():
     assert bar.startswith("━") and "●" in bar and "─" in bar
     assert "█" not in bar and "▬" not in bar
     assert len(bar) == 15
+
+
+# ── button taps ────────────────────────────────────────────────────────────
+class _Query:
+    def __init__(self, error: Exception | None = None):
+        self.error = error
+        self.answered: list[tuple[str, bool]] = []
+
+    async def answer(self, text: str = "", show_alert: bool = False):
+        if self.error is not None:
+            raise self.error
+        self.answered.append((text, show_alert))
+
+
+def test_a_button_tap_is_answered():
+    from vyron.ui import rich
+
+    query = _Query()
+    assert asyncio.run(rich.answer(query, "done", show_alert=True)) is True
+    assert query.answered == [("done", True)]
+
+
+def test_a_stale_tap_is_not_an_error():
+    """Telegram keeps a tap answerable for ~30 s; a busy group misses that."""
+
+    class Stale(Exception):
+        pass
+
+    from vyron.ui import rich
+
+    query = _Query(Stale("[400 QUERY_ID_INVALID] - The query ID is invalid"))
+    assert asyncio.run(rich.answer(query, "hi")) is False  # no exception escapes

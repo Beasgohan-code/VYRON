@@ -168,3 +168,45 @@ def test_maintenance_refreshes_cookies_each_sweep(monkeypatch):
 
 async def _noop():
     return 0
+
+
+def test_a_real_http_server_jar_is_downloaded_end_to_end(tmp_path):
+    """No fakes: a local HTTP server, the real transport, the real parse."""
+    import http.server
+    import threading
+
+    served = tmp_path / "served"
+    served.mkdir()
+    (served / "cookies.txt").write_text(JAR, encoding="utf-8")
+
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, directory=str(served), **kwargs)
+
+        def log_message(self, *args):  # keep the test output clean
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        cookies.reset()
+        port = server.server_address[1]
+        url = f"http://127.0.0.1:{port}/cookies.txt"
+        target = tmp_path / "data"
+        settings = settings_for(target, cookies_url=url)
+
+        installed = asyncio.run(cookies.refresh(settings, force=True))
+
+        assert installed == str(target / "youtube-cookies.txt")
+        assert Path(installed).read_text(encoding="utf-8").strip() == JAR.strip()
+        assert cookies.usable(Path(installed).read_text(encoding="utf-8"))
+    finally:
+        server.shutdown()
+        server.server_close()
+        cookies.reset()
+        # The transport is shared across the process; close it so the test run
+        # does not end on aiohttp's "unclosed client session" warning.
+        from vyron.utils import net
+
+        asyncio.run(net.close())

@@ -207,7 +207,7 @@ def register(client: Client) -> None:
     @client.on_callback_query(filters.regex(r"^v:logs:"))
     async def _logs_button(_: Client, cq: CallbackQuery) -> None:
         if cq.from_user is None or not is_owner(cq.from_user.id):
-            await cq.answer("Owner only", show_alert=True)
+            await rich.answer(cq, "Owner only", show_alert=True)
             return
         action = (cq.data or "").split(":")[2] if len((cq.data or "").split(":")) > 2 else "all"
         message = cq.message
@@ -215,7 +215,7 @@ def register(client: Client) -> None:
             return
         if action == "export":
             path = journal.export()
-            await cq.answer("Exported" if path else "Nothing to export", show_alert=False)
+            await rich.answer(cq, "Exported" if path else "Nothing to export", show_alert=False)
             if path is not None:
                 try:
                     await client.send_document(message.chat.id, str(path), caption="VYRON journal")
@@ -224,11 +224,11 @@ def register(client: Client) -> None:
             return
         if action == "clear":
             journal.clear()
-            await cq.answer("Journal cleared", show_alert=False)
+            await rich.answer(cq, "Journal cleared", show_alert=False)
             action = "all"
         markup, keyboard = render(action if action in _ALIASES else "all")
         await rich.edit(client, message.chat.id, message.id, markup, markup_keyboard=keyboard)
-        await cq.answer()
+        await rich.answer(cq)
 
 
 __all__ = ["SCOPES", "register", "render"]

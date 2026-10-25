@@ -717,8 +717,30 @@ async def react(message, glyph: str) -> None:
         logger.debug("reaction failed: %s", exc)
 
 
+async def answer(callback_query, text: str = "", *, show_alert: bool = False) -> bool:
+    """Answer a button tap. Returns True when Telegram accepted it.
+
+    ``QUERY_ID_INVALID`` is not a bug: a tap is only answerable for about half
+    a minute, and a queued button in a busy group is older than that by the time
+    the handler gets to it. It used to surface as ``callback failed: … QUERY_ID
+    INVALID`` at ERROR level *and* a second answer attempt that also failed, for
+    what is simply an old tap.
+    """
+    try:
+        await callback_query.answer(text, show_alert=show_alert)
+        return True
+    except Exception as exc:  # pragma: no cover - transport/permission
+        message = str(exc)
+        if "QUERY_ID_INVALID" in message.upper().replace(" ", "_"):
+            logger.debug("stale button tap ignored (%s)", message)
+        else:
+            logger.debug("could not answer a button tap: %s", message)
+        return False
+
+
 __all__ = [
     "RICH_AVAILABLE",
+    "answer",
     "blockquote",
     "edit",
     "edit_inline",

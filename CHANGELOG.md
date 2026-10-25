@@ -7,6 +7,24 @@ Two version numbers move independently:
 
 ## Bot
 
+### 1.10.18 — 2026-10-25
+
+**A walled deployment stops re-proving the wall on every track.** The Render log
+showed the same shape four times over: the IP is refused, so each track walked
+two yt-dlp clients (~15 s of socket timeouts), gave up, and *then* asked a mirror
+that answered in one second. While the wall is known, the two lanes that can
+actually succeed — somebody else's resolver (same video, signed URL) and a
+catalogue copy (same song, its own audio) — are now asked **together**, and the
+first real answer wins. The yt-dlp ladder still runs if both fail, but it is no
+longer the default path on a blocked host. A tap that took 15 s resolves in one
+or two.
+
+**A stale button tap is not a crash.** `QUERY_ID_INVALID` means the tap was older
+than Telegram's answer window — normal in a busy group, and it was filling the
+journal with tracebacks plus a second answer attempt that also failed. Every
+`cq.answer` now goes through one helper that treats it as a debug line, and the
+callback router no longer reports it as an exception.
+
 ### 1.10.17 — 2026-10-25
 
 **A cookie jar that keeps itself fresh.** `COOKIES_FILE` is a snapshot: the
