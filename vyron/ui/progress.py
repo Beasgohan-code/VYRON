@@ -10,13 +10,13 @@ import math
 import re
 import time
 
-# The bar is a line of music, not a load meter: a heavy rule for what has
-# played, a light one for what is left, and the heart as the playhead — the
-# same "—♡—" idea people already read in music bots, but with the played
-# part actually filled in.
-BAR_FULL = "━"
-BAR_EMPTY = "─"
-KNOB = "♡"
+# The bar is a line of music, not a load meter: solid blocks for what has
+# already played, light dashes for what is left, and a ring as the playhead.
+# It is the shape people already read in every music bot — it survives being
+# half a centimetre tall on a phone, which a thin line does not.
+BAR_FULL = "█"
+BAR_EMPTY = "▬"
+KNOB = "◉"
 
 def parse_duration(value: str | int | float | None) -> int:
     """Parse ``1:02:03``, ``3:45``, ``95`` or ``'95'`` into seconds."""

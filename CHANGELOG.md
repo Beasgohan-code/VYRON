@@ -22,6 +22,13 @@ Two version numbers move independently:
   what is playing to add something.
 * **`/play` with no arguments explains itself** with a card and real buttons
   instead of a blockquote of examples.
+* **The live card is a player, not a sentence.** The progress line was one
+  run-on row of clock, percent and volume; it is now the block people already
+  know from a music bot — the bar alone on its line, then
+  `📡 streaming · 1:03 · 39% · 2:44`, then `👤 requester`, then `🔊 100%`.
+  The bar itself is solid blocks with a ring playhead (`██████◉▬▬▬▬`), which
+  survives being a few millimetres tall on a phone where a thin rule did not.
+  The poster caption uses the same shape so the two never disagree.
 
 ### 1.9.2 — 2026-10-24
 

@@ -7,6 +7,7 @@ pytest.importorskip("pyrogram")
 
 from vyron.core.queue import ChatState, Track
 from vyron.ui import cards, rich
+from vyron.ui.rich import to_plain_text
 from vyron.ui.theme import E, GLYPHS, emoji_enabled, raw_glyph
 
 
@@ -67,6 +68,39 @@ def test_now_playing_card_is_editable_html():
     assert not rich.has_rich_tags(markup)   # editable lane
     assert "50" in markup or "0:50" in markup
     assert "&lt;b&gt;" in markup            # untrusted text escaped
+
+
+def test_the_live_block_is_a_bar_over_a_clock():
+    """Bar on its own line, then status · elapsed · percent · total, then who
+    asked and how loud — the shape people already read in a music bot."""
+    from vyron.ui.progress import BAR_FULL, KNOB
+    from vyron.ui.cards import progress_block
+
+    track = Track(
+        id="abc", title="Believer", duration=200, uploader="Imagine Dragons",
+        requested_name="Rinu", requested_by=7,
+    )
+    state = ChatState(chat_id=1, current=track, playing=True, offset=50, volume=100)
+    lines = progress_block(state, track).splitlines()
+
+    assert len(lines) == 4
+    assert lines[0].startswith("<code>") and KNOB in lines[0] and BAR_FULL in lines[0]
+    assert "streaming" in lines[1]
+    assert "0:50" in lines[1] and "25%" in lines[1] and "3:20" in lines[1]
+    assert lines[2].startswith("👤") and "Rinu" in lines[2]
+    assert "100%" in lines[3]
+
+
+def test_the_live_block_says_paused_and_live():
+    from vyron.ui.cards import progress_block
+
+    live = Track(id="l", title="Radio", duration=0, uploader="")
+    state = ChatState(chat_id=1, current=live, playing=True, offset=61, paused=True)
+    lines = progress_block(state, live).splitlines()
+
+    assert len(lines) == 3          # no requester
+    clock = to_plain_text(lines[1])
+    assert "paused" in clock and "1:01" in clock and "live" in clock
 
 
 def test_queue_card_pages():
