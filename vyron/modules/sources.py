@@ -118,6 +118,25 @@ def _scoreboard_rows(limit: int = 6) -> list[tuple[str, str]]:
     return rows
 
 
+def _cookies_row() -> str:
+    """Which cookie jar is live right now, and how old it is.
+
+    "set" is not the interesting answer: a jar that expired three weeks ago is
+    also set, and it is the reason the wall is back.
+    """
+    from vyron.core import cookies as cookie_store
+
+    current = cookie_store.path()
+    origin = cookie_store.source()
+    if not current:
+        if settings.cookies_url:
+            return "COOKIES_URL set · nothing downloaded yet"
+        return "set" if (settings.cookies_file or settings.cookies_text) else "not set (fine)"
+    hours = cookie_store.age() / 3600
+    where = {"url": "COOKIES_URL", "file": "file", "env": "from env"}.get(origin, "file")
+    return f"{where} · {hours:.1f}h old" if hours >= 0.1 else f"{where} · fresh"
+
+
 def _env_rows() -> list[tuple[str, str]]:
     impersonate = "on" if settings.impersonate not in {"", "off", "none", "0"} else "off"
     try:
@@ -136,7 +155,7 @@ def _env_rows() -> list[tuple[str, str]]:
         (f"{E('download')} fallback tier", "on" if settings.stream_fallback else "off"),
         (f"{E('bolt')} download tier", f"<b>{accelerator.describe()}</b>"),
         (f"{E('cloud')} hosts", f"{len(INVIDIOUS_HOSTS)} invidious · {len(PIPED_HOSTS)} piped · {cobalt} cobalt"),
-        (f"{E('key')} cookies", "set" if (settings.cookies_file or settings.cookies_text) else "not set (fine)"),
+        (f"{E('key')} cookies", _cookies_row()),
     ]
 
 
