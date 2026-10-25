@@ -262,6 +262,151 @@ def start_card(
     )
 
 
+#: What the bot actually needs in a group, in the order it matters, with the
+#: sentence that explains why. Keys match the fields the permission probe
+#: returns (`start._rights_from_member`).
+GROUP_NEEDS: tuple[tuple[str, str, str], ...] = (
+    ("voice", "manage voice chats", "join the call and start the stream"),
+    ("delete", "delete messages", "keep one card per play instead of a pile"),
+    ("invite", "invite users", "pull the assistant account into the group"),
+    ("pin", "pin messages", "pin the now-playing card, if you ask it to"),
+)
+
+
+def group_start_card(
+    chat_title: str,
+    who: str,
+    rights: dict | None,
+    stats: dict,
+    *,
+    streaming: bool = True,
+    live: dict | None = None,
+) -> str:
+    """The card `/start` sends *in a group* — a different card, on purpose.
+
+    A private `/start` answers "what is this bot". A group `/start` has to
+    answer a different question: "is it set up here, and what does it still
+    need" — so this card reads the bot's real rights in this chat instead of
+    repeating the onboarding. ``rights`` is ``None`` when the probe could not
+    run (then the checklist is shown as instructions, not as failures).
+    """
+    title = esc(truncate(chat_title or "this group", 48))
+    mention = (
+        f'<a href="tg://user?id={int(who[1])}">{esc(truncate(who[0], 32))}</a>'
+        if isinstance(who, tuple) and len(who) == 2 and who[1]
+        else esc(truncate(str(who or "there"), 32))
+    )
+    chats = int(stats.get("chats", 0) or 0)
+    tracks = int(stats.get("tracks", 0) or 0)
+
+    if live:
+        track = esc(truncate(str(live.get("title") or "Unknown"), 48))
+        state_word = "paused" if live.get("paused") else "playing"
+        queued = int(live.get("queue") or 0)
+        body = (
+            B.banner("already playing here", glyph="live")
+            + B.context(
+                f"{B.pill(state_word, 'live')} <b>{track}</b>\n"
+                f"{B.pill(f'{queued} queued', 'ok') if queued else B.pill('nothing queued', 'warn')}"
+                " · send <code>/play</code> to add another"
+            )
+            + B.actions(
+                B.row(
+                    B.btn(f"{E('queue')} The queue", data="v:queue", style="primary"),
+                    B.btn(f"{E('interface')} Player", data="v:app"),
+                ),
+                B.row(
+                    B.btn(f"{E('stop')} Stop the music", data="v:stop", style="danger"),
+                    B.btn(f"{E('tools')} All commands", data="v:help:main"),
+                ),
+            )
+            + B.footer(_stamp(chats, tracks))
+        )
+        return body
+
+    if rights is None:
+        needs_block = B.context(
+            "I could not read my own permissions here. If <code>/play</code> "
+            "says it cannot join, an admin can fix that in "
+            "<b>Group settings → Administrators</b>."
+        )
+    else:
+        rows = []
+        missing = []
+        for key, label, why in GROUP_NEEDS:
+            ready = bool(rights.get(key))
+            rows.append(
+                (
+                    "check" if ready else "cross",
+                    label,
+                    f"{'ready' if ready else 'missing'} — {why}",
+                )
+            )
+            if not ready:
+                missing.append(label)
+        needs_block = B.fields(rows) + (
+            B.note(
+                f"<b>{len(missing)} of {len(GROUP_NEEDS)} still to grant.</b> "
+                "Group settings → Administrators → add me, then tick "
+                + ", ".join(f"<i>{name}</i>" for name in missing)
+                + "."
+            )
+            if missing
+            else B.note("Everything needed is in place. Nothing else to set up.")
+        )
+
+    engine = (
+        f"{B.pill('voice chat ready', 'ok')} · the assistant can join calls"
+        if streaming
+        else f"{B.pill('no voice engine', 'warn')} · no <code>STRING_SESSION</code> — "
+        "<code>/song</code> still sends files"
+    )
+
+    return (
+        B.banner("thanks for the add", glyph="hello")
+        + B.context(
+            f"{mention} brought me to <b>{title}</b>.\n"
+            "I play music into this group's voice chat — a song, a link, or a "
+            "file you reply to."
+        )
+        + B.section_title("status")
+        + B.fields(
+            [
+                (
+                    "live" if streaming else "warn",
+                    "engine",
+                    engine,
+                ),
+                ("users", "reach", f"<b>{_compact(chats)}</b> chats · "
+                 f"<b>{_compact(tracks)}</b> tracks played"),
+            ]
+        )
+        + B.section_title("what i need here")
+        + needs_block
+        + B.section_title("first song")
+        + B.details(
+            f"{E('rocket')} <b>Three ways to start</b>",
+            B.bullets(
+                [
+                    "Send <code>/play kesariya</code> — half a title is enough",
+                    "Paste a link, or reply to an audio file with <code>/play</code>",
+                    "Tap <b>All commands</b> below if you want the whole list",
+                ],
+                ordered=True,
+            ),
+            open=False,
+        )
+        + B.actions(
+            B.row(
+                B.btn(f"{E('play')} Player", data="v:app", style="primary"),
+                B.btn(f"{E('tools')} All commands", data="v:help:main"),
+            ),
+            B.row(B.btn(f"{E('info')} About", data="v:about")),
+        )
+        + B.footer(_stamp(chats, tracks))
+    )
+
+
 def _stamp(chats: int, tracks: int) -> str:
     """The one footer line every welcome/status card ends with."""
     return (

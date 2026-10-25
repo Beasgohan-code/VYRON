@@ -7,6 +7,25 @@ Two version numbers move independently:
 
 ## Bot
 
+### 1.10.11 — 2026-10-25
+
+**A group `/start` now answers the question a group actually has.** The private
+card explains what the bot is; pasted into a group it was the wrong card — four
+features and a setup guide for something already installed. `/start` in a group
+now greets the chat by name, credits whoever ran it, and reads the bot's *real*
+rights there: manage voice chats, delete messages, invite users, pin messages,
+each one ✓ or ○ with the reason it matters, and a single line naming what is
+still missing so an admin knows exactly what to tick. If the probe cannot run,
+the card says so instead of claiming four failures.
+
+Same photo, same buttons (three in a group), same one builder: the **Home**
+button in a group now rebuilds the group card too, so a tapped button and a
+typed command can never disagree. In a group the `/start` message itself is
+deleted — the card is the message — while in a private chat it still replies to
+the command. A `FloodWait` on the photo is waited out and retried instead of
+leaving the chat silent, and the owner journal gets one line the first time a
+group or a listener says hello, not a page per `/start`.
+
 ### 1.10.10 — 2026-10-25
 
 **The first `/play` in a group streamed with no now-playing card at all.** When

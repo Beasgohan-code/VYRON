@@ -22,11 +22,13 @@ import time
 from pathlib import Path
 
 from pyrogram import Client, filters
+from pyrogram.errors import FloodWait
 from pyrogram.types import Message
 
 from vyron.config import settings
 from vyron.core.commandlist import command_names
 from vyron.core.commandlist import suggest as command_suggest
+from vyron.core.journal import journal
 from vyron.runtime import runtime
 from vyron.ui import blocks as B
 from vyron.ui import cards, keyboards, rich
@@ -131,6 +133,51 @@ async def _counters() -> dict:
         return {}
 
 
+def _rights_from_member(member) -> dict:
+    """The four permissions a music bot needs, from a ``ChatMember``.
+
+    Pure on purpose: the interesting part of a permission check is the mapping
+    (owner means everything, an admin has a privileges object, a member has
+    none), and that should be testable without a Telegram client.
+    """
+    raw = getattr(member, "status", "")
+    status = str(getattr(raw, "name", raw) or "").upper()
+    owner = "OWNER" in status
+    admin = owner or "ADMIN" in status
+    privileges = getattr(member, "privileges", None)
+    fields = {
+        "voice": "can_manage_video_chats",
+        "delete": "can_delete_messages",
+        "invite": "can_invite_users",
+        "pin": "can_pin_messages",
+    }
+    rights: dict[str, bool] = {}
+    for key, field in fields.items():
+        if not admin:
+            rights[key] = False
+        elif owner or privileges is None:
+            rights[key] = True
+        else:
+            rights[key] = bool(getattr(privileges, field, False))
+    return rights
+
+
+async def _bot_rights(client, chat_id: int) -> dict | None:
+    """What the bot may do in *chat_id*, or ``None`` when it cannot tell."""
+    try:
+        member = await client.get_chat_member(chat_id, "me")
+    except Exception as exc:  # private chats, a probe failure, an old client
+        logger.debug("could not read my rights in %s: %s", chat_id, exc)
+        return None
+    return _rights_from_member(member)
+
+
+# Chats and people that have already said hello since this process started:
+# the owner journal is a record of what changed, not a page per `/start`.
+_GREETED: set[int] = set()
+_GREETED_USERS: set[int] = set()
+
+
 async def home_card(chat, user=None) -> str:
     """The home card, for `/start` and every "Home" button.
 
@@ -144,6 +191,23 @@ async def home_card(chat, user=None) -> str:
         streaming=runtime.streaming_ready,
         live=_live_state(chat.id),
         greeting=_greeting(),
+    )
+
+
+async def group_card(client, chat, user=None) -> str:
+    """The card a *group* gets: is it set up here, and what is still missing."""
+    counters = await _counters()
+    who = (
+        (getattr(user, "first_name", "") or "").strip(),
+        int(getattr(user, "id", 0) or 0),
+    )
+    return cards.group_start_card(
+        getattr(chat, "title", "") or "this group",
+        who if who[1] else "there",
+        await _bot_rights(client, chat.id),
+        {"chats": counters.get("chats", 0), "tracks": counters.get("tracks", 0)},
+        streaming=runtime.streaming_ready,
+        live=_live_state(chat.id),
     )
 
 
@@ -192,18 +256,58 @@ def register(client: Client) -> None:
             await _send_app(message)
             return
 
-        markup = await home_card(message.chat, message.from_user)
+        private = is_private_chat(message.chat)
+        # A group asks a different question than a person does: not "what is
+        # this" but "is it set up here". Same photo, same buttons, other card.
+        markup = (
+            await home_card(message.chat, message.from_user)
+            if private
+            else await group_card(message._client, message.chat, message.from_user)
+        )
         # No credential and no URL in the card: the Mini App identifies the
         # owner from Telegram's own initData, and its button is DM-only.
         photo, cached = await _photo_source()
-        sent = await rich.send_photo(
-            message._client,
-            message.chat.id,
-            photo,
-            markup,
-            markup_keyboard=keyboards.start_panel(player=is_private_chat(message.chat)),
-            reply_to=message.id,
-        )
+        kwargs = {
+            "chat_id": message.chat.id,
+            "photo": photo,
+            "markup": markup,
+            "markup_keyboard": keyboards.start_panel(player=private),
+        }
+        if private:
+            # In a private chat the card answers the command, so it stays a
+            # reply to it. In a group the command itself goes: the card is the
+            # message, and a "/start" sitting above it reads like a person
+            # talking to themselves.
+            kwargs["reply_to"] = message.id
+        else:
+            try:
+                await message.delete()
+            except Exception:  # no rights, too old, already gone
+                pass
+        try:
+            sent = await rich.send_photo(message._client, **kwargs)
+        except FloodWait as flood:
+            # A busy group can hit the flood limit on the *photo*; waiting and
+            # retrying is what turns that into a card instead of silence.
+            await asyncio.sleep(float(getattr(flood, "value", 3)) + 1)
+            sent = await rich.send_photo(message._client, **kwargs)
+        if not private and message.chat.id not in _GREETED:
+            _GREETED.add(message.chat.id)
+            journal.info(
+                "start",
+                f"new group: {getattr(message.chat, 'title', '') or message.chat.id}",
+                chat=message.chat.id,
+                user=getattr(message.from_user, "id", 0),
+            )
+        elif private:
+            uid = int(getattr(message.from_user, "id", 0) or 0)
+            if uid and uid not in _GREETED_USERS:
+                _GREETED_USERS.add(uid)
+                journal.info(
+                    "start",
+                    f"new listener: {getattr(message.from_user, 'first_name', '') or uid}",
+                    user=uid,
+                )
         # Remember the upload so the next /start is instant. A stale id would
         # fail later; `_photo_source` re-reads it and `/start` is idempotent.
         if not cached and sent is not None and getattr(sent, "photo", None):

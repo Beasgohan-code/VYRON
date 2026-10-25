@@ -394,13 +394,19 @@ def register(client: Client) -> None:
 
         if action == "start":
             # The home card, rebuildable from any other card ("Home" buttons).
-            from vyron.modules.start import home_card
+            # In a group that is the *group* card (setup checklist), the same
+            # one `/start` sends there — a tapped button and a typed command
+            # must never show different things.
+            from vyron.modules.start import group_card, home_card
 
+            private = is_private_chat(chat)
             await _show(
                 client,
                 cq,
-                await home_card(chat, cq.from_user),
-                keyboards.start_panel(player=is_private_chat(chat)),
+                await home_card(chat, cq.from_user)
+                if private
+                else await group_card(client, chat, cq.from_user),
+                keyboards.start_panel(player=private),
             )
             await cq.answer("Home")
             return
