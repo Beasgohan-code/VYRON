@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from difflib import SequenceMatcher
 from pathlib import Path
 import re
 import shlex
@@ -304,6 +305,33 @@ def _match_words(text: str) -> set[str]:
     }
 
 
+def _token_hits(wanted: set[str], found: set[str]) -> set[str]:
+    """Which words of *wanted* the *found* words cover — allowing one typo.
+
+    People type an artist's name from memory, once: "wrong cheris grey" is
+    "Wrong" by **Chris Grey**, and "let the world burn" is his song too. Exact
+    word overlap turned every misspelling into "No results", even when YouTube
+    and the catalogues had the song in the very first row. Two words count as
+    the same when they start alike and are at least 78% similar ("cheris" vs
+    "chris" is 0.83), which tolerates a wrong vowel without letting "love"
+    match "live".
+    """
+    hits = wanted & found
+    if len(hits) == len(wanted) or not found:
+        return hits
+    comparable = [word for word in found if len(word) >= 4]
+    for want in wanted - hits:
+        if len(want) < 4:
+            continue
+        for have in comparable:
+            if want[0] != have[0]:
+                continue
+            if SequenceMatcher(None, want, have).ratio() >= 0.78:
+                hits.add(want)
+                break
+    return hits
+
+
 def match_confidence(query: str, track) -> float:
     """How sure we are that *track* is the song someone typed — 0.0 … 1.0.
 
@@ -322,11 +350,11 @@ def match_confidence(query: str, track) -> float:
         return 0.0
     title_words = _match_words(getattr(track, "title", "") or "")
     uploader_words = _match_words(getattr(track, "uploader", "") or "")
-    covered = wanted & (title_words | uploader_words)
+    covered = _token_hits(wanted, title_words | uploader_words)
     if not covered:
         return 0.0
     score = len(covered) / len(wanted)
-    artist_hits = wanted & uploader_words
+    artist_hits = _token_hits(wanted, uploader_words)
     if artist_hits:
         score = min(1.0, score + 0.15 * len(artist_hits) / len(wanted))
     # A 20-second Short is never "the song", however well the words match.
@@ -708,25 +736,90 @@ class YouTube:
         count: int,
         requester: tuple[int, str],
     ) -> list[Track]:
-        """YouTube Music first (songs, not "Official Video [4K]"), then plain
-        `ytsearch`, then the stream-source registry."""
+        """Every YouTube lane we have, and no lane can cancel another.
+
+        In order of freshness: YouTube Music (songs, not "Official Video [4K]"),
+        plain `ytsearch`, the public Invidious/Piped instances, and finally the
+        stream-source registry. Each one is optional and each one fails on its
+        own — a single refused extractor used to throw away the results of the
+        lanes that *had* answered, because the exception left this function.
+        """
         tracks: list[Track] = []
-        meta = await self._ytmusic_search(query, fetch)
-        for entry in meta:
-            track = self._track_from_entry(entry, requester=requester)
-            if track:
-                tracks.append(track)
-        if len(tracks) < count:
-            info = await self._async_extract(f"ytsearch{fetch}:{query}", extract_flat="in_playlist")
-            entries = info.get("entries") or []
-            for entry in entries:
+        # The instance search is started first: it is the lane that still works
+        # when YouTube's own endpoints treat this IP as a bot.
+        instance_task = asyncio.create_task(
+            self._instance_search(query, count + 2, requester), name="search:instances"
+        )
+        try:
+            try:
+                meta = await self._ytmusic_search(query, fetch)
+            except Exception as exc:
+                logger.info("YouTube Music search failed for %r: %s", query, exc)
+                meta = []
+            for entry in meta or []:
                 track = self._track_from_entry(entry, requester=requester)
                 if track:
                     tracks.append(track)
+
+            if len(tracks) < count:
+                try:
+                    info = await self._async_extract(
+                        f"ytsearch{fetch}:{query}", extract_flat="in_playlist"
+                    )
+                except Exception as exc:
+                    logger.info("ytsearch failed for %r: %s", query, exc)
+                    info = {}
+                for entry in (info or {}).get("entries") or []:
+                    track = self._track_from_entry(entry, requester=requester)
+                    if track:
+                        tracks.append(track)
+
+            if len(tracks) < count:
+                try:
+                    tracks.extend(await asyncio.wait_for(instance_task, YOUTUBE_DEADLINE))
+                except Exception as exc:
+                    logger.info("instance search gave nothing for %r: %s", query, exc)
+        finally:
+            if not instance_task.done():
+                instance_task.cancel()
+
         if not tracks:
-            for track in await sources.fallback_search(query, count, settings=self.settings):
-                track.requested_by, track.requested_name = requester
-                tracks.append(track)
+            try:
+                for track in await sources.fallback_search(query, count, settings=self.settings):
+                    track.requested_by, track.requested_name = requester
+                    tracks.append(track)
+            except Exception as exc:
+                logger.info("source registry search failed for %r: %s", query, exc)
+        return tracks
+
+    async def _instance_search(
+        self, query: str, limit: int, requester: tuple[int, str]
+    ) -> list[Track]:
+        """Invidious / Piped keyword search — the wall-proof lane."""
+        try:
+            from vyron.core.public_streams import get_public_streams
+
+            rows = await get_public_streams(self.settings).search(query, limit)
+        except Exception as exc:  # pragma: no cover - network variance
+            logger.info("public instance search failed for %r: %s", query, exc)
+            return []
+        tracks: list[Track] = []
+        for row in rows:
+            tracks.append(
+                Track(
+                    id=row["id"],
+                    title=row["title"],
+                    duration=row.get("duration") or 0,
+                    uploader=row.get("uploader") or "",
+                    thumbnail=row.get("thumbnail"),
+                    views=int(row.get("views") or 0),
+                    source="youtube",
+                    requested_by=requester[0],
+                    requested_name=requester[1],
+                )
+            )
+        if tracks:
+            logger.info("public instances named %d result(s) for %r", len(tracks), query)
         return tracks
 
     async def _race(
@@ -799,7 +892,7 @@ class YouTube:
         picked: list[Track] = []
         for track in tracks:
             found = self._words(track.title) | self._words(track.uploader or "")
-            if wanted & found:
+            if _token_hits(wanted, found):
                 picked.append(track)
         return picked
 
@@ -848,10 +941,15 @@ class YouTube:
 
             score = 0.0
             if wanted:
-                overlap = len(wanted & self._words(track.title)) / len(wanted)
+                title_words = self._words(track.title)
+                uploader_words = self._words(track.uploader or "")
+                overlap = len(_token_hits(wanted, title_words)) / len(wanted)
                 score += overlap * 4.0
-                if track.uploader and wanted & self._words(track.uploader):
+                if uploader_words and _token_hits(wanted, uploader_words):
                     score += 0.8
+                # and the artist's name in the title is a strong signal too
+                if uploader_words and len(_token_hits(wanted, uploader_words)) >= 2:
+                    score += 0.6
 
             # Playable-length preference: skip 20s Shorts, demote 2h "loops".
             seconds = int(track.duration or 0)

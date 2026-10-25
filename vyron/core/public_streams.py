@@ -266,6 +266,55 @@ def parse_cobalt(payload: dict, host: str, *, height: int = 0) -> DirectStream |
     )
 
 
+def parse_search_item(kind: str, item: dict) -> dict | None:
+    """One Invidious/Piped search row → the fields a `Track` needs."""
+    if not isinstance(item, dict):
+        return None
+    ident = str(item.get("videoId") or item.get("id") or "").strip()
+    if not re.fullmatch(r"[\w-]{6,24}", ident):
+        return None
+    title = str(item.get("title") or "").strip()
+    if not title:
+        return None
+    seconds = item.get("lengthSeconds")
+    if seconds in (None, ""):
+        seconds = item.get("duration")
+        if isinstance(seconds, str):
+            match = re.fullmatch(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", seconds.strip())
+            seconds = (
+                int(match.group(1) or 0) * 3600
+                + int(match.group(2) or 0) * 60
+                + int(match.group(3) or 0)
+                if match
+                else 0
+            )
+    try:
+        duration = int(seconds or 0)
+    except (TypeError, ValueError):
+        duration = 0
+    uploader = str(
+        item.get("author") or item.get("uploaderName") or item.get("uploader") or ""
+    ).strip()
+    thumb = (
+        f"https://i.ytimg.com/vi/{ident}/hqdefault.jpg"
+        if ident
+        else str(item.get("thumbnail") or "")
+    )
+    views = item.get("viewCount") or item.get("views") or 0
+    try:
+        views = int(views)
+    except (TypeError, ValueError):
+        views = 0
+    return {
+        "id": ident,
+        "title": title,
+        "duration": max(0, duration),
+        "uploader": uploader,
+        "thumbnail": thumb,
+        "views": views,
+    }
+
+
 class PublicStreams:
     """Ask Invidious, Piped and Cobalt for a URL yt-dlp could not produce."""
 
@@ -516,6 +565,70 @@ class PublicStreams:
     async def _meta_one(self, url: str) -> VideoMeta | None:
         payload = await self._json(url)
         return parse_meta("meta", payload) if payload else None
+
+    # ── search ─────────────────────────────────────────────────────────────
+    async def search(self, query: str, limit: int = 10) -> list[dict]:
+        """Ask the public instances for *songs*, not for a stream.
+
+        This is the one search lane that does not depend on yt-dlp's YouTube
+        client or on a catalogue API: Invidious and Piped answer a plain keyword
+        search even from an IP whose *streams* YouTube refuses, which is exactly
+        the deployment where "No results" used to be the only answer.
+        """
+        from urllib.parse import quote
+
+        query = (query or "").strip()
+        if not query:
+            return []
+        import asyncio as _asyncio
+
+        async def invidious(host: str) -> list[dict]:
+            payload = await self._json(
+                f"https://{host}/api/v1/search?q={quote(query)}&type=video&sort_by=relevance"
+            )
+            items = (payload or {}).get("items") if payload else None
+            return items if isinstance(items, list) else []
+
+        async def piped(host: str) -> list[dict]:
+            payload = await self._json(
+                f"https://{host}/search?q={quote(query)}&filter=videos"
+            )
+            items = (payload or {}).get("items") if payload else None
+            return items if isinstance(items, list) else []
+
+        plans: list[tuple[str, object]] = []
+        for host in self.invidious[:3]:
+            plans.append(("invidious", invidious(host)))
+        for host in self.piped[:2]:
+            plans.append(("piped", piped(host)))
+        if not plans:
+            return []
+
+        tasks = {_asyncio.create_task(coro): kind for kind, coro in plans}
+        found: list[dict] = []
+        try:
+            done, pending = await _asyncio.wait(
+                tasks, timeout=min(self.timeout, 6.0), return_when=_asyncio.FIRST_COMPLETED
+            )
+            for task in done:
+                if task.cancelled() or task.exception() is not None:
+                    continue
+                kind = tasks[task]
+                for item in task.result() or []:
+                    entry = parse_search_item(kind, item)
+                    if entry is not None:
+                        found.append(entry)
+                    if len(found) >= limit:
+                        break
+                if found:
+                    break
+            for task in pending:
+                task.cancel()
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+        return found[:limit]
 
     async def audio(self, video_id: str) -> DirectStream | None:
         return await self.resolve(video_id, height=0)
