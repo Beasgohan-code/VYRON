@@ -124,20 +124,18 @@ async def from_url(url: str) -> Avatar | None:
     url = safe_photo_url(url)
     if not url:
         return None
-    try:
-        import aiohttp
+    from vyron.utils import net
 
-        timeout = aiohttp.ClientTimeout(total=FETCH_TIMEOUT)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(url, allow_redirects=False) as response:
-                if response.status != 200:
-                    return None
-                if int(response.headers.get("Content-Length") or 0) > MAX_BYTES:
-                    return None
-                return _build(await response.content.read(MAX_BYTES + 1))
-    except Exception as exc:  # pragma: no cover - network
-        logger.debug("profile picture fetch failed: %s", exc)
-        return None
+    body = await net.fetch_bytes(
+        url,
+        limit=MAX_BYTES,
+        timeout=FETCH_TIMEOUT,
+        follow_redirects=False,  # a redirect is how an SSRF guard gets walked past
+    )
+    avatar = _build(body or b"")
+    if avatar is None:  # pragma: no cover - network / content sniffing
+        logger.debug("profile picture was not usable (%s)", url)
+    return avatar
 
 
 def _photo_file_id(obj) -> str:

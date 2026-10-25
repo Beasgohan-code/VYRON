@@ -54,9 +54,9 @@ def test_a_soundcloud_track_is_downloaded_even_when_youtube_is_walled(downloader
     """The wall is about YouTube, not about yt-dlp."""
     called: list[str] = []
 
-    def fake_ytdlp(track, *, video, on_progress=None):
+    def fake_ytdlp(track, *, video, on_progress=None, dest=None):
         called.append(track.id)
-        target = downloader.audio_path(track)
+        target = dest or downloader.audio_path(track)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(b"ID3" + b"0" * 64)
         return target

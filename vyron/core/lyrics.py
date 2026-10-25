@@ -68,10 +68,12 @@ class LyricsClient:
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=12), headers=_UA
-            )
-            self._owns_session = True
+            # The process-wide session: a lyric lookup is one more small JSON
+            # call, and it used to pay its own TCP+TLS handshake for it.
+            from vyron.utils import net
+
+            self._session = await net.session()
+            self._owns_session = False
         return self._session
 
     async def close(self) -> None:

@@ -173,20 +173,15 @@ async def _json(url: str, *, session: aiohttp.ClientSession | None = None) -> di
 
     if session is not None:
         return await _get(session)
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=TIMEOUT)) as client:
-        return await _get(client)
+    from vyron.utils import net
+
+    return await net.get_json(url, timeout=TIMEOUT, headers=_UA)
 
 
 async def _text(url: str) -> str | None:
-    try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=TIMEOUT)) as client:
-            async with client.get(url, headers=_UA) as response:
-                if response.status != 200:
-                    return None
-                return await response.text()
-    except Exception as exc:
-        logger.debug("%s failed: %s", url, exc)
-        return None
+    from vyron.utils import net
+
+    return await net.get_text(url, timeout=TIMEOUT, headers=_UA)
 
 
 # ── Deezer ─────────────────────────────────────────────────────────────────
@@ -207,14 +202,15 @@ def _deezer_track(payload: dict, service: str = "deezer") -> MetaTrack | None:
 
 
 async def _final_url(url: str) -> str | None:
-    """Follow redirects once — `deezer.page.link/…` hides the real path."""
-    try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=TIMEOUT)) as client:
-            async with client.get(url, headers=_UA, allow_redirects=True) as response:
-                return str(response.url)
-    except Exception as exc:
-        logger.debug("redirect %s failed: %s", url, exc)
-        return None
+    """Follow redirects once — `deezer.page.link/…` hides the real path.
+
+    `net.probe` asks for a single byte, so following the redirect of a page
+    whose body is a megabyte costs a header round-trip, not the page.
+    """
+    from vyron.utils import net
+
+    status, final = await net.probe(url, timeout=TIMEOUT, headers=_UA)
+    return final if final and status not in (0, 404, 410) else None
 
 
 async def _deezer(link: _Link) -> MetaTrack | MetaCollection | None:

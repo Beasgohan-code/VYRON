@@ -390,7 +390,9 @@ class PublicStreams:
 
         attempts = self._plan(target, height=height)
         if not attempts:
-            return None
+            # Every JSON mirror is cooling down or unconfigured. One direct
+            # media endpoint is still worth a single request.
+            return await self._latest_version(target, height=height)
         requests: list[asyncio.Task] = [
             asyncio.create_task(self._ask(kind, host, payload)) for kind, host, payload in attempts
         ]
@@ -413,6 +415,66 @@ class PublicStreams:
             for task in requests:
                 if not task.done():
                     task.cancel()
+        # The JSON APIs answered nothing usable. Invidious' own media endpoint
+        # needs no JSON at all — one URL that 302s to the audio — and it is the
+        # last thing that still works when an instance rate-limits its API but
+        # happily proxies streams.
+        return await self._latest_version(target, height=height)
+
+    async def _latest_version(self, video_id: str, *, height: int = 0) -> DirectStream | None:
+        """`/latest_version?id=…&itag=140` — a URL, not a document.
+
+        Probed with one ranged byte before it is handed to a player: a `302` to
+        a CDN is proof the instance still serves this file, while a `404` is
+        what a listener would otherwise have seen as "the stream failed".
+        """
+        from vyron.utils import net
+
+        itag, kind, ext, mime = (
+            (18, "video", "mp4", "video/mp4") if height else (140, "audio", "m4a", "audio/mp4")
+        )
+        candidates = [
+            host for host in self.invidious if HEALTH.available(f"invidious:{host}")
+        ] or list(self.invidious)
+        if not candidates:
+            return None
+
+        async def probe_host(host: str) -> str | None:
+            # A host may arrive with its scheme (a local instance, a test
+            # server); the configured ones never do.
+            base = host if _HTTPS.match(host) else f"https://{host}"
+            url = f"{base}/latest_version?id={video_id}&itag={itag}"
+            status, _final = await net.probe(url, timeout=min(4.0, self.timeout))
+            if status not in (200, 206, 302, 303):
+                HEALTH.record(f"invidious:{host}", False, error=f"latest_version HTTP {status}")
+                return None
+            HEALTH.record(f"invidious:{host}", True, ms=0)
+            return url
+
+        # Asked together and abandoned at one shared deadline: three probes
+        # one after another would have added twelve seconds to a total failure.
+        tasks = [asyncio.create_task(probe_host(host)) for host in candidates[:3]]
+        try:
+            for finished in asyncio.as_completed(tasks):
+                url = await finished
+                if url:
+                    for task in tasks:
+                        if not task.done():
+                            task.cancel()
+                    logger.info("resolved %s via latest_version (%s)", video_id, url.split("/")[2])
+                    return DirectStream(
+                        url=url,
+                        source="invidious",
+                        kind=kind,
+                        ext=ext,
+                        mime=mime,
+                        height=height,
+                    )
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
         return None
 
     # ── plan / parse / score ───────────────────────────────────────────────

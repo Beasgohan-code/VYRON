@@ -7,6 +7,47 @@ Two version numbers move independently:
 
 ## Bot
 
+### 1.10.13 — 2026-10-25
+
+**Everything faster: the download, the fallback, and the search behind them.**
+
+*Six connections instead of one.* The Python tier of the download accelerator
+was a single-connection `aiohttp` stream — fine for a cover, wrong for a song.
+It now asks the server how big the file is, splits it into ranges and pulls them
+at once over the shared keep-alive session (`accelerator.ranged_fetch`), falling
+back to one connection only when a signed URL refuses ranges. On a CDN that
+throttles per connection that is the whole difference between twenty seconds and
+three, and it needs no `aria2c` binary — which is why it is the default tier on
+Render. `aria2` still wins when it is installed.
+
+*yt-dlp was asked to fetch in the slowest possible way.* Four concurrent
+fragments for DASH audio, 8 MB HTTP chunks for progressive m4a, a 1 MB buffer —
+and, the big one, **no re-encode**: an AAC-in-m4a download is copied, not
+transcoded to a 320 kbps MP3. Encoding a four-minute song after the download had
+already finished was eight to twelve seconds of pure CPU on every single `/song`
+and every first play of a YouTube track.
+
+*A slow extraction no longer holds the fallbacks hostage.* yt-dlp keeps a six
+second head start (`HEAD_START`); if it is still working, the mirror and the
+catalogue race it and the first real file wins. A walled or throttled extraction
+used to spend its entire deadline — two clients times the socket timeout —
+before the mirror was even asked. The raced extraction writes to a private path,
+so a loser finishing late can never move its file over the winner's, and a raced
+copy keeps its real container instead of being renamed `.mp3`.
+
+*One more mirror tier that needs no JSON.* When every Invidious/Piped/Cobalt API
+is rate-limited, `/latest_version?id=…&itag=140` still answers with a media URL.
+It is probed with a single ranged byte over the first three healthy hosts at
+once — a `302` to a CDN is proof, a `404` is not — so it costs one round trip
+and is never handed to a player unproven.
+
+*The rest of the network went through the same session.* Lyrics, Deezer/Spotify/
+Apple metadata, Deezer short-link redirects and the Telegram-avatar proxy all
+opened their own `ClientSession` — one TLS handshake each, per call. They use the
+shared session now (and `net.session()` rebuilds itself if the event loop
+changed, instead of failing with "Event loop is closed"). Autoplay's second and
+third lane searches run together rather than one after the other.
+
 ### 1.10.12 — 2026-10-25
 
 **Search and download got their seconds back.** Three separate things were each

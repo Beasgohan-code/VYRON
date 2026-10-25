@@ -639,3 +639,217 @@ def test_a_download_impersonates_the_browser_the_resolver_already_does(tmp_path,
 
     monkeypatch.setattr(search_module, "impersonate_target", lambda settings: "")
     assert "impersonate" not in downloader._base_opts()
+
+
+# ── the head start: yt-dlp first, the mirrors too if it is slow ─────────────
+def _yt_track(ident: str = "ytrace1") -> Track:
+    return Track(id=ident, title="Kesariya", duration=268, uploader="Arijit Singh", source="youtube")
+
+
+def test_a_healthy_extraction_never_pays_for_a_second_download(tmp_path, monkeypatch):
+    """The ladder keeps its head start: a normal download is never duplicated."""
+    from vyron.core import downloader as module
+
+    downloader = _downloader(tmp_path)
+    started: list[int] = []
+
+    def fake_ytdlp(track, *, video, on_progress=None, dest=None):
+        path = dest or downloader.audio_path(track)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"from-yt-dlp")
+        return path
+
+    async def fake_tail(track, *, on_progress=None, errors=None):
+        started.append(1)
+        raise AssertionError("the fallbacks must not run for a fast extraction")
+
+    monkeypatch.setattr(module, "HEAD_START", 5.0)
+    monkeypatch.setattr(downloader, "_download_ytdlp", fake_ytdlp)
+    monkeypatch.setattr(downloader, "_audio_tail", fake_tail)
+
+    path = asyncio.run(downloader.fetch(_yt_track()))
+
+    assert path.read_bytes() == b"from-yt-dlp"
+    assert started == []
+
+
+def test_a_slow_extraction_is_raced_by_the_mirrors(tmp_path, monkeypatch):
+    """Twenty seconds of a failing ladder must not be the listener's problem."""
+    import time
+
+    from vyron.core import downloader as module
+
+    downloader = _downloader(tmp_path)
+
+    def slow_ytdlp(track, *, video, on_progress=None, dest=None):
+        time.sleep(1.0)  # still running when the head start expires
+        path = dest or downloader.audio_path(track)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"too-late")
+        return path
+
+    async def fast_tail(track, *, on_progress=None, errors=None):
+        await asyncio.sleep(0.05)
+        path = downloader.audio_path(track)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"from-a-mirror")
+        return path
+
+    monkeypatch.setattr(module, "HEAD_START", 0.2)
+    monkeypatch.setattr(downloader, "_download_ytdlp", slow_ytdlp)
+    monkeypatch.setattr(downloader, "_audio_tail", fast_tail)
+
+    started = time.monotonic()
+    path = asyncio.run(downloader.fetch(_yt_track()))
+    elapsed = time.monotonic() - started
+
+    assert path.read_bytes() == b"from-a-mirror"
+    assert elapsed < 2.0, f"took {elapsed:.1f}s — the slow extraction was awaited"
+
+
+def test_the_raced_extraction_cannot_overwrite_the_winner(tmp_path, monkeypatch):
+    """A losing yt-dlp thread writes to its own path, never the cache."""
+    import time
+
+    from vyron.core import downloader as module
+
+    downloader = _downloader(tmp_path)
+
+    def late_ytdlp(track, *, video, on_progress=None, dest=None):
+        assert dest is not None and dest != downloader.audio_path(track)
+        time.sleep(0.3)  # the mirror wins the race
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"loser")
+        return dest
+
+    async def winning_tail(track, *, on_progress=None, errors=None):
+        path = downloader.audio_path(track)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"winner")
+        return path
+
+    monkeypatch.setattr(module, "HEAD_START", 0.05)
+    monkeypatch.setattr(downloader, "_download_ytdlp", late_ytdlp)
+    monkeypatch.setattr(downloader, "_audio_tail", winning_tail)
+
+    path = asyncio.run(downloader.fetch(_yt_track("ytrace2")))
+
+    assert path.read_bytes() == b"winner"
+
+
+def test_when_everything_fails_both_reasons_are_kept(tmp_path, monkeypatch):
+    from vyron.core import downloader as module
+
+    downloader = _downloader(tmp_path)
+
+    def dead_ytdlp(track, *, video, on_progress=None, dest=None):
+        raise module.DownloadError("Failed to extract any player response")
+
+    async def dead_tail(track, *, on_progress=None, errors=None):
+        # The real tail joins what the ladder already reported.
+        raise module.DownloadError(" · ".join([*(errors or []), "mirror: no mirror had a downloadable URL"]))
+
+    monkeypatch.setattr(module, "HEAD_START", 0.05)
+    monkeypatch.setattr(downloader, "_download_ytdlp", dead_ytdlp)
+    monkeypatch.setattr(downloader, "_audio_tail", dead_tail)
+
+    try:
+        asyncio.run(downloader.fetch(_yt_track("ytrace3")))
+    except module.DownloadError as exc:
+        text = str(exc)
+        assert "player response" in text and "mirror" in text
+    else:  # pragma: no cover
+        raise AssertionError("a total failure must raise")
+
+
+def test_a_raced_copy_keeps_its_real_container(tmp_path, monkeypatch):
+    """AAC-in-m4a must not be renamed to .mp3 when it is adopted."""
+    from vyron.core import downloader as module
+
+    downloader = _downloader(tmp_path)
+
+    def m4a_ytdlp(track, *, video, on_progress=None, dest=None):
+        produced = (dest or downloader.audio_path(track)).with_suffix(".m4a")
+        produced.parent.mkdir(parents=True, exist_ok=True)
+        produced.write_bytes(b"aac")
+        return produced
+
+    monkeypatch.setattr(downloader, "_download_ytdlp", m4a_ytdlp)
+    monkeypatch.setattr(module, "HEAD_START", 5.0)
+
+    path = asyncio.run(downloader.fetch(_yt_track("ytrace4")))
+
+    assert path.suffix == ".m4a"
+    assert path.read_bytes() == b"aac"
+    assert downloader.cached(_yt_track("ytrace4")) == path
+
+
+# ── the last mirror tier: a URL, not a JSON document ───────────────────────
+def _invidious_server(state: dict):
+    """An instance whose JSON API is throttled but whose media endpoint works."""
+    from aiohttp import web
+
+    async def api(request):
+        return web.Response(status=429, text="slow down")
+
+    async def latest(request):
+        state["asked"] += 1
+        if state.get("broken"):
+            return web.Response(status=404, text="no")
+        raise web.HTTPFound("/media.m4a")
+
+    async def media(request):
+        return web.Response(body=b"\x00" * 64, content_type="audio/mp4")
+
+    app = web.Application()
+    app.router.add_get("/api/v1/videos/{vid}", api)
+    app.router.add_get("/latest_version", latest)
+    app.router.add_get("/media.m4a", media)
+    return app
+
+
+def test_a_media_endpoint_is_used_when_the_json_api_refuses():
+    """`/latest_version?id=…&itag=140` needs no JSON and no API quota."""
+    from aiohttp.test_utils import TestServer
+
+    state = {"asked": 0}
+
+    async def go():
+        server = TestServer(_invidious_server(state))
+        await server.start_server()
+        try:
+            host = str(server.make_url("/")).rstrip("/")  # keeps its scheme
+            streams = PublicStreams()
+            streams.invidious = (host,)
+            streams.piped = ()
+            streams.cobalt = ()
+            stream = await streams.resolve("dQw4w9WgXcQ")
+            assert stream is not None
+            assert "/latest_version" in stream.url and "itag=140" in stream.url
+            assert stream.kind == "audio" and stream.ext == "m4a"
+            assert state["asked"] == 1
+        finally:
+            await server.close()
+
+    asyncio.run(go())
+
+
+def test_a_dead_media_endpoint_is_silent():
+    from aiohttp.test_utils import TestServer
+
+    state = {"asked": 0, "broken": True}
+
+    async def go():
+        server = TestServer(_invidious_server(state))
+        await server.start_server()
+        try:
+            host = str(server.make_url("/")).rstrip("/").replace("http://", "")
+            streams = PublicStreams()
+            streams.invidious = (host,)
+            streams.piped = ()
+            streams.cobalt = ()
+            assert await streams.resolve("dQw4w9WgXcQ") is None
+        finally:
+            await server.close()
+
+    asyncio.run(go())

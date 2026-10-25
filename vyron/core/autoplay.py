@@ -397,16 +397,33 @@ async def candidates(
                 continue
             add(result)
 
-    for query in queries[1:3]:
-        if len(pool) >= POOL_ENOUGH:
-            break
-        if asyncio.get_event_loop().time() - started > budget_seconds:
-            logger.debug("autoplay pool timed out after %d candidate(s)", len(pool))
-            break
+    extra = queries[1:3]
+    left = budget_seconds - (asyncio.get_event_loop().time() - started)
+    if extra and len(pool) < POOL_ENOUGH and left > 0:
+        # Both fallback queries at once. One after the other, a lane that
+        # answers slowly cost its timeout *and* the next lane's, and the
+        # listener was waiting for a suggestion that had already arrived.
+        tasks = [
+            asyncio.create_task(youtube.search(query, limit=SEARCH_LIMIT), name="autoplay:search")
+            for query in extra
+        ]
         try:
-            add(await youtube.search(query, limit=SEARCH_LIMIT))
-        except Exception as exc:  # pragma: no cover - network paths
-            logger.debug("autoplay search failed for %r: %s", query, exc)
+            done, pending = await asyncio.wait(tasks, timeout=left)
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+            for task in done:
+                error = task.exception()
+                if error is not None:  # pragma: no cover - network paths
+                    logger.debug("autoplay search failed: %s", error)
+                    continue
+                add(task.result())
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+        if not pool:
+            logger.debug("autoplay pool is empty after %d lane(s)", len(extra))
     return pool
 
 

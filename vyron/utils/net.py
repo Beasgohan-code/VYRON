@@ -31,6 +31,10 @@ CONNECT_TIMEOUT = 3.5
 
 _SESSION: aiohttp.ClientSession | None = None
 _LOCK: asyncio.Lock | None = None
+#: The loop the session was built on. A `ClientSession` is bound to its loop, so
+#: one kept across `asyncio.run`-style restarts (tests, an in-process supervisor)
+#: answers with "Event loop is closed" instead of a socket.
+_LOOP: asyncio.AbstractEventLoop | None = None
 
 
 def _lock() -> asyncio.Lock:
@@ -42,11 +46,18 @@ def _lock() -> asyncio.Lock:
 
 
 async def session() -> aiohttp.ClientSession:
-    """The process-wide session, created on first use."""
-    global _SESSION
-    if _SESSION is not None and not _SESSION.closed:
+    """The process-wide session, created on first use (and per event loop)."""
+    global _SESSION, _LOOP
+    loop = asyncio.get_running_loop()
+    if _SESSION is not None and not _SESSION.closed and _LOOP is loop:
         return _SESSION
     async with _lock():
+        if _SESSION is not None and not _SESSION.closed and _LOOP is not loop:
+            try:  # pragma: no cover - only on a loop restart
+                await _SESSION.close()
+            except Exception:
+                pass
+            _SESSION = None
         if _SESSION is None or _SESSION.closed:
             _SESSION = aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(
@@ -59,13 +70,15 @@ async def session() -> aiohttp.ClientSession:
                 ),
                 headers={"User-Agent": _UA},
             )
+            _LOOP = loop
     return _SESSION
 
 
 async def close() -> None:
     """Close the shared session (shutdown, and between tests)."""
-    global _SESSION
+    global _SESSION, _LOOP
     current, _SESSION = _SESSION, None
+    _LOOP = None
     if current is not None and not current.closed:
         try:
             await current.close()
@@ -129,13 +142,23 @@ async def post_json(
         return None
 
 
-async def fetch_bytes(url: str | None, *, limit: int = _MAX_THUMB) -> bytes | None:
-    """Fetch a small remote asset (used for audio covers). Never raises."""
+async def fetch_bytes(
+    url: str | None,
+    *,
+    limit: int = _MAX_THUMB,
+    timeout: float | None = None,
+    follow_redirects: bool = True,
+) -> bytes | None:
+    """Fetch a small remote asset (covers, avatars). Never raises."""
     if not url:
         return None
     try:
         client = await session()
-        async with client.get(url, timeout=_timeout(DEFAULT_TIMEOUT)) as response:
+        async with client.get(
+            url,
+            timeout=_timeout(timeout),
+            allow_redirects=follow_redirects,
+        ) as response:
             if response.status != 200:
                 return None
             data = await response.content.read(limit + 1)
@@ -144,6 +167,35 @@ async def fetch_bytes(url: str | None, *, limit: int = _MAX_THUMB) -> bytes | No
         raise
     except Exception as exc:
         logger.debug("thumb fetch failed: %s", exc)
+        return None
+
+
+async def get_text(
+    url: str | None,
+    *,
+    timeout: float | None = None,
+    headers: dict | None = None,
+    follow_redirects: bool = True,
+) -> str | None:
+    """GET a page's text. Never raises; a non-200 is ``None``."""
+    if not url:
+        return None
+    try:
+        client = await session()
+        async with client.get(
+            url,
+            headers=headers,
+            timeout=_timeout(timeout),
+            allow_redirects=follow_redirects,
+        ) as response:
+            if response.status != 200:
+                logger.debug("%s → HTTP %s", url, response.status)
+                return None
+            return await response.text(errors="replace")
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.debug("%s failed: %s", url, exc)
         return None
 
 
@@ -167,4 +219,41 @@ def as_file(data: bytes | None, name: str = "cover.jpg"):
     return data
 
 
-__all__ = ["as_file", "close", "fetch_bytes", "get_json", "post_json", "session"]
+async def probe(
+    url: str | None,
+    *,
+    timeout: float | None = None,
+    headers: dict | None = None,
+) -> tuple[int, str]:
+    """``(status, final_url)`` for a URL, having fetched at most one byte.
+
+    Used to *test* a mirror's media endpoint before handing the URL to a
+    player: a `302` to a real CDN is proof the instance still serves audio,
+    while a `404`/"Video unavailable" page is what a listener would have seen.
+    The request is a one-byte ranged GET, so a 40 MB file costs a header.
+    """
+    if not url:
+        return 0, ""
+    merged = dict(headers or {})
+    merged.setdefault("Range", "bytes=0-0")
+    try:
+        client = await session()
+        async with client.get(url, headers=merged, timeout=_timeout(timeout)) as response:
+            return response.status, str(response.url)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.debug("probe %s failed: %s", url, exc)
+        return 0, ""
+
+
+__all__ = [
+    "as_file",
+    "close",
+    "fetch_bytes",
+    "get_json",
+    "get_text",
+    "post_json",
+    "probe",
+    "session",
+]

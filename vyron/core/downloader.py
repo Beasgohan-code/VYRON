@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import re
 import shutil
@@ -48,6 +49,11 @@ ProgressHook = Callable[[float, str], None]
 #: MP3 bitrate for anything this module has to transcode. 320 is the ceiling
 #: listeners can hear on a phone, and the catalogues already serve that.
 MP3_KBPS = "320"
+#: How long yt-dlp may work alone before the mirrors are asked too. A healthy
+#: extraction finishes in two to four seconds; a walled or throttled one spends
+#: twenty seconds failing and *then* asks the fallbacks, which is the twenty
+#: seconds this race exists to remove.
+HEAD_START = 6.0
 #: AAC bitrate inside the generated MP4 — the video's sound, not its picture.
 VIDEO_AUDIO_KBPS = "256"
 
@@ -256,6 +262,14 @@ class Downloader:
             "retries": 3,
             "fragment_retries": 4,
             "socket_timeout": 20,
+            # YouTube serves DASH audio in fragments; four at a time is the
+            # difference between "the song starts" and "the song starts after
+            # the whole file has been walked through one socket". Progressive
+            # (m4a) downloads get a big HTTP chunk so the same request is not
+            # re-handshaked every megabyte.
+            "concurrent_fragment_downloads": 4,
+            "http_chunk_size": 8 * 1024 * 1024,
+            "buffersize": 1024 * 1024,
             "max_filesize": self.settings.max_download_mb * 1024 * 1024,
             "nopart": False,
             "overwrites": True,
@@ -388,11 +402,12 @@ class Downloader:
         *,
         video: bool,
         on_progress: ProgressHook | None = None,
+        dest: Path | None = None,
     ) -> Path:
         height = {"360p": 360, "480p": 480, "720p": 720, "1080p": 1080}.get(
             self.settings.video_quality, 720
         )
-        final = self.video_path(track) if video else self.audio_path(track)
+        final = dest or (self.video_path(track) if video else self.audio_path(track))
         work = self.settings.downloads_dir / f".work-{track.id}"
         work.mkdir(parents=True, exist_ok=True)
         last_error: Exception | None = None
@@ -426,13 +441,24 @@ class Downloader:
             else:
                 opts.update(
                     {
-                        "format": "bestaudio[ext=m4a]/bestaudio[acodec!=none]/best",
+                        # AAC-in-m4a first: every player we serve (ntgcalls,
+                        # Telegram, the Mini App's <audio>) takes it, and it is
+                        # the format YouTube can hand over without a re-encode.
+                        "format": (
+                            "bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio/best"
+                        ),
                         "postprocessors": (
                             [
                                 {
+                                    # `best` keeps the source codec: an m4a is
+                                    # remuxed, not re-encoded. Transcoding a
+                                    # four-minute song to 320k MP3 was eight to
+                                    # twelve seconds of pure CPU *after* the
+                                    # download had already finished — the single
+                                    # biggest remaining delay in /song and in the
+                                    # first play of any YouTube track.
                                     "key": "FFmpegExtractAudio",
-                                    "preferredcodec": "mp3",
-                                    "preferredquality": MP3_KBPS,
+                                    "preferredcodec": "best",
                                 },
                                 {"key": "FFmpegMetadata", "add_metadata": True},
                             ]
@@ -720,16 +746,104 @@ class Downloader:
                     track.id,
                 )
             else:
-                try:
-                    return await asyncio.to_thread(
-                        self._download_ytdlp, track, video=video, on_progress=on_progress
-                    )
-                except Exception as exc:
-                    errors.append(f"yt-dlp: {exc}")
-                    logger.warning("yt-dlp download failed for %s: %s", track.id, exc)
+                early = await self._ladder_with_head_start(
+                    track, video=video, on_progress=on_progress, errors=errors
+                )
+                if early is not None:
+                    return early
             if video:
                 return await self._video_tail(track, on_progress=on_progress, errors=errors)
             return await self._audio_tail(track, on_progress=on_progress, errors=errors)
+
+    @staticmethod
+    def _adopt(produced: Path, final: Path) -> Path:
+        """Move a raced file into the cache under the name its bytes deserve.
+
+        A copy-instead-of-transcode extraction hands back `.m4a`, not `.mp3`;
+        renaming AAC bytes to `.mp3` is how a file that plays fine becomes one
+        that strict players refuse, and how Telegram labels the wrong codec.
+        """
+        target = (
+            final
+            if produced.suffix.lower() == final.suffix.lower()
+            else final.with_suffix(produced.suffix)
+        )
+        return _atomic_move(produced, target)
+
+    async def _ladder_with_head_start(
+        self,
+        track: Track,
+        *,
+        video: bool,
+        on_progress: ProgressHook | None,
+        errors: list[str],
+    ) -> Path | None:
+        """yt-dlp first, and the fallbacks too if it is not done in time.
+
+        Sequential was the wrong shape: a refused or throttled extraction spends
+        its whole deadline (two clients × the socket timeout) before the mirror
+        or the catalogue is even asked, and the listener waits for all of it.
+        The ladder still gets a head start — a healthy extraction finishes in it
+        and never pays for a second download — and only a slow one is raced.
+
+        The raced extraction writes to a private path, so whichever side loses
+        can never move its file over the winner's.
+        """
+        final = self.video_path(track) if video else self.audio_path(track)
+        private = final.with_name(f".race-{final.name}")
+        with contextlib.suppress(OSError):
+            private.unlink(missing_ok=True)  # a leftover from an earlier race
+        ladder = asyncio.create_task(
+            asyncio.to_thread(
+                self._download_ytdlp,
+                track,
+                video=video,
+                on_progress=on_progress,
+                dest=private,
+            ),
+            name=f"download:ytdlp:{track.id}",
+        )
+        try:
+            done, _ = await asyncio.wait({ladder}, timeout=HEAD_START)
+            if done:
+                try:
+                    return self._adopt(ladder.result(), final)
+                except Exception as exc:
+                    errors.append(f"yt-dlp: {exc}")
+                    logger.warning("yt-dlp download failed for %s: %s", track.id, exc)
+                    return None
+            logger.info("yt-dlp is still working on %s — asking the mirrors too", track.id)
+            tail_errors: list[str] = []
+            tail = asyncio.create_task(
+                self._video_tail(track, on_progress=on_progress, errors=tail_errors)
+                if video
+                else self._audio_tail(track, on_progress=on_progress, errors=tail_errors),
+                name=f"download:tail:{track.id}",
+            )
+            try:
+                finished, _ = await asyncio.wait(
+                    {ladder, tail}, return_when=asyncio.FIRST_COMPLETED
+                )
+                if tail in finished and tail.exception() is None:
+                    # A real file from a mirror or a catalogue: the extraction
+                    # that was still running is no longer worth waiting for.
+                    return tail.result()
+                try:
+                    # The extraction finished first: adopt its private file.
+                    return self._adopt(ladder.result(), final)
+                except Exception as exc:
+                    errors.append(f"yt-dlp: {exc}")
+                    errors.extend(tail_errors)
+                    return None
+            finally:
+                for task in (ladder, tail):
+                    if not task.done():
+                        task.cancel()
+        finally:
+            # A thread cannot be cancelled, so a losing extraction may still be
+            # writing. It only ever writes to `private`; the next call for this
+            # track sweeps it before starting another.
+            pass
 
     async def _catalogue_copy(
         self, track: Track, *, on_progress: ProgressHook | None = None
