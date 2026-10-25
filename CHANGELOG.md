@@ -34,6 +34,10 @@ Sized for the phone it actually runs in, and two failures from the log.
 * **The log line names the failure.** `GET /api/state crashed: TypeError: …`,
   because Render's stream shows messages only and a bare "crashed" forced a trip
   to `/api/logs` before anyone knew what had happened.
+* **A clean install builds again.** The three font packages were in
+  `package-lock.json` but not in `package.json`, so `npm ci` (CI, and the
+  Docker image) installed nothing to import and every build failed. Declared
+  properly now.
 * **The journal stops restoring its own summaries.** "restored 21 warning(s)"
   was mirrored, restored by the next boot, mirrored again — the tail grew a row
   per restart and the count climbed 3 → 10 → 29 across deploys. Summaries are
