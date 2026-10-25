@@ -496,6 +496,8 @@ def test_resume_always_on_only_wakes_247_chats():
     assert player.queues.get(20).playing is False
 
 def test_autoplay_prefers_the_mood_lane_over_related_videos():
+    """Related videos are a *source*, not the winner: a Malayalam room must not
+    get whatever YouTube's graph likes."""
     player, calls, youtube, storage = make_player()
     state = player.queues.get(10)
     state.current = Track(id="seed0000001", title="Kessoku Band - Guitar, Loneliness (Official Video)", duration=200, uploader="Anime")
@@ -503,12 +505,29 @@ def test_autoplay_prefers_the_mood_lane_over_related_videos():
     state.language = "malayalam"
     state.autoplay = True
     youtube.search_results = [Track(id="fresh000001", title="Lofi Malayalam Chill Mix", duration=180, uploader="x")]
+    youtube.suggestions = [Track(id="rel00000001", title="Gaming Montage", duration=600, uploader="x")]
 
     picked = run(player._autoplay_track(10, state))
 
     assert picked is not None and picked.id == "fresh000001"
     assert youtube.searches and "malayalam" in youtube.searches[0].lower()
-    assert youtube.related_calls == 0  # the lane answered, no fallback needed
+
+
+def test_the_lane_pick_is_what_gets_prefetched():
+    """Prefetching a raw related video made it jump the queue at track end."""
+    player, calls, youtube, storage = make_player()
+    state = player.queues.get(10)
+    state.current = track("seed")
+    state.playing = True
+    state.mood = "chill"
+    state.language = "malayalam"
+    state.autoplay = True
+    youtube.search_results = [Track(id="fresh000001", title="Lofi Malayalam Chill Mix", duration=180, uploader="x")]
+    youtube.suggestions = [Track(id="rel00000001", title="Gaming Montage", duration=600, uploader="x")]
+
+    run(player._prefetch_worker(10))
+
+    assert state.prefetched is not None and state.prefetched.id == "fresh000001"
 
 
 def test_autoplay_falls_back_to_related_videos_when_the_lane_is_empty():

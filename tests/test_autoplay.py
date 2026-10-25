@@ -153,3 +153,85 @@ def test_the_only_artist_left_is_still_played():
 
     only = Track(id="a", title="song a", duration=200, uploader="Arijit Singh")
     assert pick([only], streak_artists=["Arijit Singh"]) is only
+
+
+# ── the pool: related + lane, never one of them ─────────────────────────────
+class _Sources:
+    """A resolver with both a related graph and a search."""
+
+    def __init__(self, related, results):
+        self._related = related
+        self._results = results
+        self.queries: list[str] = []
+        self.related_calls = 0
+
+    async def related(self, track, limit=3):
+        self.related_calls += 1
+        return list(self._related)
+
+    async def search(self, query, limit=5, requester=(0, "")):
+        self.queries.append(query)
+        return list(self._results)
+
+
+def test_lane_match_scores_mood_and_language():
+    chill = Track(id="a", title="Lofi Chill Malayalam Mix", duration=200, uploader="x")
+    plain = Track(id="b", title="Some Song", duration=200, uploader="x")
+    tamil = Track(id="c", title="Tamil Hit Song", duration=200, uploader="x")
+
+    assert auto.lane_match(chill, mood="chill", language="malayalam") == 2
+    assert auto.lane_match(chill, mood="party", language="malayalam") == 1
+    assert auto.lane_match(tamil, language="hindi") == 0  # another Indian language
+    assert auto.lane_match(plain, mood="chill") == 0
+
+
+def test_prefer_lane_keeps_every_candidate():
+    """A hard filter empties the pool and autoplay stops; a partition cannot."""
+    pool = [
+        Track(id="b", title="Some Song", duration=200, uploader="x"),
+        Track(id="a", title="Lofi Malayalam Chill", duration=200, uploader="x"),
+    ]
+
+    ordered = auto.prefer_lane(pool, mood="chill", language="malayalam")
+
+    assert [item.id for item in ordered] == ["a", "b"]
+    assert len(ordered) == len(pool)
+    assert auto.prefer_lane(pool) == pool  # no lane asked: untouched
+
+
+def test_the_pool_merges_related_and_search_without_duplicates():
+    youtube = _Sources(
+        related=[Track(id="rel00000001", title="Neighbour", duration=200, uploader="x")],
+        results=[
+            Track(id="rel00000001", title="Neighbour", duration=200, uploader="x"),
+            Track(id="srch0000001", title="Found Song", duration=200, uploader="y"),
+        ],
+    )
+    seed = Track(id="seed0000001", title="Kesariya", duration=240, uploader="Arijit")
+
+    pool = asyncio.run(auto.candidates(youtube, seed, language="hindi"))
+
+    assert [item.id for item in pool] == ["rel00000001", "srch0000001"]
+    assert youtube.related_calls == 1
+    assert youtube.queries and youtube.queries[0].startswith("Kesariya hindi")
+
+
+def test_a_lane_candidate_beats_a_related_one_in_the_pool():
+    youtube = _Sources(
+        related=[Track(id="rel00000001", title="Gaming Montage", duration=600, uploader="x")],
+        results=[Track(id="srch0000001", title="Lofi Malayalam Chill", duration=200, uploader="y")],
+    )
+    seed = Track(id="seed0000001", title="Kesariya", duration=240, uploader="Arijit")
+
+    chosen = asyncio.run(
+        auto.next_track(youtube, seed, mood="chill", language="malayalam")
+    )
+
+    assert chosen is not None and chosen.id == "srch0000001"
+
+
+def test_the_pool_survives_a_resolver_with_no_related_graph():
+    youtube = _YouTube([Track(id="srch0000001", title="Found", duration=200, uploader="y")])
+    seed = Track(id="seed0000001", title="Song", duration=200, uploader="x")
+
+    assert [item.id for item in asyncio.run(auto.candidates(youtube, seed))] == ["srch0000001"]

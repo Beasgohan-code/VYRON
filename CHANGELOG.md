@@ -7,6 +7,31 @@ Two version numbers move independently:
 
 ## Bot
 
+### 1.10.9 — 2026-10-25
+
+**Autoplay stopped drifting out of the lane, and stopped being slow.** Two
+separate bugs, one cause: the pool it chose from was too narrow and the order
+it chose in was not the order it had just computed.
+
+* **related videos are a source now, not the winner.** A prefetched *related*
+  track used to sit in front of the queue and start at the end of a song, so a
+  Malayalam room got whatever YouTube's graph liked — the exact drift
+  `autoplay.py` exists to prevent. The pool is now related **plus** the lane's
+  searches, merged and de-duplicated, and the pick happens once over all of it.
+  The prefetch warms that lane pick instead of a raw related one.
+* **the lane rank survives the shuffle.** Picking used to shuffle the top three
+  candidates, which could put a non-matching track ahead of a perfect match.
+  Ties are still shuffled — that is what keeps a queue from walking the same
+  chain — but only *inside* a rank, never across one.
+* **mood and language are matched on the candidate itself**, from its title and
+  channel, as a preference rather than a filter. A hard filter looks tidier and
+  is worse in practice: on a query that returns nothing in the lane it empties
+  the pool, and an empty pool is an autoplay that stops.
+
+The first two lookups (related + the lane's first query) run together and
+further queries are only spent while the pool is thin, so the common case is
+still one round trip.
+
 ### 1.10.8 — 2026-10-25
 
 **A filter you switch on is a filter you hear.** ntgcalls takes the `-af` chain

@@ -19,6 +19,7 @@
 # without a network or a client.
 from __future__ import annotations
 
+import asyncio
 import logging
 import random
 import re
@@ -55,6 +56,43 @@ LANGUAGES: dict[str, str] = {
     "bengali": "bengali songs",
     "urdu": "urdu songs",
 }
+
+#: Words that keep a pick inside the chat's chosen mood. They are a
+#: *preference*, never a filter: an empty lane is how autoplay dies, so a
+#: non-matching track is always still a candidate — just later in the pool.
+MOOD_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "chill": ("chill", "relax", "lofi", "lo-fi", "acoustic", "unplugged", "soft", "ambient"),
+    "focus": ("instrumental", "study", "focus", "piano", "concentration", "lofi"),
+    "party": ("party", "club", "dance", "dj", "remix", "bass", "nacho", "bhangra"),
+    "romantic": ("love", "pyaar", "ishq", "mohabbat", "romantic", "dil", "sanam", "heart"),
+    "workout": ("workout", "gym", "motivation", "energy", "power", "fitness", "beast"),
+    "sad": ("sad", "dard", "judaa", "tanha", "alone", "broken", "tears", "heartbreak"),
+    "sleep": ("sleep", "ambient", "calm", "rain", "lullaby", "insomnia"),
+    "drive": ("drive", "night", "highway", "road", "travel", "ride"),
+}
+
+#: Language words as they actually appear in uploads. Every entry is optional
+#: in a title — most Hindi uploads never say "Hindi", which is why that lane is
+#: handled by *excluding* the other Indian languages instead.
+LANGUAGE_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "english": ("english", "pop", "rock", "hip hop", "indie"),
+    "hindi": ("hindi", "bollywood", "filmi"),
+    "malayalam": ("malayalam", "mollywood"),
+    "tamil": ("tamil", "kollywood"),
+    "telugu": ("telugu", "tollywood"),
+    "kannada": ("kannada", "sandalwood"),
+    "punjabi": ("punjabi", "jatt", "bhangra", "munde", "kudi"),
+    "bengali": ("bengali", "bangla"),
+    "urdu": ("urdu", "pakistani", "ghazal"),
+}
+OTHER_INDIAN = (
+    "punjabi", "tamil", "telugu", "kannada", "malayalam",
+    "bengali", "marathi", "gujarati", "bhojpuri", "haryanvi",
+)
+
+#: Stop widening the pool once there is real choice — every extra query is a
+#: network round trip in the gap before the next song.
+POOL_ENOUGH = 8
 
 # noise that survives in YouTube titles and ruins a search query
 _NOISE = re.compile(
@@ -123,6 +161,46 @@ def usable(title: str, duration: int) -> bool:
     return not _BAD_WORDS.search(title or "")
 
 
+def lane_match(track: Track, *, mood: str = "", language: str = "") -> int:
+    """How well *track* fits the lane: 0, 1 (mood or language), or 2.
+
+    Reads the title and the channel, because that is where uploads put it —
+    "Kesariya (Hindi)" in the title, "T-Series" in the channel.
+    """
+    text = f"{getattr(track, 'title', '') or ''} {getattr(track, 'uploader', '') or ''}".lower()
+    score = 0
+    if mood:
+        words = MOOD_KEYWORDS.get(mood, ())
+        if words and any(word in text for word in words):
+            score += 1
+    if language:
+        if language == "hindi":
+            if not any(word in text for word in OTHER_INDIAN):
+                score += 1
+        else:
+            words = LANGUAGE_KEYWORDS.get(language, ())
+            if words and any(word in text for word in words):
+                score += 1
+    return score
+
+
+def prefer_lane(
+    tracks: Iterable[Track], *, mood: str = "", language: str = ""
+) -> list[Track]:
+    """Stable partition: lane matches first, everything else right behind.
+
+    A hard filter looks tidier and is worse in practice — on a query that
+    returns nothing in the lane it empties the pool and autoplay stops, which
+    is the one thing it must never do.
+    """
+    items = list(tracks)
+    if not mood and not language:
+        return items
+    matches = [item for item in items if lane_match(item, mood=mood, language=language)]
+    rest = [item for item in items if item not in matches]
+    return matches + rest
+
+
 def build_queries(seed_title: str, *, mood: str = "", language: str = "", artist: str = "") -> list[str]:
     """Short, specific searches — best first.
 
@@ -179,6 +257,31 @@ def _soft_shuffle(items: list[Track], group: int = 3) -> list[Track]:
     return out
 
 
+def _grouped_shuffle(
+    items: list[Track], keys: dict[int, int], limit: int = 9
+) -> list[Track]:
+    """Best-ranked first; variety inside a rank, never across one.
+
+    This is the difference between "a lane" and "a lottery": two candidates
+    that fit the mood and language equally well are interchangeable, but a
+    candidate from a *different* lane is not a fair swap for one from this
+    one. Blindly shuffling the top three (what this used to do) put a gaming
+    montage ahead of the Malayalam track it had just found.
+    """
+    ordered = sorted(items, key=lambda item: -keys.get(id(item), 0))
+    out: list[Track] = []
+    index = 0
+    while index < len(ordered):
+        rank = keys.get(id(ordered[index]), 0)
+        block: list[Track] = []
+        while index < len(ordered) and keys.get(id(ordered[index]), 0) == rank:
+            block.append(ordered[index])
+            index += 1
+        random.shuffle(block)
+        out.extend(block)
+    return out[:limit]
+
+
 def pick(
     candidates: Iterable[Track],
     *,
@@ -187,10 +290,22 @@ def pick(
     seed_artist: str = "",
     group: int = 3,
     streak_artists: Iterable[str] = (),
+    keys: Iterable[int] | None = None,
 ) -> Track | None:
-    """The first candidate that is not the same song as anything played."""
+    """The first candidate that is not the same song as anything played.
+
+    ``keys`` (one per candidate, higher = better) switches the shuffle from
+    "blocks of three" to "within a rank": the caller uses it for the mood and
+    language lane.
+    """
     known = list(played)
     seed = normalise(seed_title) if seed_title else ""
+    items = list(candidates)
+    rank: dict[int, int] | None = None
+    if keys is not None:
+        pairs = list(zip(items, keys, strict=False))
+        if len(pairs) == len(items):
+            rank = {id(item): int(value) for item, value in pairs}
 
     def fresh(candidate: Track) -> bool:
         if not candidate.id:
@@ -206,7 +321,7 @@ def pick(
                 return False
         return True
 
-    pool = [c for c in candidates if fresh(c)]
+    pool = [c for c in items if fresh(c)]
     if not pool:
         return None
     # Rotate the artist: five songs by the same person in a row is the other
@@ -227,8 +342,72 @@ def pick(
         ]
         if len(fresh_artists) >= 2:
             pool = fresh_artists
+    if rank is not None:
+        ranked = _grouped_shuffle(pool, rank)
+        return ranked[0] if ranked else pool[0]
     shuffled = _soft_shuffle(pool[:9], group=group)
     return shuffled[0] if shuffled else pool[0]
+
+
+async def candidates(
+    youtube,
+    seed: Track,
+    *,
+    mood: str = "",
+    language: str = "",
+    limit: int = 15,
+    budget_seconds: float = 30.0,
+) -> list[Track]:
+    """Everywhere a next song can come from — one pool, best sources first.
+
+    YouTube's *related* graph is what makes a queue feel hand-picked ("more
+    like this"), and search is what keeps it in the lane ("more Malayalam
+    like this"). Using only one of them is the bug: related alone drifts out of
+    the lane, search alone walks the same chain of near-duplicates. The first
+    two lookups run together; further queries are only spent while the pool is
+    still thin, so the common case is one round trip, not five.
+    """
+    if youtube is None or seed is None:
+        return []
+
+    pool: list[Track] = []
+    seen: set[str] = set()
+
+    def add(items) -> None:
+        for item in items or ():
+            key = str(getattr(item, "id", "") or "")
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            pool.append(item)
+
+    queries = build_queries(seed.title, mood=mood, language=language, artist=seed.uploader or "")
+    related = getattr(youtube, "related", None)
+    started = asyncio.get_event_loop().time()
+
+    first = []
+    if callable(related):
+        first.append(related(seed, limit=limit))
+    if queries:
+        first.append(youtube.search(queries[0], limit=SEARCH_LIMIT))
+    if first:
+        for result in await asyncio.gather(*first, return_exceptions=True):
+            if isinstance(result, BaseException):
+                logger.debug("autoplay source failed: %s", result)
+                continue
+            add(result)
+
+    for query in queries[1:3]:
+        if len(pool) >= POOL_ENOUGH:
+            break
+        if asyncio.get_event_loop().time() - started > budget_seconds:
+            logger.debug("autoplay pool timed out after %d candidate(s)", len(pool))
+            break
+        try:
+            add(await youtube.search(query, limit=SEARCH_LIMIT))
+        except Exception as exc:  # pragma: no cover - network paths
+            logger.debug("autoplay search failed for %r: %s", query, exc)
+    return pool
 
 
 async def next_track(
@@ -240,29 +419,26 @@ async def next_track(
     played: Iterable[Track] = (),
     streak_artists: Iterable[str] = (),
 ) -> Track | None:
-    """Search the mood/language lane and return one track, or ``None``."""
+    """One next track from the lane's whole candidate pool, or ``None``."""
     if youtube is None or seed is None:
         return None
-    seen = list(played)
-    queries = build_queries(seed.title, mood=mood, language=language, artist=seed.uploader or "")
-    for query in queries[:3]:
-        try:
-            results = await youtube.search(query, limit=SEARCH_LIMIT)
-        except Exception as exc:  # pragma: no cover - network paths
-            logger.debug("autoplay search failed for %r: %s", query, exc)
-            continue
-        chosen = pick(
-            results,
-            played=seen,
-            seed_title=seed.title,
-            seed_artist=seed.uploader or "",
-            streak_artists=streak_artists,
-        )
-        if chosen is not None:
-            chosen.requested_name = "autoplay"
-            logger.info("autoplay picked %r for %r", chosen.title, seed.title)
-            return chosen
-    return None
+    pool = await candidates(youtube, seed, mood=mood, language=language)
+    if not pool:
+        return None
+    ordered = prefer_lane(pool, mood=mood, language=language)
+    chosen = pick(
+        ordered,
+        played=list(played),
+        seed_title=seed.title,
+        seed_artist=seed.uploader or "",
+        streak_artists=streak_artists,
+        keys=[lane_match(item, mood=mood, language=language) for item in ordered],
+    )
+    if chosen is None:
+        return None
+    chosen.requested_name = "autoplay"
+    logger.info("autoplay picked %r for %r", chosen.title, seed.title)
+    return chosen
 
 
 def describe(mood: str, language: str) -> str:
@@ -277,13 +453,18 @@ def describe(mood: str, language: str) -> str:
 
 __all__ = [
     "LANGUAGES",
+    "LANGUAGE_KEYWORDS",
     "MOODS",
+    "MOOD_KEYWORDS",
     "build_queries",
+    "candidates",
     "clean_title",
     "describe",
+    "lane_match",
     "next_track",
     "normalise",
     "pick",
+    "prefer_lane",
     "same_song",
     "usable",
 ]

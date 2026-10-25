@@ -1097,11 +1097,27 @@ class Player:
                 return
             if not state.autoplay or not state.current:
                 return
-            for candidate in await self.youtube.related(state.current, limit=3):
-                if candidate not in state.history and candidate != state.current:
-                    state.prefetched = candidate
-                    await self.youtube.stream_info(candidate, video=candidate.is_video)
-                    return
+            # Warm the *lane* pick, not a raw related video. Prefetching a
+            # related track made it jump the queue: a Malayalam room got
+            # whatever YouTube's graph liked, which is the drift autoplay.py
+            # exists to stop. `next_track` merges related with the lane's
+            # searches, so this is both better ordered and still one round trip.
+            from vyron.core import autoplay as auto
+
+            candidate = await auto.next_track(
+                self.youtube,
+                state.current,
+                mood=state.mood,
+                language=state.language,
+                played=state.history,
+                streak_artists=[
+                    getattr(item, "uploader", "") or "" for item in state.history[-2:]
+                ],
+            )
+            if candidate is None:
+                return
+            state.prefetched = candidate
+            await self.youtube.stream_info(candidate, video=candidate.is_video)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # prefetch is an optimisation, never a failure
