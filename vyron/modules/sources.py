@@ -129,9 +129,12 @@ def _env_rows() -> list[tuple[str, str]]:
     from vyron.core.public_streams import COBALT_HOSTS, INVIDIOUS_HOSTS, PIPED_HOSTS
 
     cobalt = settings.cobalt_urls or ("off" if settings.disable_cobalt else f"{len(COBALT_HOSTS)} public")
+    from vyron.core import accelerator
+
     return [
         (f"{E('shield')} impersonation", f"<b>{impersonate}</b>"),
         (f"{E('download')} fallback tier", "on" if settings.stream_fallback else "off"),
+        (f"{E('bolt')} download tier", f"<b>{accelerator.describe()}</b>"),
         (f"{E('cloud')} hosts", f"{len(INVIDIOUS_HOSTS)} invidious · {len(PIPED_HOSTS)} piped · {cobalt} cobalt"),
         (f"{E('key')} cookies", "set" if (settings.cookies_file or settings.cookies_text) else "not set (fine)"),
     ]

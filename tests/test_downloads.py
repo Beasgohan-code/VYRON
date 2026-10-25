@@ -537,7 +537,12 @@ def test_a_direct_m4a_is_not_labelled_mp3(tmp_path, monkeypatch):
     assert not list(dl.settings.downloads_dir.glob(".stream-*"))
 
 
-def test_a_direct_m4a_is_transcoded_to_320k_mp3_when_ffmpeg_can(tmp_path, monkeypatch):
+def test_a_direct_m4a_is_kept_instead_of_re_encoded(tmp_path, monkeypatch):
+    """AAC in m4a is already what every player we serve accepts.
+
+    Transcoding it to 320k MP3 was ten seconds of CPU per download and a worse
+    file; the download is moved into the cache as it is.
+    """
     from vyron.core import accelerator, downloader as module
 
     dl = _downloader(tmp_path)
@@ -545,6 +550,32 @@ def test_a_direct_m4a_is_transcoded_to_320k_mp3_when_ffmpeg_can(tmp_path, monkey
 
     async def fake_fetch(url, target, **kwargs):
         target.write_bytes(b"\x00\x00\x00\x20ftypM4A " + b"0" * 64)
+
+    def boom(*args, **kwargs):  # pragma: no cover - ffmpeg must not run
+        raise AssertionError("an m4a must not be re-encoded")
+
+    monkeypatch.setattr(accelerator, "fetch", fake_fetch)
+    monkeypatch.setattr(module.subprocess, "run", boom)
+    track = Track(
+        id="saavn2", title="Kesariya", duration=268, source="jiosaavn",
+        url="https://cdn.example/kesariya.m4a",
+    )
+
+    path = asyncio.run(dl._download_stream(track))
+
+    assert path.suffix == ".m4a" and path.stat().st_size > 0
+    assert dl.cached(track) == path
+
+
+def test_a_direct_webm_is_transcoded_to_mp3_when_ffmpeg_can(tmp_path, monkeypatch):
+    """Telegram's audio player is picky: opus-in-webm is still converted."""
+    from vyron.core import accelerator, downloader as module
+
+    dl = _downloader(tmp_path)
+    monkeypatch.setattr(module, "ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+
+    async def fake_fetch(url, target, **kwargs):
+        target.write_bytes(b"\x1a\x45\xdf\xa3" + b"0" * 64)
 
     built: list[list[str]] = []
 
@@ -563,8 +594,8 @@ def test_a_direct_m4a_is_transcoded_to_320k_mp3_when_ffmpeg_can(tmp_path, monkey
     monkeypatch.setattr(accelerator, "fetch", fake_fetch)
     monkeypatch.setattr(module.subprocess, "run", fake_run)
     track = Track(
-        id="saavn2", title="Kesariya", duration=268, source="jiosaavn",
-        url="https://cdn.example/kesariya.m4a",
+        id="piped2", title="Kesariya", duration=268, source="soundcloud",
+        url="https://cdn.example/kesariya.webm",
     )
 
     path = asyncio.run(dl._download_stream(track))

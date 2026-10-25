@@ -41,6 +41,13 @@ It is probed with a single ranged byte over the first three healthy hosts at
 once — a `302` to a CDN is proof, a `404` is not — so it costs one round trip
 and is never handed to a player unproven.
 
+*A direct m4a is moved, not re-encoded.* The same rule as the YouTube path: an
+AAC-in-m4a catalogue stream is served as it arrives, and only the containers
+Telegram's player is picky about (webm/opus, ogg) go through ffmpeg.
+
+*`/sources` now names the download tier* (files or ranges), so "which one is
+actually doing the work" is answerable from inside the bot.
+
 *The rest of the network went through the same session.* Lyrics, Deezer/Spotify/
 Apple metadata, Deezer short-link redirects and the Telegram-avatar proxy all
 opened their own `ClientSession` — one TLS handshake each, per call. They use the

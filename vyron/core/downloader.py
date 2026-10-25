@@ -37,6 +37,10 @@ logger = logging.getLogger(__name__)
 
 _SAFE_RE = re.compile(r"[^\w\-. ()\[\]]+", re.UNICODE)
 AUDIO_EXTS = ("mp3", "m4a", "opus", "webm", "ogg", "aac")
+#: Containers that are already what we serve, so a download of one is *moved*
+#: into the cache rather than re-encoded. Everything else (webm/opus, ogg) still
+#: goes through ffmpeg because Telegram's audio player is picky about them.
+COPY_SUFFIXES = ("mp3", "m4a", "aac")
 VIDEO_EXTS = ("mp4", "webm", "mkv")
 
 # yt-dlp clients, in the order that keeps working when web starts demanding a
@@ -994,6 +998,16 @@ class Downloader:
                 on_progress(0.92, "converting")
 
             binary = ffmpeg_path()
+            if suffix in COPY_SUFFIXES:
+                # Already the container we serve: an mp3 stays an mp3, and AAC
+                # in m4a is played by ntgcalls, Telegram and every browser. The
+                # transcode below re-encoded those — ten seconds of CPU to make
+                # a file worse — so they are moved, not converted.
+                target = self.settings.downloads_dir / f"{stem}.{suffix}"
+                _atomic_move(raw, target)
+                if on_progress:
+                    on_progress(1.0, "done")
+                return target
             if binary and suffix != "mp3":
                 final = self.audio_path(track)
                 args = [
