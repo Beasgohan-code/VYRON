@@ -264,3 +264,73 @@ def test_both_engines_failing_reports_both_reasons(downloader, monkeypatch):
         asyncio.run(downloader.fetch(track))
     message = str(caught.value)
     assert "mirror" in message and "substitute" in message
+
+
+# ── a file on disk beats a URL that can expire ────────────────────────────
+def test_a_cached_file_is_played_instead_of_a_stream_url(tmp_path):
+    """The reliability model of every bot that "just works": a local file.
+
+    A signed URL can 403 halfway through a song; a file cannot. What made this
+    worth changing is that the file is already there — either cached from an
+    earlier play or fetched by the prefetch — so it is also the *faster* lane.
+    """
+    from vyron.core import player as player_module
+
+    cached = tmp_path / "youtube-abc.mp3"
+    cached.write_bytes(b"ID3" + b"0" * 64)
+
+    class Downloader:
+        def cached(self, track, *, video=False):
+            return cached
+
+        async def fetch(self, *args, **kwargs):  # pragma: no cover
+            raise AssertionError("a cached file must not be downloaded again")
+
+    class Youtube:
+        async def stream_info(self, *args, **kwargs):  # pragma: no cover
+            raise AssertionError("a cached file must not be resolved again")
+
+    class Calls:
+        def __init__(self):
+            self.played = []
+
+        async def play(self, chat_id, stream, **kwargs):
+            self.played.append(stream)
+
+    instance = player_module.Player.__new__(player_module.Player)
+    instance.tracks_played = 0
+    instance._recovered_at = {}
+    instance.storage = None
+    instance.schedule_save = lambda *args, **kwargs: None
+    instance._schedule_prefetch = lambda *args, **kwargs: None
+    instance.settings = type(
+        "S",
+        (),
+        {
+            "play_from_disk": False,
+            "preheat_depth": 0,
+            "preheat_seconds": 0,
+            "audio_quality": "high",
+            "video_quality": "720p",
+        },
+    )()
+    instance.downloader = Downloader()
+    instance.youtube = Youtube()
+    instance.calls = Calls()
+    instance._in_call = set()
+    class _State:
+        effects = None
+        is_video = False
+        offset = 0.0
+
+        def __getattr__(self, name):  # touch(), reset_stream(), … are no-ops here
+            return lambda *args, **kwargs: None
+
+    instance.queues = type("Q", (), {"get": staticmethod(lambda chat: _State())})()
+
+    track = Track(id="abc", title="Wrong", source="youtube", duration=187)
+    asyncio.run(instance._start_stream(-100, track, video=False))
+
+    played = instance.calls.played
+    assert played and isinstance(played[0], player_module.MediaStream)
+    assert str(cached) in repr(played[0].__dict__), "it must hand ntgcalls the file"

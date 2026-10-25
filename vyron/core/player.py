@@ -404,9 +404,25 @@ class Player:
             )
         state = self.queues.get(chat_id)
         url = ""
+        # A file we already have always wins, whatever PLAY_FROM_DISK says: it
+        # starts instantly (no download, no resolve), it cannot expire
+        # mid-song, and after a prefetch it is the difference between a hand-off
+        # and a gap. This is the reliability model of the bots this one is
+        # measured against, kept in the fast path instead of replacing it.
+        cached_file: Path | None = None
+        if self.downloader is not None and not (
+            track.source == "telegram" and _is_local_file(track.url)
+        ):
+            try:
+                cached_file = self.downloader.cached(track, video=video)
+            except Exception:  # pragma: no cover - a cache miss is not an error
+                cached_file = None
         if track.source == "telegram" and _is_local_file(track.url):
             # already downloaded locally — stream the file, not a URL
             url = track.url
+        elif cached_file is not None:
+            url = str(cached_file)
+            logger.info("playing %s from the cache (%s)", track.id, cached_file.suffix)
         elif track.source in _DIRECT_SOURCES and track.url:
             # A direct stream: the catalogue URL *is* the audio, so ntgcalls can
             # start on the first megabyte instead of waiting for a whole file to
@@ -999,6 +1015,20 @@ class Player:
                     logger.debug("preheat budget spent in %s after %d track(s)", chat_id, warmed)
                     break
                 await self.youtube.stream_info(upcoming, video=upcoming.is_video)
+                # Then the bytes themselves, for the very next track only. A
+                # resolved URL still has to be fetched after the song ends; a
+                # file on disk just plays. Bounded by what is left of the
+                # budget, and never fatal — this is an optimisation.
+                if warmed == 0 and self.downloader is not None and not upcoming.is_video:
+                    left = budget - (time.monotonic() - started)
+                    if left > 2:
+                        try:
+                            if self.downloader.cached(upcoming) is None:
+                                await asyncio.wait_for(
+                                    self.downloader.audio(upcoming), timeout=max(3.0, left)
+                                )
+                        except Exception as exc:
+                            logger.debug("prefetch file for %s skipped: %s", upcoming.id, exc)
                 warmed += 1
             if warmed:
                 return
