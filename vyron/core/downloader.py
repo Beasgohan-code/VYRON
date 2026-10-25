@@ -285,8 +285,11 @@ class Downloader:
             "nopart": False,
             "overwrites": True,
         }
-        if self.settings.cookies_file:
-            opts["cookiefile"] = self.settings.cookies_file
+        from vyron.core import cookies
+
+        cookiefile = cookies.path() or self.settings.cookies_file
+        if cookiefile:
+            opts["cookiefile"] = cookiefile
         proxy = self._youtube_proxy()
         if proxy:
             opts["proxy"] = proxy

@@ -6,6 +6,7 @@
 #    * delete download files past `DOWNLOAD_CACHE_HOURS`
 #    * prune history/favourite rows past `MAINTENANCE_DAYS`
 #    * delete API keys revoked more than `REVOKED_GRACE_DAYS` ago (7 days)
+#    * re-read `COOKIES_URL` when the jar is older than six hours
 #
 #  Both are also available on demand (`/clearcache`, `/dbcleanup`); the loop
 #  just means a bot left running for weeks never fills the disk or the DB.
@@ -51,6 +52,21 @@ async def purge_keys(days: float | None = None) -> int:
     return len(removed)
 
 
+async def refresh_cookies(*, force: bool = False) -> str:
+    """Keep the YouTube cookie jar fresh (no-op without `COOKIES_URL`).
+
+    A cookie file that expires is the wall coming back mid-queue, so this is
+    part of housekeeping rather than something an operator has to remember.
+    """
+    from vyron.core import cookies
+
+    try:
+        return await cookies.refresh(settings, force=force)
+    except Exception as exc:  # pragma: no cover - housekeeping never raises
+        logger.debug("cookie refresh failed: %s", exc)
+        return ""
+
+
 async def run_once() -> dict[str, int]:
     """One sweep. Safe to call by hand — never raises."""
     files = 0
@@ -67,6 +83,7 @@ async def run_once() -> dict[str, int]:
         except Exception as exc:  # pragma: no cover - backend oddities
             logger.debug("database prune failed: %s", exc)
     keys = await purge_keys()
+    await refresh_cookies()
     _state.update(last=time.time(), files=files, rows=rows, keys=keys)
     if files or rows or keys:
         logger.info(
@@ -108,4 +125,4 @@ async def stop() -> None:
     _task = None
 
 
-__all__ = ["purge_keys", "run_once", "start", "status", "stop"]
+__all__ = ["purge_keys", "refresh_cookies", "run_once", "start", "status", "stop"]

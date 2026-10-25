@@ -402,6 +402,11 @@ async def _async_main() -> int:
 
     ytdlp_update.start()
     maintenance.start()
+    # One cookie refresh before the first search needs it. Backgrounded: a slow
+    # COOKIES_URL host must never delay the bots coming online.
+    from vyron.core import cookies as cookie_store
+
+    asyncio.create_task(cookie_store.refresh(settings), name="cookies:boot")
 
     # A standby is not a spectator for ever: when the old process stops
     # answering, this one takes the call back and resumes 24/7 playback.

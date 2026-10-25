@@ -83,6 +83,20 @@ async def _probe_storage() -> tuple[bool | None, str]:
 def _cookies_state() -> tuple[bool | None, str]:
     from pathlib import Path
 
+    from vyron.core import cookies as cookie_store
+
+    # The refreshed jar wins: it is the file the resolver and the downloader
+    # will actually hand yt-dlp, so it is the one worth reporting.
+    current = cookie_store.path()
+    origin = cookie_store.source()
+    if current and Path(current).is_file():
+        size = Path(current).stat().st_size
+        hours = cookie_store.age() / 3600
+        where = {"url": "refreshed", "file": "file", "env": "from env"}.get(origin, "file")
+        age = f" · {hours:.1f}h old" if hours >= 0.1 else " · fresh"
+        return True, f"{where} · {size} bytes{age}"
+    if settings.cookies_url:
+        return None if not current else False, "COOKIES_URL set, nothing downloaded yet"
     configured = settings.cookies_file or settings.cookies_text
     if not configured:
         return None, "none (YouTube may bot-check this IP)"

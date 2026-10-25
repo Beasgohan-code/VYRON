@@ -537,8 +537,14 @@ class YouTube:
             "socket_timeout": 15,
             "retries": 2,
         }
-        if self.settings.cookies_file:
-            opts["cookiefile"] = self.settings.cookies_file
+        # `cookies.path()` is the refreshed jar when COOKIES_URL is set, and
+        # the operator's own file otherwise — one place decides, so the
+        # resolver and the downloader can never disagree about who is signed in.
+        from vyron.core import cookies
+
+        cookiefile = cookies.path() or self.settings.cookies_file
+        if cookiefile:
+            opts["cookiefile"] = cookiefile
         if self.settings.proxy:
             opts["proxy"] = self.settings.proxy
         if self.settings.ytdlp_args:
@@ -1522,6 +1528,18 @@ class YouTube:
         self._wall_until = time.time() + window
         if not self._wall_logged:
             self._wall_logged = True
+            # An expired cookie jar is the most likely cause of this wall, so
+            # re-read COOKIES_URL now instead of waiting for the next sweep.
+            if str(getattr(self.settings, "cookies_url", "") or ""):
+                try:
+                    from vyron.core import cookies
+
+                    asyncio.create_task(
+                        cookies.refresh(self.settings, force=True),
+                        name="cookies:after-wall",
+                    )
+                except RuntimeError:  # pragma: no cover - no running loop
+                    pass
             logger.warning(
                 "YouTube is refusing this server (%s) — serving %s for the next %ds",
                 (message or "")[:90],

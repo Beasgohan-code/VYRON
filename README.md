@@ -267,14 +267,27 @@ and translated instead of being flattened into "nothing could be extracted":
 |---|---|---|
 | *YouTube thinks this server is a bot* | the anti-bot wall, not the video | impersonation (`curl_cffi`), Cobalt, cookies, or `ALTERNATE_SOURCES` (the song from another engine) |
 | *the video is gone* | deleted or privated | pick another result |
-| *age-restricted* | needs a signed-in session | `COOKIES_FILE` |
+| *age-restricted* | needs a signed-in session | `COOKIES_FILE`, or `COOKIES_URL` so an expiring jar refreshes itself |
 | *geo-blocked* | wrong country | `PROXY` in an allowed region |
 | *rate-limiting this server* | shared public mirrors are saturated | self-host Cobalt |
 | *cannot reach YouTube* | egress/DNS on the host | `PROXY` or a different region |
 
 `/doctor` prints the same sentence, and its first row is the **build**
-(`v1.10.16 · 2026-10-25`): if it still shows an older one, the deploy did not
+(`v1.10.17 · 2026-10-25`): if it still shows an older one, the deploy did not
 land — that is a different problem from a broken track.
+
+### 🍪 A cookie jar that keeps itself fresh
+
+`COOKIES_FILE` is a snapshot: the session behind it expires, and the wall comes
+back — usually in the middle of a queue, where it looks like the bot broke. Point
+`COOKIES_URL` at a plain-text copy instead and VYRON re-reads it every six hours,
+**and immediately when YouTube answers "confirm you're not a bot"**, then retries
+with the new jar.
+
+Only a real Netscape jar is installed: a placeholder (`paste your cookies here`),
+an HTML error page or a JSON export is refused and the previous file is kept, so
+a mistyped URL can never downgrade a working deployment. `/doctor` shows which
+jar is in use and how old it is.
 
 ### Every source, and how they back each other up
 
@@ -981,6 +994,7 @@ The interesting optional ones:
 | `YT_DLP_FORMAT` / `YT_DLP_RETRIES` / `YT_DLP_SOCKET_TIMEOUT` | `bestaudio/best` / `3` / `20` | download engine tuning |
 | `YOUTUBE_PROXY` / `YOUTUBE_PROXY_FILE` | – | proxy for the engine (falls back to `PROXY`) |
 | `YOUTUBE_COOKIES` / `YOUTUBE_COOKIES_FILE` | – | cookies for the engine (falls back to `COOKIES_FILE`) |
+| `COOKIES_URL` | – | a plain-text cookie jar to re-read every 6 h (and immediately after a bot-wall). Placeholders and HTML error pages are refused, so a bad URL can never overwrite a working file |
 | `DOWNLOAD_CLEANUP_SECONDS` | `900` | how long a temp download folder may live |
 | `STREAM_FAILURE_TTL` | `60` | how long a track that just failed answers instantly instead of retrying |
 | `EXTRACT_CONCURRENCY` | `2` | yt-dlp extractions allowed at once (the rest queue, so web requests stay fast) |

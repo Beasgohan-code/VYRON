@@ -7,6 +7,22 @@ Two version numbers move independently:
 
 ## Bot
 
+### 1.10.17 — 2026-10-25
+
+**A cookie jar that keeps itself fresh.** `COOKIES_FILE` is a snapshot: the
+session behind it expires and YouTube's "confirm you're not a bot" wall comes
+back, usually in the middle of a queue where it looks like the bot broke. With
+`COOKIES_URL` set, the jar is re-read every six hours, **and immediately when the
+wall is detected**, and the retry uses the new one.
+
+Only a real Netscape jar is ever installed. A placeholder
+(`paste your cookies here`), an HTML error page, a JSON export or an oversized
+body is refused and the previous file is kept — a mistyped URL can never
+downgrade a working deployment, and the failure is logged instead of surfacing as
+"cookies are invalid". `COOKIES_FILE` still wins over everything and is never
+rewritten. `/doctor` reports which jar is in use, where it came from and how old
+it is; `/clearcache`-style housekeeping now includes the refresh.
+
 ### 1.10.16 — 2026-10-25
 
 **The comparison, written down.** [`docs/COMPARISON.md`](docs/COMPARISON.md)

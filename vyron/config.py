@@ -178,6 +178,13 @@ class Settings:
     cookies_text: str = field(
         default_factory=lambda: _env("YOUTUBE_COOKIES") or _env("COOKIES_TEXT")
     )
+    # A cookie file someone uploaded is only good until the session expires,
+    # and the wall comes back mid-queue. Point this at a plain-text copy and
+    # the bot re-reads it every few hours (and immediately after YouTube says
+    # "confirm you're not a bot"), refusing anything that is not a cookie jar.
+    cookies_url: str = field(
+        default_factory=lambda: _env("COOKIES_URL") or _env("YOUTUBE_COOKIES_URL")
+    )
     proxy: str = field(default_factory=lambda: _env("PROXY"))
     # ── Download API (/vyron; engine in vyron/engine/) ─────────────────────
     vyron_api: bool = field(default_factory=lambda: _flag("VYRON_API", True))
