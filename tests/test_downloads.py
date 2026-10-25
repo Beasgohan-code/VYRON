@@ -572,3 +572,53 @@ def test_a_direct_m4a_is_transcoded_to_320k_mp3_when_ffmpeg_can(tmp_path, monkey
     assert path.suffix == ".mp3" and path.stat().st_size > 0
     assert f"{module.MP3_KBPS}k" in built[0]
     assert "libmp3lame" in built[0]
+
+
+def test_the_download_honours_the_proxy_the_resolver_already_uses(tmp_path):
+    """Only PROXY was read here, so YOUTUBE_PROXY proxied the metadata and left
+    the download on the datacenter IP — the exact wall the proxy exists to avoid."""
+    import dataclasses
+
+    from vyron.core.downloader import Downloader
+
+    proxied = dataclasses.replace(
+        _settings(tmp_path),
+        proxy="",
+        youtube_proxy="http://proxy.example:8080",
+    )
+    downloader = Downloader(proxied)
+    downloader.settings.ensure_dirs()
+    assert downloader._base_opts()["proxy"] == "http://proxy.example:8080"
+
+    # …and a plain PROXY still works, as does nothing at all.
+    plain = Downloader(dataclasses.replace(proxied, youtube_proxy="", proxy="socks5://p.example:1080"))
+    plain.settings.ensure_dirs()
+    assert plain._base_opts()["proxy"] == "socks5://p.example:1080"
+
+    bare = Downloader(dataclasses.replace(proxied, youtube_proxy="", proxy=""))
+    bare.settings.ensure_dirs()
+    assert "proxy" not in bare._base_opts()
+
+
+def test_a_walled_ip_is_named_in_the_failure(tmp_path, monkeypatch):
+    """"no mirror had a downloadable URL" told the operator nothing.
+
+    When YouTube refuses the server, the download cannot be fixed by retrying —
+    the message now says what is wrong and what to set.
+    """
+    from types import SimpleNamespace
+
+    from vyron.runtime import runtime
+
+    downloader = _downloader(tmp_path)
+    monkeypatch.setattr(
+        runtime,
+        "youtube",
+        SimpleNamespace(walled=lambda: True),
+        raising=False,
+    )
+    reason = downloader._no_mirror_reason()
+    assert "YOUTUBE_PROXY" in reason and "refusing this server" in reason
+
+    monkeypatch.setattr(runtime, "youtube", SimpleNamespace(walled=lambda: False), raising=False)
+    assert downloader._no_mirror_reason() == "no mirror had a downloadable URL"

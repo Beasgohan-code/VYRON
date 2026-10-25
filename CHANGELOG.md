@@ -7,6 +7,48 @@ Two version numbers move independently:
 
 ## Bot
 
+### 1.10.6 — 2026-10-25
+
+A boot log from Render, read line by line. Every fault below happened on a real
+deployment, and most of them were invisible to the person using the bot:
+
+* **`/song` lost the whole file whenever the cover downloaded.** The artwork was
+  passed to the upload as raw bytes; the client's upload path accepts a path or
+  a *binary file object*, and nothing else. The rejection happened inside
+  `send_audio`, so the audio went down with the picture. One conversion
+  (`vyron.utils.net.as_file`) is now the only way bytes reach Telegram.
+* **`Peer id invalid: 0`.** A token minted without a chat context resolves to
+  peer 0, which is not a peer at all — groups and channels are negative. Cards
+  are no longer addressed to it (nothing can arrive, so nothing is attempted),
+  and the chat-title lookup neither asks for it nor re-pays a 3-second timeout
+  on every poll.
+* **`/api/state` can no longer answer 500.** The whole Mini App is built from
+  that one document; an outer guard now returns a degraded payload (with the
+  reason in the owner journal) instead of a blank screen.
+* **A client hanging up is not a crash.** aiohttp's `ClientConnectionResetError`
+  is not a `ConnectionResetError` subclass, so every existing `except` missed
+  it: each seek and each locked phone wrote a red line into `/logs` and buried
+  the entries that mattered. The stream copy loop, the log SSE route and the
+  middleware now treat a dead reader as the normal end of a request.
+* **`/api/audio/{id}` took 29.7 s.** A lookup that failed was repeated for
+  every hit — a storage round trip plus an 8-second catalogue call each time.
+  Answers are cached per user (misses for a minute), the storage half of a
+  lookup is cut off at 4 s, and a track in the registry always beats a cached
+  miss.
+* **The download ignored `YOUTUBE_PROXY`.** Only `PROXY` was read, so a
+  deployment that proxied its *metadata* still downloaded from the blocked
+  datacenter IP. Downloads honour `YOUTUBE_PROXY` / `YT_DLP_PROXY` / the proxy
+  list now, in the same order the resolver does.
+* **A walled IP says so.** "no mirror had a downloadable URL" explained
+  nothing; when the resolver knows YouTube is refusing this server, the failure
+  names that and points at `YOUTUBE_PROXY`.
+* **The boot log summarises the last run instead of reprinting it.** Restoring
+  60 rows verbatim pushed this run's own lines off a phone-sized `/logs`; it is
+  now one line per distinct message with a `×N`, capped at a dozen.
+* **yt-dlp has a modern floor.** YouTube rotates its player response every few
+  weeks and an old extractor answers "Failed to extract any player response"
+  for *every* video, which reads like a network fault.
+
 ### 1.10.5 — 2026-10-25
 
 "What I typed did work yesterday." Three separate faults in one report:

@@ -273,7 +273,7 @@ and translated instead of being flattened into "nothing could be extracted":
 | *cannot reach YouTube* | egress/DNS on the host | `PROXY` or a different region |
 
 `/doctor` prints the same sentence, and its first row is the **build**
-(`v1.10.5 · 2026-10-25`): if it still shows an older one, the deploy did not
+(`v1.10.6 · 2026-10-25`): if it still shows an older one, the deploy did not
 land — that is a different problem from a broken track.
 
 ### Every source, and how they back each other up
@@ -1063,6 +1063,7 @@ owner-only `/sysstats` card.
 | `Could not resolve that track` | run **`/sources`** first — it names the tier that failed and why. Then: confirm `curl_cffi` is installed (`/doctor` → impersonation), let `YTDLP_AUTOUPDATE` fetch a newer extractor, keep `STREAM_FALLBACK=on`, and self-host Cobalt (`COBALT_URLS`) if the public mirrors are rate-limited. Cookies (`COOKIES_FILE`) are only needed for age/region-locked videos. |
 | Download fails but streaming works | the client ladder got a URL but no file → check `/doctor`'s **ffmpeg** row; without ffmpeg the bot saves `.m4a` instead of `.mp3`, which is fine but not what `/song` promises. |
 | Bot replies "already in use" | Two instances with the same `STRING_SESSION` — run only one. |
+| Boot log says **another instance … already owns this deployment** | The service is scaled past one instance, so this process runs as a standby: no 24/7 resume and no streams from here. One bot, one voice stream, one Telegram session — set the instance count to **1** (Render: Scale → 1). |
 | Docker build: `error: No such file or directory: 'gcc'` | TgCrypto has no cp312 wheel; the image compiles it in its own stage. Rebuild without cache (`docker compose build --no-cache`). |
 | MongoDB falls back to JSON | `MONGO_URL` must start with `mongodb://` or `mongodb+srv://`; whitelist the host in Atlas → Network Access. The bot keeps running on JSON storage meanwhile. Mongo is tried three times before that happens, so a single cold-start DNS miss is not fatal. |
 | `PEER_ID_INVALID` on boot | The owner never opened a chat with the bot — send `/start` once; the boot card then arrives next time. |

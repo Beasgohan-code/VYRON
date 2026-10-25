@@ -230,6 +230,10 @@ class Journal:
     #: afterwards. Only the tail is kept — this is a diagnosis, not an archive.
     PERSIST_LEVELS = frozenset({"warn", "error"})
     PERSIST_MAX = 60
+    #: How many distinct restored lines are replayed at boot. A full 60-row tail
+    #: used to be dumped verbatim on every restart, which on a phone-sized log
+    #: view pushed this run's own lines off the screen.
+    PERSIST_RESTORE_LINES = 12
     PERSIST_META = "journal_errors"
 
     def _mirror(self, event: Event) -> None:
@@ -288,6 +292,9 @@ class Journal:
         if not isinstance(rows, list) or not rows:
             return 0
         loaded = 0
+        counts: dict[tuple[str, str, str], int] = {}
+        first_ts: dict[tuple[str, str, str], str] = {}
+        order: list[tuple[str, str, str]] = []
         with self._lock:
             seen = {
                 (str(item.get("level")), str(item.get("scope")), str(item.get("message")), str(item.get("ts")))
@@ -312,14 +319,35 @@ class Journal:
                     continue            # already mirrored in this run
                 seen.add(key)
                 self._persisted.append(row)   # keep mirroring them forward
+            bucket = (level, scope, message)
+            if bucket not in counts:
+                order.append(bucket)
+                first_ts[bucket] = row.get("ts")
+            counts[bucket] = counts.get(bucket, 0) + 1
+            loaded += 1
+        # One line per *distinct* message, with a ×N when it repeated, and a cap
+        # on how many are replayed — a boot should summarise the last run, not
+        # reprint it.
+        ranked = sorted(order, key=lambda item: -counts[item])
+        replayed, rest = ranked[: self.PERSIST_RESTORE_LINES], ranked[self.PERSIST_RESTORE_LINES :]
+        for level, scope, message in replayed:
+            repeats = counts[(level, scope, message)]
+            suffix = f"  (×{repeats})" if repeats > 1 else ""
             self.record(
                 level,
                 scope,
-                f"[previous run] {message}"[: _MAX_MESSAGE],
+                f"[previous run] {message}{suffix}"[: _MAX_MESSAGE],
                 restored=True,
-                original_ts=row.get("ts"),
+                original_ts=first_ts[(level, scope, message)],
+                count=repeats,
             )
-            loaded += 1
+        if rest:
+            self.warn(
+                "journal",
+                f"[previous run] {len(rest)} more distinct warning(s)/error(s), "
+                f"{sum(counts[b] for b in rest)} line(s) — ask for the previous run's log",
+                summary=True,
+            )
         if loaded:
             self.warn(
                 "journal",

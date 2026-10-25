@@ -18,7 +18,10 @@ tgcrypto==1.2.5; python_version < "3.12"
 richgram>=0.2.0
 
 # ─── Media ──────────────────────────────────────────────────────────────────
-yt-dlp>=2025.1.1
+# A floor, not a ceiling: YouTube changes its player response every few
+# weeks, and an old extractor answers "Failed to extract any player
+# response" for *every* video — which looks like a network fault and is not.
+yt-dlp>=2026.10.1
 psutil>=5.9
 # YouTube Music search for the resolver ladder (optional at runtime: the code
 # falls back to yt-dlp search when the package is absent).

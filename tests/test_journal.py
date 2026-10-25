@@ -222,3 +222,47 @@ def test_restore_is_a_no_op_without_storage():
 
     fresh = Journal(path=None)
     assert asyncio.run(fresh.restore(None)) == 0
+
+
+def test_a_restored_tail_is_summarised_not_reprinted(tmp_path):
+    """A 60-row tail used to be replayed verbatim at every boot.
+
+    On a phone-sized `/logs` that pushed this run's own lines off the screen,
+    which is exactly when they are needed. Restoring now collapses repeats
+    (×N) and caps the number of lines.
+    """
+    import asyncio
+    import dataclasses
+
+    from vyron.config import settings as base
+    from vyron.core.journal import Journal
+    from vyron.database import JsonStorage
+
+    storage = JsonStorage(dataclasses.replace(base, data_dir=tmp_path))
+
+    async def scenario():
+        await storage.connect()
+        first = Journal(path=None)
+        first.persist = True
+        for _ in range(30):
+            first.warn("webapp", "slow request GET /api/state (5000 ms)")
+        for index in range(5):
+            first.warn("search", f"resolver cooling down {index}")
+        await storage.set_meta(Journal.PERSIST_META, list(first._persisted))
+
+        second = Journal(path=None)
+        second.persist = True
+        loaded = await second.restore(storage)
+        return loaded, second
+
+    loaded, second = asyncio.run(scenario())
+    assert loaded == 35
+
+    replayed = [
+        row["message"]
+        for row in second.events(limit=200)
+        if "[previous run]" in row["message"]
+    ]
+    assert len(replayed) <= Journal.PERSIST_RESTORE_LINES
+    assert any("(×30)" in message for message in replayed)
+    assert any("resolver cooling down" in message for message in replayed)

@@ -262,8 +262,9 @@ class Downloader:
         }
         if self.settings.cookies_file:
             opts["cookiefile"] = self.settings.cookies_file
-        if self.settings.proxy:
-            opts["proxy"] = self.settings.proxy
+        proxy = self._youtube_proxy()
+        if proxy:
+            opts["proxy"] = proxy
         if self.settings.ytdlp_args:
             try:
                 from vyron.core.search import YouTube
@@ -273,6 +274,37 @@ class Downloader:
                 pass
         opts.update(self._external_downloader())
         return opts
+
+    def _youtube_proxy(self) -> str | None:
+        """The proxy the *resolver* already honours, for the download itself.
+
+        Only PROXY was consulted here, so a deployment that set YOUTUBE_PROXY
+        (or YT_DLP_PROXY, or a proxy list) got proxied metadata and then a
+        direct-IP download — which YouTube refuses with the very wall the proxy
+        was added to avoid.
+        """
+        settings = self.settings
+        candidates = [
+            getattr(settings, "youtube_proxy", "") or "",
+            getattr(settings, "proxy", "") or "",
+        ]
+        try:  # the list file is resolved last, and only when it exists
+            from vyron.engine.youtube import _first_line, validate_proxy
+        except Exception:  # pragma: no cover - engine always importable
+            return None
+        candidates.append(
+            _first_line(getattr(settings, "youtube_proxy_file", "") or "") or ""
+        )
+        for candidate in candidates:
+            candidate = candidate.strip()
+            if not candidate:
+                continue
+            try:
+                return validate_proxy(candidate)
+            except Exception as exc:
+                logger.warning("ignoring an unusable download proxy: %s", exc)
+                return None
+        return None
 
     def _attempts(self) -> list[tuple[str, dict]]:
         attempts: list[tuple[str, dict]] = []
@@ -315,6 +347,28 @@ class Downloader:
                 on_progress(0.99, f"{label} — finishing")
 
         return hook
+
+    def _no_mirror_reason(self) -> str:
+        """"no mirror had a downloadable URL" answered nothing.
+
+        When the resolver's own wall flag is up, the honest reason is that
+        YouTube refuses *this server*, and the remedy is a proxy — not that a
+        mirror was missing. Say so, because the alternative is an operator
+        retrying the same command forever.
+        """
+        try:
+            from vyron.runtime import runtime
+
+            engine = getattr(runtime, "youtube", None)
+            if engine is not None and getattr(engine, "walled", lambda: False)():
+                return (
+                    "YouTube is refusing this server's IP, so no id could be "
+                    "resolved and no mirror had the file — set YOUTUBE_PROXY "
+                    "to a working proxy, or use a catalogue track"
+                )
+        except Exception:  # pragma: no cover - runtime not up yet
+            pass
+        return "no mirror had a downloadable URL"
 
     # ── yt-dlp engine ──────────────────────────────────────────────────────
     def _download_ytdlp(
@@ -436,7 +490,7 @@ class Downloader:
             track.id, height=height if video else 0
         )
         if not direct:
-            raise DownloadError("no mirror had a downloadable URL")
+            raise DownloadError(self._no_mirror_reason())
 
         if on_progress:
             on_progress(0.1, f"downloading from {direct.source.split(':')[0]}")
