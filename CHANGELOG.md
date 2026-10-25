@@ -7,6 +7,18 @@ Two version numbers move independently:
 
 ## Bot
 
+### 1.10.25 — 2026-10-25
+
+**A test that could only run in one module layout.** `tests/test_vplay.py`
+imported its sibling as `tests.test_commands`, which works only while the
+repository wins the name `tests` against any installed package that ships one.
+The CI job on Python 3.11 lost that race and failed on an *import* — red for a
+week of green local runs, and for a reason that had nothing to do with the
+code under test. The helper is now loaded from its file, so the test asserts
+what it meant to assert in any environment.
+
+970 backend tests, plain and shuffled.
+
 ### 1.10.24 — 2026-10-25
 
 **Nineteen languages, named in their own scripts.** The catalog shipped four

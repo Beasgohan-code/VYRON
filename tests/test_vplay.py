@@ -175,6 +175,25 @@ def test_vplay_search_remembers_the_kind_for_the_picker(monkeypatch):
     pending._CACHE.clear()
 
 
+def _command_table() -> dict[str, list[str]]:
+    """`test_commands._commands()`, loaded from its file rather than imported.
+
+    `from tests.test_commands import …` depends on the repository winning the
+    name `tests` against any installed package that ships one — on CI's Python
+    3.11 job it did not, and the job failed on an *import*, not an assertion.
+    A test that can only run in one module layout is a test that lies.
+    """
+    import importlib.util
+    import pathlib
+
+    path = pathlib.Path(__file__).with_name("test_commands.py")
+    spec = importlib.util.spec_from_file_location("_vyron_command_table", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module._commands()
+
+
 def test_vplay_is_registered_on_the_play_handler(monkeypatch):
     """One implementation: `/vplay` must not be a second `/play` that drifts."""
     from vyron.modules import play as module
@@ -184,9 +203,7 @@ def test_vplay_is_registered_on_the_play_handler(monkeypatch):
     client = FakeClient()
     module.register(client)
     # the same handler answers both names, which is what the command table says
-    from tests.test_commands import _commands
-
-    found = _commands()
+    found = _command_table()
     assert set(found["vplay"]) & set(found["play"])
 
 
