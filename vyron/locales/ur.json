@@ -1,0 +1,33 @@
+{
+  "name": "اردو",
+  "strings": {
+    "lang.title": "زبان",
+    "lang.note": "VYRON کے جوابات اسی چیٹ کی زبان میں آئیں گے۔ زبان منتخب کریں — فوراً لاگو ہوگی۔",
+    "lang.current": "موجودہ",
+    "lang.saved": "زبان محفوظ ہو گئی۔",
+    "lang.unknown": "یہ زبان دستیاب نہیں۔",
+    "lang.admin_only": "یہاں صرف ایڈمن زبان بدل سکتے ہیں۔",
+    "lang.switched": "{name} منتخب ہوئی۔",
+    "lang.page": "صفحہ {page}/{pages}",
+    "np.streaming": "چل رہا ہے",
+    "np.paused": "رکا ہوا",
+    "np.live": "لائیو",
+    "np.up_next": "اگلا",
+    "np.queued": "{count} قطار میں",
+    "np.now_playing": "ابھی چل رہا ہے",
+    "np.by": "فنکار",
+    "ctl.paused": "روک دیا",
+    "ctl.resumed": "دوبارہ شروع",
+    "ctl.nothing_playing": "کچھ نہیں چل رہا",
+    "ctl.nothing_paused": "کچھ رکا نہیں ہے",
+    "ctl.skipped": "اگلی طرف بڑھ گیا",
+    "ctl.queue_empty": "قطار خالی ہے",
+    "ctl.stopped": "روکا اور وائس چیٹ چھوڑ دی",
+    "ctl.volume": "آواز: {volume}%",
+    "ctl.loop": "لوپ: {mode}",
+    "ctl.shuffled": "{count} ٹریک شفل کیے",
+    "ctl.autoplay_on": "آٹو پلے آن",
+    "ctl.autoplay_off": "آٹو پلے آف",
+    "ctl.seek": "{time} پر پہنچا"
+  }
+}

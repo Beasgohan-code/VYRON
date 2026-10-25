@@ -7,6 +7,42 @@ Two version numbers move independently:
 
 ## Bot
 
+### 1.10.24 — 2026-10-25
+
+**Nineteen languages, named in their own scripts.** The catalog shipped four
+(English, हिन्दी, മലയാളം, ਪੰਜਾਬੀ) and sixteen keys; it now ships eighteen
+translations on top of English — বাংলা, தமிழ், తెలుగు, ಕನ್ನಡ, मराठी, ગુજરાતી, اردو,
+العربية, Español, Français, Deutsch, Português, Русский, Bahasa Indonesia and
+Türkçe — every one of them complete: the tests refuse a catalog that is missing
+a key or that drops a `{placeholder}` from its English sentence, because a
+half translation renders `{count}` at the listener and nobody notices until it
+is in a group.
+
+**The picker pages.** Nineteen buttons in one card is not a picker, it is a
+wall — so it shows four languages and two arrows, which is exactly six
+buttons, and it opens on the page the current language is on so the ✅ is in
+the first card you see. The body says `page 2/5 · 19 languages` and the footer
+reminds you that `/setlang <code>` skips the tapping. `/language` also accepts
+a page and `/setlang` still validates against real catalogs.
+
+**`np.live` never existed.** The now-playing caption asked the catalog for
+`np.live`, which was in no catalog at all — so every chat, in every language,
+printed the literal string `np.live` where the LIVE badge belongs. It is a real
+key now, translated everywhere, and a test asserts no catalog renders a key
+instead of a word.
+
+**The Mini App can change it.** `/api/state` carries the chat's language and
+the full list (with `rtl` flags), and a new `language` action writes the same
+per-chat setting the command writes — owner-only in a group, anyone in a DM.
+The profile page shows the languages as a grid of native names, right-to-left
+scripts set their own direction, and the choice takes effect on the next poll.
+
+**Every translation is a file.** The three in-code catalogs became
+`vyron/locales/*.json`, so adding a language is one file and no Python: the
+documented path and the real path are now the same one.
+
+970 backend tests and 126 frontend tests (`tsc` clean).
+
 ### 1.10.23 — 2026-10-25
 
 **A queue stops having gaps.** Between two tracks there used to be a silence the

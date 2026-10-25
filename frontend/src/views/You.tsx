@@ -4,6 +4,7 @@ import {
   Gauge,
   HardDrive,
   History,
+  Languages,
   Link2,
   Moon,
   Palette,
@@ -55,7 +56,9 @@ export function You() {
     playlists,
     audio,
     toast,
+    act,
   } = useApp();
+  const language = state?.language;
   const stage = useViewReveal<HTMLDivElement>("you", ".stage-block");
   const user = state?.user;
   const isOwner = Boolean(state?.owner);
@@ -169,6 +172,44 @@ export function You() {
             >
               <span />
             </button>
+          </div>
+        </div>
+      </section>
+
+      <section className="stage-block">
+        <header className="section-head">
+          <h2>
+            <Languages size={15} /> Language
+          </h2>
+          <span className="fine">{language?.name ?? "English"}</span>
+        </header>
+        <div className="list-card">
+          <div className="pref">
+            <span>
+              Replies
+              <i className="fine">
+                the bot answers this chat in the language you pick — the same choice /language writes
+              </i>
+            </span>
+            <span className="fine">{(language?.available ?? []).length} languages</span>
+          </div>
+          <div className="lang-grid">
+            {(language?.available ?? []).map((item) => (
+              <button
+                key={item.code}
+                type="button"
+                dir={item.rtl ? "rtl" : "ltr"}
+                className={`chip lang-chip ${item.code === language?.code ? "active" : ""}`}
+                aria-pressed={item.code === language?.code}
+                onClick={() =>
+                  void act<{ lang?: string; name?: string }>("language", item.code).then((payload) => {
+                    if (payload?.lang) toast(`Language · ${payload.name ?? item.name}`, "success");
+                  })
+                }
+              >
+                {item.name}
+              </button>
+            ))}
           </div>
         </div>
       </section>

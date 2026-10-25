@@ -1,0 +1,33 @@
+{
+  "name": "Русский",
+  "strings": {
+    "lang.title": "язык",
+    "lang.note": "VYRON отвечает на языке этого чата. Выберите язык — он применится сразу.",
+    "lang.current": "текущий",
+    "lang.saved": "Язык сохранён.",
+    "lang.unknown": "Этот язык недоступен.",
+    "lang.admin_only": "Здесь язык могут менять только админы.",
+    "lang.switched": "Переключено на {name}.",
+    "lang.page": "страница {page}/{pages}",
+    "np.streaming": "играет",
+    "np.paused": "на паузе",
+    "np.live": "в эфире",
+    "np.up_next": "далее",
+    "np.queued": "{count} в очереди",
+    "np.now_playing": "сейчас играет",
+    "np.by": "исполнитель",
+    "ctl.paused": "Пауза",
+    "ctl.resumed": "Продолжено",
+    "ctl.nothing_playing": "Ничего не играет",
+    "ctl.nothing_paused": "Ничего не на паузе",
+    "ctl.skipped": "Пропущено",
+    "ctl.queue_empty": "Очередь пуста",
+    "ctl.stopped": "Остановлено, голосовой чат покинут",
+    "ctl.volume": "Громкость: {volume}%",
+    "ctl.loop": "Повтор: {mode}",
+    "ctl.shuffled": "Перемешано треков: {count}",
+    "ctl.autoplay_on": "Автовоспроизведение включено",
+    "ctl.autoplay_off": "Автовоспроизведение выключено",
+    "ctl.seek": "Переход к {time}"
+  }
+}

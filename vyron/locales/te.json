@@ -1,0 +1,33 @@
+{
+  "name": "తెలుగు",
+  "strings": {
+    "lang.title": "భాష",
+    "lang.note": "VYRON ఈ చాట్ భాషలో సమాధానం ఇస్తుంది. ఒక భాషను ఎంచుకోండి — వెంటనే అమలవుతుంది.",
+    "lang.current": "ప్రస్తుతం",
+    "lang.saved": "భాష సేవ్ అయింది.",
+    "lang.unknown": "ఆ భాష అందుబాటులో లేదు.",
+    "lang.admin_only": "ఇక్కడ అడ్మిన్‌లు మాత్రమే భాష మార్చగలరు.",
+    "lang.switched": "{name} ఎంచుకోబడింది.",
+    "lang.page": "పేజీ {page}/{pages}",
+    "np.streaming": "ప్లే అవుతోంది",
+    "np.paused": "ఆపబడింది",
+    "np.live": "లైవ్",
+    "np.up_next": "తదుపరి",
+    "np.queued": "{count} క్యూలో",
+    "np.now_playing": "ఇప్పుడు ప్లే అవుతోంది",
+    "np.by": "గాయకుడు",
+    "ctl.paused": "ఆపబడింది",
+    "ctl.resumed": "కొనసాగింది",
+    "ctl.nothing_playing": "ఏమీ ప్లే అవడం లేదు",
+    "ctl.nothing_paused": "ఏమీ ఆపబడలేదు",
+    "ctl.skipped": "తదుపరికి వెళ్లింది",
+    "ctl.queue_empty": "క్యూ ఖాళీగా ఉంది",
+    "ctl.stopped": "ఆపి వాయిస్ చాట్ నుండి బయటకు వెళ్లింది",
+    "ctl.volume": "శబ్దం: {volume}%",
+    "ctl.loop": "లూప్: {mode}",
+    "ctl.shuffled": "{count} ట్రాక్‌లు షఫుల్ చేయబడ్డాయి",
+    "ctl.autoplay_on": "ఆటోప్లే ఆన్",
+    "ctl.autoplay_off": "ఆటోప్లే ఆఫ్",
+    "ctl.seek": "{time} కు వెళ్లింది"
+  }
+}

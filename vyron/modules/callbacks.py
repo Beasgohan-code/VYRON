@@ -480,6 +480,16 @@ def register(client: Client) -> None:
 
             catalog = await i18n.for_chat(chat.id)
             code = arg
+            # The picker is paged: four languages and two arrows per card.
+            if code == "page":
+                current = str(await chatcfg.get(chat.id, "lang", "") or "")
+                raw = parts[3] if len(parts) > 3 else ""
+                page = int(raw) if raw.isdigit() else 0
+                await _show(
+                    client, cq, language_card(current, page=page), lang_keyboard(current, page)
+                )
+                await rich.answer(cq)
+                return
             if not code or code == "menu":
                 current = str(await chatcfg.get(chat.id, "lang", "") or "")
                 await _show(client, cq, language_card(current), lang_keyboard(current))

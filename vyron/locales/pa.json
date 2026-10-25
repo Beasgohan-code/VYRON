@@ -1,0 +1,33 @@
+{
+  "name": "ਪੰਜਾਬੀ",
+  "strings": {
+    "lang.title": "ਭਾਸ਼ਾ",
+    "lang.note": "VYRON ਦੇ ਜਵਾਬ ਇਸ ਚੈਟ ਦੀ ਭਾਸ਼ਾ ਵਿੱਚ ਆਉਣਗੇ। ਇੱਕ ਭਾਸ਼ਾ ਚੁਣੋ।",
+    "lang.current": "ਮੌਜੂਦਾ",
+    "lang.saved": "ਭਾਸ਼ਾ ਸੰਭਾਲੀ ਗਈ।",
+    "lang.unknown": "ਇਹ ਭਾਸ਼ਾ ਉਪਲਬਧ ਨਹੀਂ।",
+    "lang.admin_only": "ਇੱਥੇ ਸਿਰਫ਼ ਐਡਮਿਨ ਭਾਸ਼ਾ ਬਦਲ ਸਕਦੇ ਹਨ।",
+    "lang.switched": "{name} ਚੁਣੀ ਗਈ।",
+    "lang.page": "ਸਫ਼ਾ {page}/{pages}",
+    "np.streaming": "ਚੱਲ ਰਿਹਾ",
+    "np.paused": "ਰੁਕਿਆ",
+    "np.live": "ਲਾਈਵ",
+    "np.up_next": "ਅਗਲਾ",
+    "np.queued": "{count} ਕਤਾਰ ਵਿੱਚ",
+    "np.now_playing": "ਹੁਣ ਚੱਲ ਰਿਹਾ",
+    "np.by": "ਦੁਆਰਾ",
+    "ctl.paused": "ਰੋਕਿਆ",
+    "ctl.resumed": "ਜਾਰੀ",
+    "ctl.nothing_playing": "ਕੁਝ ਨਹੀਂ ਚੱਲ ਰਿਹਾ",
+    "ctl.nothing_paused": "ਕੁਝ ਰੁਕਿਆ ਨਹੀਂ",
+    "ctl.skipped": "ਅੱਗੇ ਵਧਾਇਆ",
+    "ctl.queue_empty": "ਕਤਾਰ ਖਾਲੀ ਹੈ",
+    "ctl.stopped": "ਰੋਕਿਆ ਅਤੇ ਵਾਇਸ ਚੈਟ ਛੱਡੀ",
+    "ctl.volume": "ਆਵਾਜ਼: {volume}%",
+    "ctl.loop": "ਲੂਪ: {mode}",
+    "ctl.shuffled": "{count} ਟਰੈਕ ਸ਼ਫਲ ਕੀਤੇ",
+    "ctl.autoplay_on": "ਆਟੋਪਲੇ ਚਾਲੂ",
+    "ctl.autoplay_off": "ਆਟੋਪਲੇ ਬੰਦ",
+    "ctl.seek": "{time} 'ਤੇ ਪਹੁੰਚੇ"
+  }
+}

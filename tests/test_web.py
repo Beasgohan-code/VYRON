@@ -1331,3 +1331,83 @@ def test_state_answers_a_degraded_app_instead_of_a_500(monkeypatch):
         assert body["now"] is None and body["queue"] == []
 
     asyncio.run(_with_client(scenario))
+
+
+# ── language, from the app ─────────────────────────────────────────────────
+def test_the_state_carries_every_language_the_bot_speaks():
+    async def scenario(client):
+        token = auth.make_token(-100999, 424242, TOKEN)
+        response = await client.post(
+            "/api/state", json={"token": token}, headers={"X-Vyron-Token": token}
+        )
+        language = (await response.json())["language"]
+        assert language["code"] == "en" and language["name"] == "English"
+        codes = {item["code"] for item in language["available"]}
+        assert {"hi", "ml", "pa", "bn", "ta", "te", "kn", "mr", "gu", "ur"} <= codes
+        assert {"es", "fr", "de", "pt", "ru", "id", "ar", "tr"} <= codes
+        arabic = next(item for item in language["available"] if item["code"] == "ar")
+        assert arabic["rtl"] is True
+
+    asyncio.run(_with_client(scenario))
+
+
+def test_the_app_can_change_its_own_language(tmp_path, monkeypatch):
+    from vyron.config import settings as live_settings
+    from vyron.database import JsonStorage
+    from vyron.runtime import runtime
+
+    storage = JsonStorage(live_settings)
+    storage.path = tmp_path / "db.json"
+    monkeypatch.setattr(runtime, "storage", storage)
+    monkeypatch.setattr(runtime, "player", None)
+
+    async def scenario(client):
+        # 424242 is the user, so this is a private chat: no admin to ask.
+        headers = {"X-Vyron-Token": auth.make_token(424242, 424242, TOKEN)}
+        response = await client.post(
+            "/api/action", json={"action": "language", "value": "ta"}, headers=headers
+        )
+        assert response.status == 200, await response.text()
+        payload = await response.json()
+        assert payload["ok"] is True and payload["lang"] == "ta"
+        assert payload["name"] == "தமிழ்"
+
+        # …and the next poll already speaks it.
+        state = await client.post("/api/state", json={}, headers=headers)
+        assert (await state.json())["language"]["code"] == "ta"
+
+        unknown = await client.post(
+            "/api/action", json={"action": "language", "value": "klingon"}, headers=headers
+        )
+        assert unknown.status == 400
+        assert (await unknown.json())["ok"] is False
+
+    asyncio.run(_with_client(scenario))
+
+
+def test_a_group_language_is_an_owner_decision_in_the_app(tmp_path, monkeypatch):
+    from vyron.config import settings as live_settings
+    from vyron.database import JsonStorage
+    from vyron.runtime import runtime
+
+    storage = JsonStorage(live_settings)
+    storage.path = tmp_path / "db.json"
+    monkeypatch.setattr(runtime, "storage", storage)
+    monkeypatch.setattr(runtime, "player", None)
+
+    async def scenario(client):
+        # 424242 is the owner in the test environment; a listener is not.
+        listener = {"X-Vyron-Token": auth.make_token(-100777, 555001, TOKEN)}
+        response = await client.post(
+            "/api/action", json={"action": "language", "value": "hi"}, headers=listener
+        )
+        assert response.status == 403
+        assert "admin" in (await response.json())["error"]
+
+        owner = {"X-Vyron-Token": auth.make_token(-100777, 424242, TOKEN)}
+        allowed = await client.post(
+            "/api/action", json={"action": "language", "value": "hi"}, headers=owner
+        )
+        assert allowed.status == 200 and (await allowed.json())["lang"] == "hi"
+
+    asyncio.run(_with_client(scenario))

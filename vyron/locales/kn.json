@@ -1,0 +1,33 @@
+{
+  "name": "ಕನ್ನಡ",
+  "strings": {
+    "lang.title": "ಭಾಷೆ",
+    "lang.note": "VYRON ಈ ಚಾಟ್‌ನ ಭಾಷೆಯಲ್ಲಿ ಉತ್ತರಿಸುತ್ತದೆ. ಒಂದು ಭಾಷೆಯನ್ನು ಆಯ್ಕೆ ಮಾಡಿ — ತಕ್ಷಣ ಜಾರಿಗೆ ಬರುತ್ತದೆ.",
+    "lang.current": "ಪ್ರಸ್ತುತ",
+    "lang.saved": "ಭಾಷೆ ಉಳಿಸಲಾಗಿದೆ.",
+    "lang.unknown": "ಆ ಭಾಷೆ ಲಭ್ಯವಿಲ್ಲ.",
+    "lang.admin_only": "ಇಲ್ಲಿ ನಿರ್ವಾಹಕರು ಮಾತ್ರ ಭಾಷೆ ಬದಲಿಸಬಹುದು.",
+    "lang.switched": "{name} ಆಯ್ಕೆಯಾಗಿದೆ.",
+    "lang.page": "ಪುಟ {page}/{pages}",
+    "np.streaming": "ಪ್ಲೇ ಆಗುತ್ತಿದೆ",
+    "np.paused": "ವಿರಾಮ",
+    "np.live": "ನೇರ",
+    "np.up_next": "ಮುಂದಿನದು",
+    "np.queued": "{count} ಸರದಿಯಲ್ಲಿ",
+    "np.now_playing": "ಈಗ ಪ್ಲೇ ಆಗುತ್ತಿದೆ",
+    "np.by": "ಗಾಯಕ",
+    "ctl.paused": "ವಿರಾಮಗೊಳಿಸಲಾಗಿದೆ",
+    "ctl.resumed": "ಮುಂದುವರಿಸಲಾಗಿದೆ",
+    "ctl.nothing_playing": "ಏನೂ ಪ್ಲೇ ಆಗುತ್ತಿಲ್ಲ",
+    "ctl.nothing_paused": "ಏನೂ ವಿರಾಮದಲ್ಲಿಲ್ಲ",
+    "ctl.skipped": "ಮುಂದಕ್ಕೆ ಹೋಯಿತು",
+    "ctl.queue_empty": "ಸರದಿ ಖಾಲಿಯಾಗಿದೆ",
+    "ctl.stopped": "ನಿಲ್ಲಿಸಿ ಧ್ವನಿ ಚಾಟ್ ಬಿಟ್ಟಿದೆ",
+    "ctl.volume": "ಧ್ವನಿ: {volume}%",
+    "ctl.loop": "ಲೂಪ್: {mode}",
+    "ctl.shuffled": "{count} ಟ್ರ್ಯಾಕ್‌ಗಳನ್ನು ಶಫಲ್ ಮಾಡಲಾಗಿದೆ",
+    "ctl.autoplay_on": "ಆಟೋಪ್ಲೇ ಆನ್",
+    "ctl.autoplay_off": "ಆಟೋಪ್ಲೇ ಆಫ್",
+    "ctl.seek": "{time} ಗೆ ಹೋಯಿತು"
+  }
+}

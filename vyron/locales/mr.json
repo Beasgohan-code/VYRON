@@ -1,0 +1,33 @@
+{
+  "name": "मराठी",
+  "strings": {
+    "lang.title": "भाषा",
+    "lang.note": "VYRON ची उत्तरे या चॅटच्या भाषेत येतील. भाषा निवडा — लगेच लागू होईल.",
+    "lang.current": "सध्याची",
+    "lang.saved": "भाषा जतन झाली.",
+    "lang.unknown": "ही भाषा उपलब्ध नाही.",
+    "lang.admin_only": "येथे फक्त अ‍ॅडमिन भाषा बदलू शकतात.",
+    "lang.switched": "{name} निवडली.",
+    "lang.page": "पृष्ठ {page}/{pages}",
+    "np.streaming": "सुरू आहे",
+    "np.paused": "थांबलेले",
+    "np.live": "लाइव्ह",
+    "np.up_next": "पुढील",
+    "np.queued": "{count} रांगेत",
+    "np.now_playing": "आता सुरू आहे",
+    "np.by": "गायक",
+    "ctl.paused": "थांबवले",
+    "ctl.resumed": "पुन्हा सुरू",
+    "ctl.nothing_playing": "काहीही सुरू नाही",
+    "ctl.nothing_paused": "काहीही थांबलेले नाही",
+    "ctl.skipped": "पुढे गेले",
+    "ctl.queue_empty": "रांग रिकामी आहे",
+    "ctl.stopped": "थांबवले आणि व्हॉइस चॅट सोडली",
+    "ctl.volume": "आवाज: {volume}%",
+    "ctl.loop": "लूप: {mode}",
+    "ctl.shuffled": "{count} ट्रॅक शफल केले",
+    "ctl.autoplay_on": "ऑटोप्ले चालू",
+    "ctl.autoplay_off": "ऑटोप्ले बंद",
+    "ctl.seek": "{time} वर गेले"
+  }
+}

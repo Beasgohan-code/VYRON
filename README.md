@@ -273,7 +273,7 @@ and translated instead of being flattened into "nothing could be extracted":
 | *cannot reach YouTube* | egress/DNS on the host | `PROXY` or a different region |
 
 `/doctor` prints the same sentence, and its first row is the **build**
-(`v1.10.23 · 2026-10-25`): if it still shows an older one, the deploy did not
+(`v1.10.24 · 2026-10-25`): if it still shows an older one, the deploy did not
 land — that is a different problem from a broken track.
 
 ### 🍪 A cookie jar that keeps itself fresh
@@ -374,7 +374,7 @@ Telegram `file_id` after the first send, so later starts cost nothing.
 `/song` · `/repo` · `/language` · `/logger` · `/voice` · `/thumbnail`
 
 `/song` sends the file instead of streaming it;
-`/language` switches this chat between English, हिन्दी, മലയാളം and ਪੰਜਾਬੀ, and
+`/language` switches this chat between the nineteen languages listed below, and
 `/logger` mirrors warnings and errors into `LOGGER_ID`, `/voice` shows the live
 state of the streaming engine (assistant account, active calls, quality), and
 `/thumbnail` lets a group put its own picture behind the now-playing poster —
@@ -825,15 +825,32 @@ shelves; the boot and gate both respect `prefers-reduced-motion`.
 
 ## 🌍 Languages
 
-VYRON speaks English, हिन्दी, മലയാളം and ਪੰਜਾਬੀ. `/language` shows the picker;
-the choice is per chat and applies to the now-playing caption, the DM mirror
-and every transport acknowledgement. In a group only admins can change it.
+VYRON speaks nineteen languages, each named in its own script:
 
-English is the reference catalog in `vyron/core/i18n.py`. Two ways to add one:
+| | | |
+|---|---|---|
+| English `en` | हिन्दी `hi` | മലയാളം `ml` |
+| ਪੰਜਾਬੀ `pa` | বাংলা `bn` | தமிழ் `ta` |
+| తెలుగు `te` | ಕನ್ನಡ `kn` | मराठी `mr` |
+| ગુજરાતી `gu` | اردو `ur` | العربية `ar` |
+| Español `es` | Français `fr` | Deutsch `de` |
+| Português `pt` | Русский `ru` | Bahasa Indonesia `id` |
+| Türkçe `tr` | | |
 
-* drop `vyron/locales/<code>.json` with `{"name": "…", "strings": {…}}` — picked
-  up at start, no code change, missing keys fall back to English;
-* or add a dict to `CATALOGS` next to the shipped ones.
+`/language` opens the picker — four languages and two arrows a card, so it
+stays inside the six-button rule however many we ship — and `/setlang ta`
+skips the picker entirely. The Mini App's profile page carries the same list
+and writes the same setting, because it is the same per-chat value.
+
+The choice applies to the now-playing caption, the DM mirror and every
+transport acknowledgement. In a group only admins can change it.
+
+English is the reference catalog in `vyron/core/i18n.py`; every other language
+is one file in `vyron/locales/`. Adding one is a single JSON file —
+`{"name": "…", "strings": {…}}`, keys copied from English. It is picked up at
+start with no code change, missing keys fall back to English, and the tests
+refuse to ship a catalog that lacks a key or drops a `{placeholder}` — a
+half-translated string renders `{count}` at the user, silently.
 
 The test suite fails if a shipped catalog is missing keys or is mostly an
 English copy, so a half-finished translation cannot land quietly.

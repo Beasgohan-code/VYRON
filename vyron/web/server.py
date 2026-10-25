@@ -290,12 +290,32 @@ def _state_degraded() -> web.Response:
                 "shuffle": False,
                 "effects": [],
             },
+            "language": {
+                "code": "en",
+                "name": "English",
+                "rtl": False,
+                "available": _languages(),
+            },
             "favorites": [],
             "history": [],
             "playlists": [],
             "stats": {"tracks": 0, "downloads": 0, "chats": 0},
         }
     )
+
+
+def _languages() -> list[dict]:
+    """The picker's payload, built without importing at module scope — the web
+    layer must boot even if the language package is somehow broken."""
+    try:
+        from vyron.core import i18n
+
+        return [
+            {"code": code, "name": name, "rtl": i18n.is_rtl(code)}
+            for code, name in i18n.available().items()
+        ]
+    except Exception:  # pragma: no cover - defensive
+        return [{"code": "en", "name": "English", "rtl": False}]
 
 
 async def _state_response(request: web.Request) -> web.Response:
@@ -322,12 +342,15 @@ async def _state_response(request: web.Request) -> web.Response:
         )
 
     storage = runtime.storage
-    chat_title, favorites, history, playlist_rows, counters = await asyncio.gather(
+    from vyron.core import i18n
+
+    chat_title, favorites, history, playlist_rows, counters, catalog = await asyncio.gather(
         _safe("chat title", _chat_title(user.chat_id), "") if user.chat_id else _none(""),
         _safe("favorites", storage.favorites(user.user_id, 50), []) if storage else _none([]),
         _safe("history", storage.history(user.user_id, 20), []) if storage else _none([]),
         _safe("playlists", pl.list_playlists(user.user_id), []),
         _safe("counters", storage.counters(), {}) if storage else _none({}),
+        _safe("language", i18n.for_chat(chat_id), i18n.catalog("")),
     )
     playlists = []
     for entry in playlist_rows:
@@ -372,6 +395,16 @@ async def _state_response(request: web.Request) -> web.Response:
                 "always_on": state_obj.always_on if state_obj else False,
                 "shuffle": state_obj.shuffle if state_obj else False,
                 "effects": state_obj.effects if state_obj else [],
+            },
+            "language": {
+                "code": catalog.code,
+                "name": catalog.name,
+                "rtl": i18n.is_rtl(catalog.code),
+                # Every shipped language, in the order the picker shows them.
+                "available": [
+                    {"code": code, "name": name, "rtl": i18n.is_rtl(code)}
+                    for code, name in i18n.available().items()
+                ],
             },
             "favorites": _tracks(favorites),
             "history": _tracks(history),
@@ -884,7 +917,7 @@ KNOWN_ACTIONS = frozenset(
         "stop", "seek", "volume", "loop", "shuffle", "clear", "remove", "move",
         "jump", "autoplay", "always", "effects", "favorite", "unfavorite",
         "favorite_track", "playlist_create", "playlist_delete", "playlist_add",
-        "playlist_remove", "playlist_play", "search", "download",
+        "playlist_remove", "playlist_play", "search", "download", "language",
     }
 )
 
@@ -892,7 +925,7 @@ KNOWN_ACTIONS = frozenset(
 PLAYERLESS_ACTIONS = frozenset(
     {
         "playlist_create", "playlist_delete", "playlist_add", "playlist_remove",
-        "favorite_track", "unfavorite", "search",
+        "favorite_track", "unfavorite", "search", "language",
     }
 )
 
@@ -992,6 +1025,30 @@ async def action(request: web.Request) -> web.Response:
                 return ok(track=_track_json(track))
             await player.enqueue(chat_id, track, index=0)
             return ok(track=_track_json(track))
+
+        if name == "language":
+            # The same choice `/language` writes, reachable from the app. A
+            # group keeps its own language, so changing it there is an admin
+            # decision — the app only knows the owner, so that is what it asks.
+            from vyron.core import i18n
+
+            code = str(value or "").strip().lower()
+            if not i18n.is_known(code):
+                return web.json_response(
+                    {
+                        "ok": False,
+                        "error": "that language is not available",
+                        "languages": i18n.available(),
+                    },
+                    status=400,
+                )
+            if chat_id < 0 and not _is_owner(user):
+                return web.json_response(
+                    {"ok": False, "error": "only group admins can change the language"},
+                    status=403,
+                )
+            chosen = await i18n.set_for_chat(chat_id, code)
+            return ok(lang=chosen, name=i18n.name(chosen))
 
         if name == "pause":
             return ok(changed=await player.pause(chat_id))

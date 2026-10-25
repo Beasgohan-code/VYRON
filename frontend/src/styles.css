@@ -2853,3 +2853,36 @@ h2 { text-wrap: balance; }
   transition: border-color 180ms var(--ease), background 180ms var(--ease);
 }
 .gate-token input:focus { border-color: hsl(var(--art-hue) 90% 70% / 0.7); background: rgba(255, 255, 255, 0.09); }
+
+/* ── languages: a grid of native names ─────────────────────────────────── */
+/* Nineteen scripts in one row would be unreadable, and a horizontal scroller
+   hides half of them; a wrapping grid shows every language at once and each
+   chip is sized by its own name, so Tamil and Russian both look right. */
+.lang-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 6px;
+  padding: 4px 2px 2px;
+}
+.lang-chip {
+  justify-content: center;
+  padding: 9px 10px;
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* A script's own direction: Arabic and Urdu read right to left, and a chip
+     that refuses to would look like a typo rather than a translation. */
+  unicode-bidi: isolate;
+}
+.lang-chip[dir="rtl"] { font-size: 13.5px; }
+.lang-chip.active {
+  background: rgba(var(--accent-rgb), 0.22);
+  border-color: rgba(var(--accent-rgb), 0.6);
+  color: var(--text);
+  font-weight: 600;
+}
+@media (max-width: 380px) {
+  .lang-grid { grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); }
+  .lang-chip { font-size: 12px; padding: 8px; }
+}

@@ -5,11 +5,14 @@
 #  are plain dicts, English is the source of truth, and a missing key simply
 #  falls back to English — a half-finished translation never shows a blank.
 #
-#  Adding a language:
-#    1. drop ``vyron/locales/<code>.json`` with {"name": …, "strings": {…}}
-#       (keys copied from English, values translated), or
-#    2. add a dict to ``CATALOGS`` below.
-#  Nothing else needs touching: /language reads ``available()`` at call time.
+#  Adding a language is one file: drop ``vyron/locales/<code>.json`` with
+#  {"name": …, "strings": {…}} — keys copied from English, values translated.
+#  Nothing else needs touching: /language reads ``available()`` at call time,
+#  the picker pages itself, and `/setlang <code>` accepts the new code at once.
+#
+#  A catalog is only *complete* when it carries every English key: the tests
+#  refuse to ship a half translation, and ``coverage()`` is what the picker
+#  shows for a file somebody added by hand.
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 
@@ -22,13 +25,13 @@ logger = logging.getLogger(__name__)
 
 DEFAULT = "en"
 
-# code → what /language calls it
-NAMES: dict[str, str] = {
-    "en": "English",
-    "hi": "हिन्दी",
-    "ml": "മലയാളം",
-    "pa": "ਪੰਜਾਬੀ",
-}
+# code → what /language calls it.  JSON locales fill this in themselves; the
+# entry here is the fallback for English (which has no file — it *is* the keys).
+NAMES: dict[str, str] = {"en": "English"}
+
+# Right-to-left scripts.  Nothing in a Rich card needs flipping, but the Mini
+# App renders the native names itself and has to.
+RTL: frozenset[str] = frozenset({"ar", "ur", "fa", "he", "ps", "sd"})
 
 # ── English: the reference catalog ─────────────────────────────────────────
 _EN: dict[str, str] = {
@@ -40,6 +43,7 @@ _EN: dict[str, str] = {
     "lang.unknown": "That language isn't available.",
     "lang.admin_only": "Only admins can change the language here.",
     "lang.switched": "Switched to {name}.",
+    "lang.page": "page {page}/{pages}",
     # now playing
     "np.streaming": "streaming",
     "np.paused": "paused",
@@ -47,6 +51,9 @@ _EN: dict[str, str] = {
     "np.queued": "{count} queued",
     "np.now_playing": "now playing",
     "np.by": "by",
+    # The poster's own badge. It was read by `cards.now_playing_caption` but
+    # never existed here, so every language printed the literal "np.live".
+    "np.live": "live",
     # control acknowledgements
     "ctl.paused": "Paused",
     "ctl.resumed": "Resumed",
@@ -63,96 +70,10 @@ _EN: dict[str, str] = {
     "ctl.seek": "Jumped to {time}",
 }
 
-CATALOGS: dict[str, dict[str, str]] = {
-    "en": _EN,
-    # ── Hindi ──────────────────────────────────────────────────────────────
-    "hi": {
-        "lang.title": "भाषा",
-        "lang.note": "VYRON के जवाब इस चैट की भाषा में आएंगे। भाषा चुनें — तुरंत लागू होगी।",
-        "lang.current": "वर्तमान",
-        "lang.saved": "भाषा सहेजी गई।",
-        "lang.unknown": "यह भाषा उपलब्ध नहीं है।",
-        "lang.admin_only": "यहाँ केवल एडमिन भाषा बदल सकते हैं।",
-        "lang.switched": "भाषा {name} कर दी गई।",
-        "np.streaming": "चल रहा है",
-        "np.paused": "रुका हुआ",
-        "np.up_next": "अगला",
-        "np.queued": "{count} कतार में",
-        "np.now_playing": "अभी चल रहा है",
-        "np.by": "द्वारा",
-        "ctl.paused": "रोका गया",
-        "ctl.resumed": "फिर शुरू",
-        "ctl.nothing_playing": "कुछ नहीं चल रहा",
-        "ctl.nothing_paused": "कुछ रुका नहीं है",
-        "ctl.skipped": "आगे बढ़ाया",
-        "ctl.queue_empty": "कतार खाली है",
-        "ctl.stopped": "रोका गया और वॉइस चैट छोड़ दी",
-        "ctl.volume": "आवाज़: {volume}%",
-        "ctl.loop": "लूप: {mode}",
-        "ctl.shuffled": "{count} ट्रैक शफल किए",
-        "ctl.autoplay_on": "ऑटोप्ले चालू",
-        "ctl.autoplay_off": "ऑटोप्ले बंद",
-        "ctl.seek": "{time} पर पहुँचे",
-    },
-    # ── Malayalam ─────────────────────────────────────────────────────────
-    "ml": {
-        "lang.title": "ഭാഷ",
-        "lang.note": "VYRON-ന്റെ മറുപടികൾ ഈ ചാറ്റിന്റെ ഭാഷയിൽ വരും. ഒരു ഭാഷ തിരഞ്ഞെടുക്കുക.",
-        "lang.current": "നിലവിലുള്ളത്",
-        "lang.saved": "ഭാഷ സേവ് ചെയ്തു.",
-        "lang.unknown": "ഈ ഭാഷ ലഭ്യമല്ല.",
-        "lang.admin_only": "ഇവിടെ അഡ്മിനുകൾക്ക് മാത്രമേ ഭാഷ മാറ്റാനാകൂ.",
-        "lang.switched": "{name} തിരഞ്ഞെടുത്തു.",
-        "np.streaming": "പ്ലേ ചെയ്യുന്നു",
-        "np.paused": "നിർത്തിവച്ചു",
-        "np.up_next": "അടുത്തത്",
-        "np.queued": "{count} ക്യൂവിൽ",
-        "np.now_playing": "ഇപ്പോൾ പ്ലേ ചെയ്യുന്നത്",
-        "np.by": "ഗായകൻ",
-        "ctl.paused": "നിർത്തി",
-        "ctl.resumed": "തുടർന്നു",
-        "ctl.nothing_playing": "ഒന്നും പ്ലേ ചെയ്യുന്നില്ല",
-        "ctl.nothing_paused": "ഒന്നും നിർത്തിയിട്ടില്ല",
-        "ctl.skipped": "അടുത്തതിലേക്ക് പോയി",
-        "ctl.queue_empty": "ക്യൂ ശൂന്യമാണ്",
-        "ctl.stopped": "നിർത്തി വോയ്സ് ചാറ്റ് വിട്ടു",
-        "ctl.volume": "ശബ്ദം: {volume}%",
-        "ctl.loop": "ലൂപ്പ്: {mode}",
-        "ctl.shuffled": "{count} ട്രാക്കുകൾ ഷഫിൾ ചെയ്തു",
-        "ctl.autoplay_on": "ഓട്ടോപ്ലേ ഓൺ",
-        "ctl.autoplay_off": "ഓട്ടോപ്ലേ ഓഫ്",
-        "ctl.seek": "{time} ലേക്ക് പോയി",
-    },
-    # ── Punjabi ───────────────────────────────────────────────────────────
-    "pa": {
-        "lang.title": "ਭਾਸ਼ਾ",
-        "lang.note": "VYRON ਦੇ ਜਵਾਬ ਇਸ ਚੈਟ ਦੀ ਭਾਸ਼ਾ ਵਿੱਚ ਆਉਣਗੇ। ਇੱਕ ਭਾਸ਼ਾ ਚੁਣੋ।",
-        "lang.current": "ਮੌਜੂਦਾ",
-        "lang.saved": "ਭਾਸ਼ਾ ਸੰਭਾਲੀ ਗਈ।",
-        "lang.unknown": "ਇਹ ਭਾਸ਼ਾ ਉਪਲਬਧ ਨਹੀਂ।",
-        "lang.admin_only": "ਇੱਥੇ ਸਿਰਫ਼ ਐਡਮਿਨ ਭਾਸ਼ਾ ਬਦਲ ਸਕਦੇ ਹਨ।",
-        "lang.switched": "{name} ਚੁਣੀ ਗਈ।",
-        "np.streaming": "ਚੱਲ ਰਿਹਾ",
-        "np.paused": "ਰੁਕਿਆ",
-        "np.up_next": "ਅਗਲਾ",
-        "np.queued": "{count} ਕਤਾਰ ਵਿੱਚ",
-        "np.now_playing": "ਹੁਣ ਚੱਲ ਰਿਹਾ",
-        "np.by": "ਦੁਆਰਾ",
-        "ctl.paused": "ਰੋਕਿਆ",
-        "ctl.resumed": "ਜਾਰੀ",
-        "ctl.nothing_playing": "ਕੁਝ ਨਹੀਂ ਚੱਲ ਰਿਹਾ",
-        "ctl.nothing_paused": "ਕੁਝ ਰੁਕਿਆ ਨਹੀਂ",
-        "ctl.skipped": "ਅੱਗੇ ਵਧਾਇਆ",
-        "ctl.queue_empty": "ਕਤਾਰ ਖਾਲੀ ਹੈ",
-        "ctl.stopped": "ਰੋਕਿਆ ਅਤੇ ਵਾਇਸ ਚੈਟ ਛੱਡੀ",
-        "ctl.volume": "ਆਵਾਜ਼: {volume}%",
-        "ctl.loop": "ਲੂਪ: {mode}",
-        "ctl.shuffled": "{count} ਟਰੈਕ ਸ਼ਫਲ ਕੀਤੇ",
-        "ctl.autoplay_on": "ਆਟੋਪਲੇ ਚਾਲੂ",
-        "ctl.autoplay_off": "ਆਟੋਪਲੇ ਬੰਦ",
-        "ctl.seek": "{time} 'ਤੇ ਪਹੁੰਚੇ",
-    },
-}
+# English is the only catalog in code: it is the reference every other one is
+# measured against.  Everything else is a file under ``vyron/locales/``.
+CATALOGS: dict[str, dict[str, str]] = {"en": _EN}
+
 
 _LOCALES_DIR = Path(__file__).resolve().parents[1] / "locales"
 
@@ -231,6 +152,11 @@ def name(code: str | None) -> str:
     return NAMES.get(resolve(code), resolve(code).upper())
 
 
+def is_rtl(code: str | None) -> bool:
+    """True for a right-to-left script, so a renderer knows to flip."""
+    return resolve(code) in RTL
+
+
 def is_known(code: str | None) -> bool:
     return str(code or "").strip().lower() in CATALOGS
 
@@ -282,6 +208,7 @@ async def set_for_chat(chat_id: int, code: str) -> str:
 
 __all__ = [
     "CATALOGS",
+    "RTL",
     "Catalog",
     "DEFAULT",
     "NAMES",
@@ -292,6 +219,7 @@ __all__ = [
     "catalog",
     "for_chat",
     "is_known",
+    "is_rtl",
     "name",
     "resolve",
     "set_for_chat",

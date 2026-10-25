@@ -178,6 +178,20 @@ export interface ApiHealth {
   endpoints: string[];
 }
 
+export interface LanguageOption {
+  code: string;
+  /** The language's own name — "മലയാളം", never "Malayalam". */
+  name: string;
+  rtl?: boolean;
+}
+
+export interface LanguageState {
+  code: string;
+  name: string;
+  rtl?: boolean;
+  available: LanguageOption[];
+}
+
 export interface AppState {
   ok: boolean;
   preview?: boolean;
@@ -200,6 +214,8 @@ export interface AppState {
   now?: NowPlaying | null;
   queue?: Track[];
   settings?: Settings;
+  /** The chat's language, and every language the bot can answer in. */
+  language?: LanguageState;
   favorites?: Track[];
   history?: Track[];
   playlists?: Playlist[];

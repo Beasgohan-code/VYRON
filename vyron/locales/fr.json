@@ -1,0 +1,33 @@
+{
+  "name": "Français",
+  "strings": {
+    "lang.title": "langue",
+    "lang.note": "VYRON répond dans la langue de ce chat. Choisissez une langue — elle s'applique immédiatement.",
+    "lang.current": "actuelle",
+    "lang.saved": "Langue enregistrée.",
+    "lang.unknown": "Cette langue n'est pas disponible.",
+    "lang.admin_only": "Seuls les admins peuvent changer la langue ici.",
+    "lang.switched": "Passé en {name}.",
+    "lang.page": "page {page}/{pages}",
+    "np.streaming": "en lecture",
+    "np.paused": "en pause",
+    "np.live": "en direct",
+    "np.up_next": "à suivre",
+    "np.queued": "{count} en file",
+    "np.now_playing": "lecture en cours",
+    "np.by": "par",
+    "ctl.paused": "En pause",
+    "ctl.resumed": "Reprise",
+    "ctl.nothing_playing": "Rien n'est en lecture",
+    "ctl.nothing_paused": "Rien n'est en pause",
+    "ctl.skipped": "Passé",
+    "ctl.queue_empty": "La file est vide",
+    "ctl.stopped": "Arrêté et sorti du salon vocal",
+    "ctl.volume": "Volume : {volume}%",
+    "ctl.loop": "Boucle : {mode}",
+    "ctl.shuffled": "{count} pistes mélangées",
+    "ctl.autoplay_on": "Lecture automatique activée",
+    "ctl.autoplay_off": "Lecture automatique désactivée",
+    "ctl.seek": "Avancé à {time}"
+  }
+}
