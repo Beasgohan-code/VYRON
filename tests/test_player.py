@@ -823,3 +823,81 @@ def test_a_substituted_stream_is_not_announced_as_video():
     # a mime-less answer falls back to the extension
     assert _is_video_stream(StreamInfo(url="u", ext="webm", mime="")) is True
     assert _is_video_stream(StreamInfo(url="u", ext="m4a", mime="")) is False
+
+
+# ── the end of a session ───────────────────────────────────────────────────
+def test_the_queue_running_out_leaves_the_call_and_says_so(monkeypatch):
+    """A finished queue is the assistant's cue to leave the voice chat.
+
+    Radio mode used to be on by default, so `_autoplay_track` always found
+    something and the bot never let go of the call: the queue was finished but
+    nobody left. The card now says the session ended and offers "again" and
+    "radio" instead of expecting a typed command.
+    """
+    sent: list[str] = []
+
+    class Bot:
+        async def send_rich_message(self, **kwargs):  # pragma: no cover
+            sent.append(str(kwargs))
+            return SimpleNamespace(id=1)
+
+        async def send_message(self, **kwargs):
+            sent.append(kwargs.get("text", ""))
+            return SimpleNamespace(id=1)
+
+        async def delete_messages(self, chat_id, message_id):
+            return True
+
+    player, calls, youtube, _ = make_player()
+    player.bot = Bot()
+    state = player.queues.get(10)
+    run(player.play_track(10, track("one")))
+    state.np_message_id = 999          # a poster is on screen
+    youtube.search_results = []
+    youtube.suggestions = []
+
+    skipped = run(player.skip(10, natural=True))
+
+    assert skipped is None
+    assert calls.left == [10], "the assistant must leave when nothing is left"
+    assert state.current is None and state.queue == []
+    assert state.np_message_id is None
+    body = "\n".join(sent)
+    # The heading is small-caps, so the buttons are what identify the card.
+    assert "Play again" in body and "Radio" in body
+    assert "left the voice chat" in body
+
+
+def test_stop_keeps_the_call_when_the_chat_asked_for_247():
+    player, calls, _, _ = make_player()
+    state = player.queues.get(10)
+    state.always_on = True
+    run(player.play_track(10, track("one")))
+
+    run(player.stop(10, leave=not state.always_on))
+
+    assert calls.left == []
+    assert state.current is None
+
+
+def test_radio_mode_is_off_unless_someone_chose_it():
+    """An old saved `"autoplay": true` was the *default*, not a decision."""
+    player, _, _, storage = make_player(settings=SimpleNamespace(**{**SETTINGS.__dict__, "autoplay_default": False}))
+    storage.meta["chat_settings"] = {
+        "10": {"autoplay": True},                      # written by the old default
+        "11": {"autoplay": False},                     # a real decision
+        "12": {"autoplay": True, "autoplay_set": True},  # chosen with /autoplay
+    }
+
+    class S:
+        def __init__(self):
+            self.data = storage.meta["chat_settings"]
+
+        async def chat_settings(self, chat_id):
+            return self.data.get(str(chat_id), {})
+
+    player.storage = S()
+    assert run(player.restore_settings(10)).autoplay is False
+    assert run(player.restore_settings(11)).autoplay is False
+    chosen = run(player.restore_settings(12))
+    assert chosen.autoplay is True and chosen.autoplay_set is True

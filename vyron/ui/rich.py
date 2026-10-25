@@ -151,6 +151,47 @@ def is_photo(chat_id: int | str, message_id: int) -> bool:
 
 def _forget(chat_id: int, message_id: int) -> None:
     _RICH_SENT.pop((int(chat_id), int(message_id)), None)
+    _PHOTO_SENT.pop((int(chat_id), int(message_id)), None)
+
+
+def forget(chat_id: int | str, message_id: int | None) -> None:
+    """Stop remembering a message we deleted ourselves.
+
+    The lane caches are how `edit` knows whether to send a caption or a text;
+    a deleted id left in them would make the next edit target a ghost.
+    """
+    if not message_id:
+        return
+    try:
+        _forget(int(chat_id), int(message_id))
+    except (TypeError, ValueError):  # pragma: no cover - a username chat
+        return
+
+
+_PHOTO_FAILED_AT: dict[int, float] = {}
+
+
+def _note_photo_failure(chat_id: Any, exc: Exception) -> None:
+    try:
+        key = int(chat_id)
+    except (TypeError, ValueError):
+        key = 0
+    import time as _time
+
+    now = _time.time()
+    if now - _PHOTO_FAILED_AT.get(key, 0.0) < 300:
+        return
+    _PHOTO_FAILED_AT[key] = now
+    try:
+        from vyron.core.journal import journal
+
+        journal.warn(
+            "art",
+            f"a picture could not be uploaded: {type(exc).__name__}: {exc}"[:300],
+            chat=key,
+        )
+    except Exception:  # pragma: no cover - never break a send on the log
+        pass
 
 
 def esc(value: Any) -> str:
@@ -528,6 +569,11 @@ async def send_photo(
             return sent
         except Exception as exc:
             logger.debug("photo send failed (%s) — falling back to a text card", exc)
+            # "The picture never appears" is invisible from a chat: the card
+            # still arrives, just without the artwork. One rate-limited line in
+            # the owner journal names the reason (file too big, bad file id,
+            # `PHOTO_INVALID_DIMENSIONS`, a chat that forbids media).
+            _note_photo_failure(chat_id, exc)
     return await send(
         client,
         chat_id,
@@ -677,6 +723,7 @@ __all__ = [
     "edit",
     "edit_inline",
     "esc",
+    "forget",
     "has_rich_tags",
     "normalize",
     "react",

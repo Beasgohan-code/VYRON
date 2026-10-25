@@ -119,7 +119,14 @@ class ChatState:
     current: Track | None = None
     history: list[Track] = field(default_factory=list)
     loop: LoopMode = LoopMode.OFF
-    autoplay: bool = True
+    #: Radio mode. Off unless the room asked for it: when the queue a listener
+    #: built runs out, the assistant should leave the voice chat — not keep
+    #: playing suggestions nobody requested.
+    autoplay: bool = False
+    #: Did *someone* choose this, or is it just the default? Settings saved
+    #: before this field existed have no answer, so they follow the current
+    #: default instead of reviving radio mode forever.
+    autoplay_set: bool = False
     shuffle: bool = False
     volume: int = 100
     paused: bool = False

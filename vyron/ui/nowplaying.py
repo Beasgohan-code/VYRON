@@ -132,13 +132,14 @@ async def announce(
 
     catalog = await i18n.for_chat(chat_id)
 
-    if edit and state.np_message_id:
-        markup = (
-            cards.now_playing_caption(state, catalog)
-            if rich.is_photo(chat_id, state.np_message_id)
-            else cards.now_playing_card(state)
-        )
-        if await rich.edit(bot, chat_id, state.np_message_id, markup, markup_keyboard=keyboard):
+    previous = state.np_message_id
+    # The cheapest update there is: the message already *is* the picture, and
+    # only the clock inside its caption moved. No upload, no new message.
+    if edit and previous and rich.is_photo(chat_id, previous):
+        if await rich.edit(
+            bot, chat_id, previous, cards.now_playing_caption(state, catalog),
+            markup_keyboard=keyboard,
+        ):
             return
 
     want_poster = await allowed(chat_id)
@@ -173,6 +174,15 @@ async def announce(
             markup_keyboard=keyboard,
         )
     if message is None:
+        # No picture to be had. If the message already on screen is a text card
+        # it is edited rather than twinned: the same words twice is worse than
+        # a card that stays put.
+        if edit and previous and not rich.is_photo(chat_id, previous):
+            if await rich.edit(
+                bot, chat_id, previous, cards.now_playing_card(state),
+                markup_keyboard=keyboard,
+            ):
+                return
         message = await rich.send(
             bot,
             chat_id,
@@ -180,11 +190,30 @@ async def announce(
             markup_keyboard=keyboard,
             editable=True,
         )
-    if message is not None:
-        state.np_message_id = message.id
+    if message is None:
+        return
+    state.np_message_id = message.id
+    if previous and previous != message.id:
+        # One now-playing message per chat. A text card cannot *become* a
+        # picture in Telegram, so the placeholder goes once its replacement is
+        # on screen — otherwise every track leaves another card behind and the
+        # picture is buried under them.
+        await drop_message(bot, chat_id, previous)
 
     if dm_to and settings.np_dm and dm_to != int(chat_id):
         await mirror_to_dm(bot, dm_to, state, chat_title=chat_title)
+
+
+async def drop_message(bot, chat_id: int, message_id: int | None) -> None:
+    """Delete a message the bot owns, and forget it in the lane caches."""
+    if not message_id or bot is None:
+        return
+    try:
+        await bot.delete_messages(int(chat_id), int(message_id))
+    except Exception as exc:  # already gone, no rights, too old
+        logger.debug("could not drop message %s in %s: %s", message_id, chat_id, exc)
+    finally:
+        rich.forget(chat_id, message_id)
 
 
 async def mirror_to_dm(bot, user_id: int, state: ChatState, *, chat_title: str = "") -> None:
@@ -208,4 +237,4 @@ async def mirror_to_dm(bot, user_id: int, state: ChatState, *, chat_title: str =
         logger.debug("now-playing mirror to %s failed: %s", user_id, exc)
 
 
-__all__ = ["announce", "enabled", "mirror_to_dm", "poster"]
+__all__ = ["announce", "drop_message", "enabled", "mirror_to_dm", "poster"]

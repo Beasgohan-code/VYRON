@@ -71,8 +71,25 @@ class Settings:
     default_volume: int = field(default_factory=lambda: min(200, max(1, _int("DEFAULT_VOLUME", 100))))
     max_queue_size: int = field(default_factory=lambda: max(1, _int("MAX_QUEUE_SIZE", 100)))
     max_track_minutes: int = field(default_factory=lambda: max(0, _int("MAX_TRACK_MINUTES", 0)))
+    #: Comma-separated words no request may contain (`BLOCKED_WORDS`).
+    #:
+    #: Empty by default on purpose: a blanket filter also refuses "Sex on Fire"
+    #: and "Sextape", which are songs. Shizu ships a hard-coded list; here it is
+    #: an operator decision, and the comparison is on whole words, so
+    #: "essex live" still works when "sex" is blocked.
+    blocked_words: str = field(default_factory=lambda: _env("BLOCKED_WORDS"))
+
+    @property
+    def blocked_word_list(self) -> tuple[str, ...]:
+        return tuple(
+            word.strip().lower()
+            for word in self.blocked_words.split(",")
+            if word.strip()
+        )
     idle_leave_seconds: int = field(default_factory=lambda: max(0, _int("IDLE_LEAVE_SECONDS", 300)))
-    autoplay_default: bool = field(default_factory=lambda: _flag("AUTOPLAY", True))
+    # Radio mode is an opt-in, per chat: `/autoplay on`. On a free host the
+    # assistant should leave when the queue someone built ends.
+    autoplay_default: bool = field(default_factory=lambda: _flag("AUTOPLAY", False))
     autoleave_24_7: bool = field(default_factory=lambda: _flag("ALWAYS_ON", False))
     stream_cache_ttl: int = field(default_factory=lambda: max(60, _int("STREAM_CACHE_TTL", 1800)))
     # How long a track that just failed stays "known bad" — long enough to stop

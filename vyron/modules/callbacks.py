@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 _CONTROL_ACTIONS = {
     "pause", "resume", "skip", "stop", "loop", "shuffle", "queue",
     "clearqueue", "vol", "set", "pick", "get", "dl", "lock", "fx", "video",
+    # `radio` persists a chat setting, so it follows the same rule as set.
+    "radio",
 }
 
 
@@ -36,6 +38,13 @@ async def _authorized(client: Client, cq: CallbackQuery, action: str) -> bool:
     if is_owner(cq.from_user.id):
         return True
     return await is_chat_admin(client, message.chat.id, cq.from_user.id)
+
+
+async def _drop(client, chat_id: int, message_id: int | None) -> None:
+    """Delete a card the now-playing picture has made redundant."""
+    from vyron.ui.nowplaying import drop_message
+
+    await drop_message(client, chat_id, message_id)
 
 
 async def _show(client: Client, cq: CallbackQuery, markup: str, keyboard=None) -> None:
@@ -319,6 +328,9 @@ def register(client: Client) -> None:
                     ),
                 )
                 outcome = await begin(client, chat.id, track, status_id=cq.message.id)
+                if outcome == "streamed":
+                    # The poster is the message now; this button card is spent.
+                    await _drop(client, chat.id, cq.message.id)
                 await cq.answer(
                     {
                         "streamed": f"Playing · {truncate(track.title, 26)}",
@@ -585,6 +597,60 @@ def register(client: Client) -> None:
                 await cq.answer("Could not seek")
             return
 
+        # ── the end of a session: "again" and "keep going" ─────────────────
+        if action == "replay":
+            if not state or not state.history:
+                await cq.answer("Nothing to play again.", show_alert=True)
+                return
+            track = state.history[-1]
+            try:
+                await player.play_track(chat.id, track, video=track.is_video)
+            except Exception as exc:
+                logger.info("replay failed for %s: %s", track.id, exc)
+                await cq.answer("Could not start it again — try /play.", show_alert=True)
+                return
+            await _drop(client, chat.id, cq.message.id)
+            await cq.answer(f"▶️ {truncate(track.title, 32)}")
+            return
+
+        if action == "radio":
+            # One tap from "the queue ended" to "keep the same kind of music
+            # going" — no command to remember, and it survives the next
+            # restart because it is persisted.
+            state.autoplay = True
+            state.autoplay_set = True
+            await player.persist(chat.id)
+            seed = state.history[-1] if state.history else None
+            chosen = None
+            if seed is not None:
+                from vyron.core import autoplay as auto
+
+                try:
+                    chosen = await auto.next_track(
+                        runtime.youtube,
+                        seed,
+                        mood=state.mood,
+                        language=state.language,
+                        played=state.history,
+                    )
+                except Exception as exc:  # pragma: no cover - network paths
+                    logger.info("radio pick failed: %s", exc)
+            if chosen is None:
+                await cq.answer(
+                    "Radio is on — the next /play will keep going by itself.",
+                    show_alert=True,
+                )
+                return
+            try:
+                await player.enqueue(chat.id, chosen, play_now=True)
+            except Exception as exc:
+                logger.info("radio start failed: %s", exc)
+                await cq.answer("Radio is on, but that track would not start.", show_alert=True)
+                return
+            await _drop(client, chat.id, cq.message.id)
+            await cq.answer(f"📻 {truncate(chosen.title, 32)}")
+            return
+
         if action == "video":
             # /play picks audio on purpose (it is a music bot), so the card
             # offers the other half of the choice: this same track, with its
@@ -648,6 +714,7 @@ def register(client: Client) -> None:
                 state.loop = state.loop.next()
             elif arg == "autoplay":
                 state.autoplay = not state.autoplay
+                state.autoplay_set = True
             elif arg == "always":
                 state.always_on = not state.always_on
             elif arg == "poster":
@@ -762,7 +829,7 @@ def register(client: Client) -> None:
                 await cq.answer()
                 return
 
-            from vyron.modules.play import _honest_kind, begin
+            from vyron.modules.play import begin
 
             track = entry.tracks[index]
             want_video = bool(entry.video or track.is_video)
@@ -775,13 +842,15 @@ def register(client: Client) -> None:
                 video=want_video,
                 status_id=cq.message.id,
             )
-            if outcome != "error":
+            if outcome == "streamed":
+                # Playing: the now-playing poster replaces the picker instead of
+                # leaving a second card under it.
+                await _drop(client, chat.id, cq.message.id)
+            elif outcome != "error":
                 await _show(
                     client,
                     cq,
-                    cards.started_card(track, note=_honest_kind(want_video, chat.id))
-                    if outcome == "streamed"
-                    else cards.queued_card(track, 0),
+                    cards.queued_card(track, 0),
                     keyboards.now_playing(state),
                 )
             await cq.answer(

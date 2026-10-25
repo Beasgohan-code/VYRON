@@ -289,3 +289,84 @@ def test_bytes_become_a_file_pointer_the_client_accepts():
     assert as_file(None) is None and as_file(b"") is None
     # Already a file object: handed back untouched.
     assert as_file(pointer) is pointer
+
+
+class _TrackingBot(_PhotoBot):
+    def __init__(self) -> None:
+        super().__init__()
+        self.deleted: list[tuple[int, int]] = []
+        self._next_id = 600
+
+    async def _fresh(self):
+        self._next_id += 1
+        return type("M", (), {"id": self._next_id})()
+
+    async def send_photo(self, **kwargs):
+        self.photos.append(kwargs)
+        return await self._fresh()
+
+    async def send_message(self, **kwargs):
+        self.texts.append(kwargs)
+        return await self._fresh()
+
+    async def delete_messages(self, chat_id, message_ids):
+        self.deleted.append((int(chat_id), int(message_ids)))
+        return True
+
+
+def test_a_text_placeholder_is_replaced_by_the_picture(monkeypatch):
+    """A text card cannot *become* a picture, so the picture wins outright.
+
+    This is the "why is there no thumbnail when it plays" report: the working
+    card was edited into a text "now playing" and the poster was either a
+    second message above it or never seen at all.
+    """
+    from vyron.ui import nowplaying
+
+    async def fake_poster(state, track, **_):
+        return b"\xff\xd8fake"
+
+    monkeypatch.setattr(nowplaying, "poster", fake_poster)
+    bot = _TrackingBot()
+    state = _state()
+    state.np_message_id = 300  # a text card from before
+
+    asyncio.run(nowplaying.announce(bot, 1, state, edit=True))
+
+    assert bot.photos, "the now-playing message must end up as a picture"
+    assert bot.texts == [], "no text twin"
+    assert state.np_message_id == 601
+    assert (1, 300) in bot.deleted, "the text placeholder is removed once the photo lands"
+    assert not rich.is_photo(1, 300), "a deleted id must not stay in the lane caches"
+
+
+def test_a_picture_is_edited_in_place_and_only_one_np_message_stays(monkeypatch):
+    """The clock ticks on the caption; a new track replaces the old poster."""
+    from vyron.ui import nowplaying
+
+    async def fake_poster(state, track, **_):
+        return b"\xff\xd8fake"
+
+    monkeypatch.setattr(nowplaying, "poster", fake_poster)
+
+    edited: list[dict] = []
+
+    class Bot(_TrackingBot):
+        async def edit_message_caption(self, **kwargs):
+            edited.append(kwargs)
+            return type("M", (), {"id": kwargs.get("message_id")})()
+
+    bot = Bot()
+    state = _state()
+    state.np_message_id = 501
+    rich._remember_photo(1, 501)
+
+    asyncio.run(nowplaying.announce(bot, 1, state, edit=True))
+    assert edited, "a picture message is updated with a caption edit"
+    assert bot.photos == [] and bot.deleted == []
+
+    # A different track: one new picture, and the previous poster goes.
+    state.current = Track(id="track-2", title="Next", duration=100)
+    asyncio.run(nowplaying.announce(bot, 1, state))
+    assert len(bot.photos) == 1
+    assert (1, 501) in bot.deleted, "the chat keeps one now-playing picture, not a pile"

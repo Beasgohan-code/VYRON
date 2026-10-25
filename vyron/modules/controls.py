@@ -251,6 +251,7 @@ def register(client: Client) -> None:
 
         if not option:  # bare /autoplay keeps the old toggle behaviour
             state.autoplay = not state.autoplay
+            state.autoplay_set = True
             await _player().persist(chat_id)
             await rich.send(
                 client_,
@@ -334,6 +335,7 @@ def register(client: Client) -> None:
 
         if option in {"on", "off"}:
             state.autoplay = option == "on"
+            state.autoplay_set = True
             await _player().persist(chat_id)
             await rich.send(client_, chat_id, _status())
             return

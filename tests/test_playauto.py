@@ -229,3 +229,92 @@ def test_the_song_cover_is_handed_over_as_a_file_not_raw_bytes(monkeypatch, tmp_
     assert thumb is not None and hasattr(thumb, "read"), "thumb must be a file pointer"
     assert getattr(thumb, "name", "").endswith(".jpg")
     assert thumb.read(2) == b"\xff\xd8"
+
+
+def test_a_command_message_is_cleaned_up_in_groups_only():
+    """Shizu's habit: the typed command does not stay above the answer."""
+    from pyrogram.enums import ChatType
+
+    calls: list[str] = []
+
+    class Message:
+        def __init__(self, chat_type):
+            self.chat = SimpleNamespace(id=-100, type=chat_type)
+
+        async def delete(self):
+            calls.append("deleted")
+
+    asyncio.run(play_module._tidy(None, Message(ChatType.SUPERGROUP)))
+    assert calls == ["deleted"]
+
+    asyncio.run(play_module._tidy(None, Message(ChatType.PRIVATE)))
+    assert calls == ["deleted"], "a DM has no clutter to save"
+
+    class NoRights(Message):
+        async def delete(self):
+            raise RuntimeError("not enough rights")
+
+    asyncio.run(play_module._tidy(None, NoRights(ChatType.SUPERGROUP)))  # must not raise
+
+
+def test_a_blocked_word_is_whole_words_only(monkeypatch):
+    """`BLOCKED_WORDS` is an operator list, and "essex" is not "sex"."""
+    from vyron import runtime as runtime_module
+
+    monkeypatch.setattr(
+        runtime_module.runtime,
+        "settings",
+        SimpleNamespace(blocked_word_list=("sex", "porn")),
+        raising=False,
+    )
+    assert play_module._blocked("Sex on Fire") == "sex"
+    assert play_module._blocked("essex live set") == ""
+    assert play_module._blocked("pornography mix") == "", "only the exact word"
+    assert play_module._blocked("let the world burn") == ""
+
+
+def test_no_words_are_blocked_by_default():
+    from vyron.config import settings
+
+    assert "sex" not in settings.blocked_word_list
+
+
+def test_the_working_card_makes_way_for_the_picture(monkeypatch):
+    """One play, one message: the poster — not the poster plus a text twin."""
+    from vyron import runtime as runtime_module
+
+    state = SimpleNamespace(np_message_id=900)
+    player = SimpleNamespace(queues=SimpleNamespace(get=lambda chat_id: state))
+    monkeypatch.setattr(runtime_module.runtime, "player", player)
+
+    deleted: list[tuple[int, int]] = []
+    edits: list[str] = []
+
+    class Client:
+        async def delete_messages(self, chat_id, message_id):
+            deleted.append((chat_id, message_id))
+            return True
+
+        async def send_message(self, **kwargs):  # pragma: no cover - not reached
+            edits.append(kwargs.get("text", ""))
+            return SimpleNamespace(id=1)
+
+    asyncio.run(play_module._settle(Client(), -100, 55, "<b>started</b>"))
+    assert deleted == [(-100, 55)]
+    assert edits == []
+
+    # No poster to hand over to: the card stays, with the answer written on it.
+    state.np_message_id = None
+    written: list[str] = []
+
+    async def fake_edit(client, chat_id, message_id, markup, keyboard=None):
+        written.append(markup)
+
+    monkeypatch.setattr(play_module, "_edit", fake_edit)
+
+    class EditOnly:
+        pass
+
+    asyncio.run(play_module._settle(EditOnly(), -100, 56, "<b>started</b>"))
+    assert deleted == [(-100, 55)], "nothing to delete when there is no picture"
+    assert written == ["<b>started</b>"]

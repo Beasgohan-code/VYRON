@@ -135,6 +135,19 @@ class Player:
     def active_chats(self) -> list[int]:
         return [chat_id for chat_id in self._in_call]
 
+    def _restored_autoplay(self, data: dict) -> bool:
+        """Radio mode from a stored payload, honouring the old default.
+
+        Settings written before `autoplay_set` existed say `"autoplay": true`
+        because that *was* the default — restoring that verbatim is why a group
+        whose queue ran out kept playing suggestions forever instead of the
+        assistant leaving. A stored `false` is a decision either way and always
+        wins; a stored `true` without the flag follows the current default.
+        """
+        if bool(data.get("autoplay_set", False)):
+            return bool(data.get("autoplay", False))
+        return bool(data.get("autoplay", False)) and self.queues.autoplay_default
+
     async def restore_settings(self, chat_id: int) -> ChatState:
         state = self.queues.get(chat_id)
         if int(chat_id) in self._settings_loaded:
@@ -143,7 +156,8 @@ class Player:
         self._settings_loaded.add(int(chat_id))
         if data:
             state.loop = LoopMode.parse(data.get("loop", state.loop.value))
-            state.autoplay = bool(data.get("autoplay", state.autoplay))
+            state.autoplay_set = bool(data.get("autoplay_set", False))
+            state.autoplay = self._restored_autoplay(data)
             state.volume = int(data.get("volume", state.volume) or state.volume)
             state.always_on = bool(data.get("always_on", state.always_on))
             state.effects = audio_fx.resolve(data.get("effects", []))
@@ -158,6 +172,7 @@ class Player:
             {
                 "loop": state.loop.value,
                 "autoplay": state.autoplay,
+                "autoplay_set": state.autoplay_set,
                 "volume": state.volume,
                 "always_on": state.always_on,
                 "mood": state.mood,
@@ -180,6 +195,7 @@ class Player:
                 "position": round(state.elapsed(), 1) if state.current else 0.0,
                 "loop": state.loop.value,
                 "autoplay": state.autoplay,
+                "autoplay_set": state.autoplay_set,
                 "shuffle": state.shuffle,
                 "volume": state.volume,
                 "always_on": state.always_on,
@@ -239,7 +255,8 @@ class Player:
                 continue
             state = self.queues.get(chat_id)
             state.loop = LoopMode.parse(payload.get("loop") or state.loop.value)
-            state.autoplay = bool(payload.get("autoplay", state.autoplay))
+            state.autoplay_set = bool(payload.get("autoplay_set", False))
+            state.autoplay = self._restored_autoplay(payload)
             state.shuffle = bool(payload.get("shuffle", state.shuffle))
             state.volume = int(payload.get("volume") or state.volume)
             state.always_on = bool(payload.get("always_on", state.always_on))
@@ -898,6 +915,10 @@ class Player:
     async def stop(self, chat_id: int, *, leave: bool = True, announce: bool = False) -> None:
         state = self.queues.get(chat_id)
         journal.info("player", f"playback stopped in {chat_id}", leave=leave, queued=len(state.queue))
+        last = state.current
+        played = len(state.history) + (1 if last else 0)
+        radio = bool(state.autoplay)
+        poster_id, state.np_message_id = state.np_message_id, None
         state.reset_stream()
         state.current = None
         state.queue.clear()
@@ -906,17 +927,33 @@ class Player:
         self._cancel_np(chat_id)
         self._cancel_prefetch(chat_id)
         self.schedule_save()
+        left = False
         if leave:
-            await self.leave(chat_id)
+            left = await self.leave(chat_id)
+        if poster_id and self.bot:
+            # The picture says "streaming · 1:12" forever otherwise; the session
+            # it described is over.
+            from vyron.ui import nowplaying
+
+            await nowplaying.drop_message(self.bot, chat_id, poster_id)
         if announce and self.bot:
             try:
+                # One card that says the session ended — and, when the queue
+                # simply ran out, that the assistant has left the call. The
+                # buttons make "again" and "keep something playing" one tap
+                # instead of a typed command.
                 await rich.send(
                     self.bot,
                     chat_id,
-                    cards.warn_card("<b>Queue finished</b> — add more with /play."),
+                    cards.queue_finished_card(
+                        last if last is not None else (state.history[-1] if state.history else None),
+                        played=played,
+                        left=left,
+                        radio=radio,
+                    ),
                 )
-            except Exception:
-                pass
+            except Exception as exc:  # a card is never worth losing the stop
+                logger.debug("queue-finished card failed in %s: %s", chat_id, exc)
 
     async def leave(self, chat_id: int) -> bool:
         state = self.queues.get(chat_id)

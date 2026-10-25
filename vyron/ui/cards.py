@@ -1995,6 +1995,54 @@ def ok_card(text: str, *, headline: str = "done") -> str:
     return _status_card("check", headline, text)
 
 
+def queue_finished_card(
+    last: Track | None = None,
+    *,
+    played: int = 0,
+    left: bool = True,
+    radio: bool = False,
+) -> str:
+    """The end of a session: the queue ran out, and the assistant is leaving.
+
+    This used to be a one-line warning bolted onto whatever was on screen, so
+    the beginning of the silence and the end of the music looked the same as
+    any other notice. It is the last thing a group sees before the bot leaves
+    the call, so it says what happened, what played, and what to do next.
+
+    Three buttons, never more (Videl and Shizu both stop at five): play the last
+    song again, turn the room into radio, or dismiss.
+    """
+    where = (
+        "The assistant has left the voice chat, so nothing is holding the call "
+        "open."
+        if left
+        else "The assistant is staying in the voice chat (24/7 mode)."
+    )
+    rows: list[tuple[str, str, str]] = [
+        ("clock", "session", f"<b>{played} track{'s' if played != 1 else ''}</b> played"),
+    ]
+    if last is not None:
+        rows.append(("note", "last up", f"<b>{esc(truncate(last.title, 44))}</b>"))
+        if last.uploader:
+            rows.append(("user", "artist", esc(truncate(last.uploader, 32))))
+    return (
+        B.banner("queue finished", glyph="check")
+        + B.context(where)
+        + B.fields(rows)
+        + B.actions(
+            B.row(
+                B.btn(f"{E('play')} Play again", data="v:replay", style="primary"),
+                B.btn(f"{E('spark')} Radio", data="v:radio"),
+                B.btn(f"{E('close')} Close", data="v:close"),
+            )
+        )
+        + B.footer(
+            f"{E('info')} /play queues more · /autoplay keeps the music going"
+            + (" · radio is already on" if radio else "")
+        )
+    )
+
+
 def warn_card(text: str, *, headline: str = "heads up") -> str:
     return _status_card("warn", headline, text, style="danger")
 

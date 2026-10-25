@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from pathlib import Path
 
@@ -154,6 +155,7 @@ async def _thinking(
     glyph: str = "search",
     label: str = "looking for",
     stages: list[tuple[float, str]] | None = None,
+    tidy: bool = True,
 ):
     """Post the working card, then keep it honest while the work happens.
 
@@ -175,6 +177,11 @@ async def _thinking(
             ),
             name="play:ticker",
         )
+    if tidy:
+        # The command has been answered; it does not need to stay above the
+        # answer. Done here, after the card replying to it exists, so no send is
+        # ever addressed to a message that is already gone.
+        await _tidy(client, message)
     return msg
 
 
@@ -182,6 +189,63 @@ async def _edit(client: Client, chat_id: int, message_id: int | None, markup: st
     if message_id:
         _stop_ticker(message_id)
         await rich.edit(client, chat_id, message_id, markup, markup_keyboard=keyboard)
+
+
+async def _tidy(client: Client, message: Message) -> None:
+    """Delete the command itself once it has been understood.
+
+    ShizuMusic's habit, and the reason a group's chat stays readable: `/play
+    never gonna give you up` does not need to sit above the answer for the next
+    two hours. Groups only — a DM has no clutter to save — and never fatal,
+    because deleting a message needs the bot to be an admin.
+    """
+    chat = getattr(message, "chat", None)
+    if chat is None or getattr(chat, "type", None) == ChatType.PRIVATE:
+        return
+    try:
+        await message.delete()
+    except Exception as exc:  # no rights, too old, already gone
+        logger.debug("could not delete the command in %s: %s", message.chat.id, exc)
+
+
+def _blocked(query: str) -> str:
+    """The banned word in *query*, or ``""``. Whole words only."""
+    words = tuple(getattr(runtime.settings, "blocked_word_list", ()) or ())
+    if not words or not query:
+        return ""
+    tokens = set(re.findall(r"[a-z0-9']+", query.lower()))
+    for word in words:
+        if word in tokens:
+            return word
+    return ""
+
+
+async def _settle(
+    client: Client, chat_id: int, status_id: int | None, markup: str | None = None
+) -> None:
+    """Hand the screen over to the now-playing message.
+
+    Playback announces itself with a *picture* — the poster. The working card
+    that got there is a text message, so it used to be edited into a second
+    "started" card that sat underneath the poster: the artwork people asked
+    for, with a duplicate of itself below it. Once the picture is on screen the
+    working card has done its job and goes; if there is no picture (poster
+    disabled, no cover, no rights to delete) the card is edited as before.
+    """
+    if not status_id:
+        return
+    state = runtime.player.queues.get(chat_id) if runtime.player else None
+    announced = getattr(state, "np_message_id", None)
+    if announced and int(announced) != int(status_id):
+        _stop_ticker(status_id)
+        try:
+            await client.delete_messages(chat_id, status_id)
+            rich.forget(chat_id, status_id)
+            return
+        except Exception as exc:  # no rights, too old — show it in place
+            logger.debug("could not drop the working card in %s: %s", chat_id, exc)
+    if markup:
+        await _edit(client, chat_id, status_id, markup)
 
 
 class _Painter:
@@ -376,8 +440,10 @@ def register(client: Client) -> None:
                     await runtime.player.play_track(
                         chat_id, media_track, video=media_track.is_video
                     )
-                    await _edit(client, chat_id, status.id if status else None,
-                                cards.started_card(media_track))
+                    await _settle(
+                        client, chat_id, status.id if status else None,
+                        cards.started_card(media_track),
+                    )
                 except Exception as exc:
                     await _edit(
                         client,
@@ -389,6 +455,24 @@ def register(client: Client) -> None:
 
         if not query:
             await rich.send(client, chat_id, USAGE(), reply_to=message.id)
+            return
+
+        hit = _blocked(query)
+        if hit:
+            from vyron.core.journal import journal
+
+            journal.warn("play", f"refused a request containing {hit!r}", chat=chat_id)
+            await rich.send(
+                client,
+                chat_id,
+                cards.warn_card(
+                    "<b>That word is filtered here</b>\n"
+                    "<blockquote>The request was not run. The list lives in "
+                    "<code>BLOCKED_WORDS</code> on the server.</blockquote>"
+                ),
+                reply_to=message.id,
+            )
+            await _tidy(client, message)
             return
 
         # 2a) catalogue album/playlist (Spotify, Deezer, Apple Music) → queue it
@@ -417,15 +501,17 @@ def register(client: Client) -> None:
                     )
                     if position > 0:
                         queued += 1
-                await _edit(
-                    client,
-                    chat_id,
-                    status.id if status else None,
-                    cards.started_card(tracks[0])
-                    if started and queued
-                    else f"{E('queue')} <b>{rich.esc(truncate(title, 44))}</b>\n"
-                    f"<blockquote>{E('note')} {queued} tracks queued</blockquote>",
+                queued_markup = (
+                    f"{E('queue')} <b>{rich.esc(truncate(title, 44))}</b>\n"
+                    f"<blockquote>{E('note')} {queued} tracks queued</blockquote>"
                 )
+                if started and queued:
+                    await _settle(
+                        client, chat_id, status.id if status else None,
+                        cards.started_card(tracks[0]),
+                    )
+                else:
+                    await _edit(client, chat_id, status.id if status else None, queued_markup)
                 return
 
         # 2b) direct link → resolve and start immediately
@@ -448,16 +534,19 @@ def register(client: Client) -> None:
                     status_id=status.id if status else None,
                     reply_to=message.id,
                 )
-                if outcome != "error":
+                if outcome == "streamed":
+                    await _settle(
+                        client, chat_id, status.id if status else None,
+                        cards.started_card(
+                            track, note=_honest_kind(bool(track.is_video), chat_id)
+                        ),
+                    )
+                elif outcome != "error":
                     await _edit(
                         client,
                         chat_id,
                         status.id if status else None,
-                        cards.started_card(
-                            track, note=_honest_kind(bool(track.is_video), chat_id)
-                        )
-                        if outcome == "streamed"
-                        else cards.queued_card(track, 0),
+                        cards.queued_card(track, 0),
                     )
             except MediaError as exc:
                 await _edit(
@@ -517,20 +606,24 @@ def register(client: Client) -> None:
                         style="primary",
                     )
                 )
-                await _edit(
-                    client,
-                    chat_id,
-                    status.id,
-                    cards.started_card(
-                        tracks[0],
-                        note=_autoplay_note(query, outcome),
-                        extra_actions=others,
+                if outcome == "streamed":
+                    await _settle(
+                        client, chat_id, status.id,
+                        cards.started_card(
+                            tracks[0],
+                            note=_autoplay_note(query, outcome),
+                            extra_actions=others,
+                        ),
                     )
-                    if outcome == "streamed"
-                    else cards.queued_card(
-                        tracks[0], _queue_position(chat_id, tracks[0]), extra_actions=others
-                    ),
-                )
+                else:
+                    await _edit(
+                        client,
+                        chat_id,
+                        status.id,
+                        cards.queued_card(
+                            tracks[0], _queue_position(chat_id, tracks[0]), extra_actions=others
+                        ),
+                    )
                 return
 
         await _edit(
@@ -551,11 +644,26 @@ def register(client: Client) -> None:
         if not query:
             await rich.send(client, chat_id, USAGE(), reply_to=message.id)
             return
+        hit = _blocked(query)
+        if hit:
+            await rich.send(
+                client,
+                chat_id,
+                cards.warn_card(
+                    "<b>That word is filtered here</b>\n"
+                    "<blockquote>The request was not run. The list lives in "
+                    "<code>BLOCKED_WORDS</code> on the server.</blockquote>"
+                ),
+                reply_to=message.id,
+            )
+            await _tidy(client, message)
+            return
 
         status = await _thinking(
             client, message, "searching", glyph="search", query=truncate(query, 52),
             step="asking the catalogues",
             stages=[(1.5, "matching the results"), (4.0, "still searching")],
+            tidy=False,   # `/song` replies to the command with the file itself
         )
         requester = (
             message.from_user.id if message.from_user else 0,
@@ -598,6 +706,7 @@ def register(client: Client) -> None:
                 cards.search_card(query, tracks, mode="download"),
                 keyboards.results_page(tracks),
             )
+        await _tidy(client, message)
 
     # ── /search ────────────────────────────────────────────────────────────
     @client.on_message(cmd(["search"]))
