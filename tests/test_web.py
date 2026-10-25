@@ -113,6 +113,77 @@ def test_state_requires_auth():
     asyncio.run(_with_client(scenario))
 
 
+def test_the_state_payload_points_at_a_real_avatar_route():
+    async def scenario(client):
+        token = auth.make_token(-100999, 424242, TOKEN)
+        response = await client.post(
+            "/api/state", json={"token": token}, headers={"X-Vyron-Token": token}
+        )
+        body = await response.json()
+        assert body["user"]["avatar"] == "/api/avatar"
+        assert body["user"]["photo"] == ""  # a signed token carries no picture
+
+    asyncio.run(_with_client(scenario))
+
+
+def test_the_avatar_endpoint_serves_the_picture(monkeypatch):
+    from vyron.web import avatars
+
+    picture = avatars.Avatar(
+        body=b"\xff\xd8\xff\x00" * 8, content_type="image/jpeg", etag='"tag"'
+    )
+    seen: list[int] = []
+
+    async def fake_avatar_for(user_id, photo=""):
+        seen.append(user_id)
+        return picture
+
+    monkeypatch.setattr(avatars, "avatar_for", fake_avatar_for)
+
+    async def scenario(client):
+        token = auth.make_token(-100999, 424242, TOKEN)
+        headers = {"X-Vyron-Token": token}
+        response = await client.get("/api/avatar", headers=headers)
+        assert response.status == 200
+        assert response.headers["Content-Type"].startswith("image/jpeg")
+        assert response.headers["Cache-Control"] == "private, max-age=21600"
+        assert response.headers["X-Avatar"] == "custom"
+        assert await response.read() == picture.body
+
+        # the same picture is one small body, not a re-download
+        cached = await client.get("/api/avatar", headers={**headers, "If-None-Match": '"tag"'})
+        assert cached.status == 304
+
+    asyncio.run(_with_client(scenario))
+    assert seen and seen[0] == 424242
+
+
+def test_the_avatar_endpoint_admits_when_there_is_no_picture(monkeypatch):
+    from vyron.web import avatars
+
+    async def nothing(user_id, photo=""):
+        return None
+
+    monkeypatch.setattr(avatars, "avatar_for", nothing)
+
+    async def scenario(client):
+        token = auth.make_token(-100999, 424242, TOKEN)
+        response = await client.get("/api/avatar", headers={"X-Vyron-Token": token})
+        assert response.status == 404
+        # do not let a browser cache "no face" forever: people add photos
+        assert response.headers["Cache-Control"] == "no-store"
+
+    asyncio.run(_with_client(scenario))
+
+
+def test_the_avatar_endpoint_is_not_public():
+    async def scenario(client):
+        response = await client.get("/api/avatar")
+        assert response.status == 401
+
+    asyncio.run(_with_client(scenario))
+
+
 def test_action_requires_auth():
     async def scenario(client):
         response = await client.post("/api/action", json={"action": "pause"})

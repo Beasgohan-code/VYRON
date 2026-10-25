@@ -219,6 +219,10 @@ async def state(request: web.Request) -> web.Response:
                 "username": user.username,
                 "owner": _is_owner(user),
                 "access": user.source,
+                # A signed Telegram URL when the app was opened inside Telegram;
+                # the picture itself is served by `/api/avatar` either way.
+                "photo": user.photo,
+                "avatar": "/api/avatar",
             },
             "owner": _is_owner(user),
             "chat": {
@@ -947,6 +951,39 @@ async def info(request: web.Request) -> web.Response:
     )
 
 
+async def avatar(request: web.Request) -> web.Response:
+    """The caller's Telegram profile picture, as image bytes.
+
+    The Mini App cannot put `X-Init-Data` on an `<img src>`; it fetches this
+    endpoint with the same headers as every other call and paints the blob, so
+    the picture never needs a credential in a URL. A 404 means "no picture" —
+    the client draws the initials instead, and the miss is cached for ten
+    minutes so a server without a bot does not retry on every screen.
+    """
+    from vyron.web import avatars
+
+    user = await _identify(request)
+    denied = _denied(user)
+    if denied:
+        return denied
+    picture = await avatars.avatar_for(user.user_id, user.photo) if user.user_id else None
+    if picture is None:
+        return web.Response(
+            status=404,
+            headers={"Cache-Control": "no-store", "X-Avatar": "none"},
+        )
+
+    headers = {
+        # Private: one person's face, cached on their own device only.
+        "Cache-Control": "private, max-age=21600",
+        "ETag": picture.etag,
+        "X-Avatar": "custom",
+    }
+    if request.headers.get("If-None-Match") == picture.etag:
+        return web.Response(status=304, headers=headers)
+    return web.Response(body=picture.body, content_type=picture.content_type, headers=headers)
+
+
 async def authenticate(request: web.Request) -> web.Response:
     user = await _identify(request)
     denied = _denied(user)
@@ -1330,6 +1367,7 @@ def register(app: web.Application) -> None:
     app.router.add_get("/api/playlists", playlists_route)
     app.router.add_get("/api/mix", mix)
     app.router.add_get("/api/state", state)
+    app.router.add_get("/api/avatar", avatar)
     app.router.add_post("/api/state", state)
     app.router.add_post("/api/search", search)
     app.router.add_post("/api/action", action)

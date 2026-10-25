@@ -110,3 +110,13 @@ def test_stats_card_skips_the_block_without_telemetry():
         cache_bytes=0, backend="json", version="1.3.0", system=None,
     )
     assert "CPU" not in markup
+
+
+def test_the_runtime_reports_the_package_version():
+    """The Mini App footer and /health must never show a stale literal."""
+    import vyron
+    from vyron.runtime import Runtime
+
+    fresh = Runtime()
+    assert fresh.version == vyron.__version__
+    assert fresh.build == vyron.__build__

@@ -13,6 +13,7 @@ from typing import Any
 
 from pyrogram import Client
 
+from vyron import __build__, __version__
 from vyron.config import Settings, settings as default_settings
 from vyron.core.charts import Charts
 from vyron.core.downloader import Downloader
@@ -37,8 +38,12 @@ class Runtime:
     lyrics: LyricsClient | None = None
     player: Player | None = None
     started_at: float = field(default_factory=time.time)
-    version: str = "1.3.0"
-    build: str = ""
+    # The *package* version, not a copy of it: the Mini App footer and /health
+    # used to show a literal that was two years of releases out of date
+    # whenever the process was built without `__main__` (preview, tooling,
+    # tests). `__main__` still overwrites this, which is harmless.
+    version: str = field(default_factory=lambda: __version__)
+    build: str = field(default_factory=lambda: __build__)
     handlers_loaded: list[str] = field(default_factory=list)
     # The HTTP port opens before the bot finishes booting, on purpose: a host
     # that never sees the port assumes the deploy failed. That leaves a window

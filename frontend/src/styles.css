@@ -870,7 +870,6 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
 .artist-card b { font-size: 13.5px; }
 .artist-card span { font-size: 12px; color: var(--dim); }
 .artist-card .cover-mono { font-size: 30px; }
-.profile-art .cover-mono { font-size: 40px; }
 .pv-cover .cover-mono { font-size: clamp(48px, 9vw, 96px); }
 
 .playlist-card {
@@ -981,7 +980,7 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
     linear-gradient(140deg, color-mix(in srgb, var(--accent) 16%, transparent), transparent 55%),
     var(--panel);
 }
-.profile-art { width: 96px; flex: none; border-radius: 24px; overflow: hidden; border: 1px solid var(--line); }
+.profile-art { width: 116px; flex: none; }
 .profile-main { display: grid; gap: 4px; }
 .profile-main h1 { font-family: var(--font-display); font-size: clamp(24px, 3.4vw, 32px); font-weight: 800; letter-spacing: -0.03em; }
 .profile-main p { color: var(--muted); font-size: 13.5px; }
@@ -1651,7 +1650,7 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
   .quick b { font-size: 13.5px; }
   .quick span { font-size: 11.5px; }
   .profile-card { flex-direction: column; align-items: flex-start; }
-  .profile-art { width: 76px; }
+  .profile-art { width: 100px; padding: 2px; }
   .log-line { grid-template-columns: 54px 12px minmax(0, 1fr); }
   .log-scope { display: none; }
   .log-line .log-msg { grid-column: 3 / -1; }
@@ -2164,12 +2163,97 @@ body::after {
 .screen-head.with-art h1 { font-size: clamp(24px, 3.2vw, 34px); }
 .screen-head.with-art p { color: color-mix(in srgb, var(--text) 70%, transparent); }
 
-.profile-logo {
+/* ── avatars ───────────────────────────────────────────────────────────────
+   One component, every face in the app: the Telegram profile picture when we
+   have it, this person's own initials when we do not. The picture fades in
+   over the initials, so there is never an empty circle waiting on a network.
+   ---------------------------------------------------------------------- */
+.avatar {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  isolation: isolate;
+  vertical-align: middle;
+  background: var(--panel-2);
+  background:
+    radial-gradient(circle at 30% 20%, hsl(var(--av-h, 265) 82% 62%), hsl(calc(var(--av-h, 265) + 44) 68% 38%));
+  color: #fff;
+  font-family: var(--font-display);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  user-select: none;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1), 0 8px 20px -14px rgba(0, 0, 0, 0.9);
+}
+.avatar-circle { border-radius: 50%; }
+.avatar-squircle { border-radius: 30%; }
+.avatar-initials {
+  font-size: var(--av-size, 15px);
+  line-height: 1;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.35);
+}
+.avatar-img {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   border-radius: inherit;
   object-fit: cover;
-  display: block;
+  opacity: 0;
+  transition: opacity 0.28s var(--ease);
+  background: var(--bg-elev);
+}
+.avatar-img.in { opacity: 1; }
+
+/* The profile card gets a ring; a signed-in listener gets a live dot. */
+.avatar-ring::after {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  border-radius: inherit;
+  border: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  box-shadow: 0 0 26px -6px color-mix(in srgb, var(--accent) 75%, transparent);
+  pointer-events: none;
+}
+.avatar-status {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--bg);
+  background: var(--dim);
+  transition: background 0.2s var(--ease);
+}
+.avatar-status.on {
+  background: var(--ok);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 26%, transparent);
+}
+
+/* The small face in the topbar; it is the way to "You" on a phone. */
+.topbar-avatar {
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  line-height: 0;
+  cursor: pointer;
+  transition: transform 0.18s var(--ease), filter 0.18s var(--ease);
+}
+.topbar-avatar:hover { transform: translateY(-1px); filter: brightness(1.08); }
+.topbar-avatar:active { transform: scale(0.94); }
+.topbar-avatar:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+/* A squircle profile picture sits in the card like a record sleeve. */
+.profile-art {
+  display: grid;
+  place-items: center;
+  padding: 10px;
+  border-radius: 30px;
 }
 
 /* ==========================================================================

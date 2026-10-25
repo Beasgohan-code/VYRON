@@ -273,7 +273,7 @@ and translated instead of being flattened into "nothing could be extracted":
 | *cannot reach YouTube* | egress/DNS on the host | `PROXY` or a different region |
 
 `/doctor` prints the same sentence, and its first row is the **build**
-(`v1.9.5 · 2026-10-25`): if it still shows an older one, the deploy did not
+(`v1.9.6 · 2026-10-25`): if it still shows an older one, the deploy did not
 land — that is a different problem from a broken track.
 
 ### Every source, and how they back each other up
@@ -713,8 +713,17 @@ WEBAPP_URL=https://your-deployment        # Render/Koyeb URL
   own playback can be inspected side by side.
 - **Backend** — `vyron/web/` (`aiohttp`) exposes `/api/state`, `/api/action`,
   `/api/home`, `/api/search`, `/api/mix`, `/api/rooms`, `/api/playlists`,
-  `/api/lyrics` and streaming audio at `/api/stream/{id}` (HTTP Range, so seeking
+  `/api/lyrics`, `/api/avatar` (your Telegram picture, fetched and cached
+  server-side) and streaming audio at `/api/stream/{id}` (HTTP Range, so seeking
   works) over the *same* `Player` the bot uses, so chat and app never disagree.
+- **Your face** — the Mini App shows the same profile picture Telegram does: a
+  30 px one in the topbar (the way to *You* on a phone) and a ringed 96 px one on
+  the profile card. It never depends on a third-party request from the webview:
+  `/api/avatar` resolves the signed `photo_url` from `initData`, falls back to
+  the bot's own `get_chat`, and caches the bytes for six hours; the app keeps the
+  last picture on the device, so reopening paints your face before the network
+  answers — and initials, drawn underneath, stand in when there is no picture at
+  all.
 - **Auth** — Telegram `initData` (HMAC-verified) or a signed chat token. A group
   player is reached from inside the app: *Rooms → Control* asks
   `POST /api/room` for a chat-scoped token, which the server only mints for an

@@ -159,7 +159,8 @@ export function BootScreen() {
       </div>
 
       <p className="boot-foot">
-        {state?.bot ? `@${state.bot}` : "voice-chat music bot"} · v{state?.version ?? "1.3.0"}
+        {state?.bot ? `@${state.bot}` : "voice-chat music bot"}
+        {state?.version ? ` · v${state.version}` : ""}
       </p>
     </div>
   );

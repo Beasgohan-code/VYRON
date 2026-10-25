@@ -7,6 +7,30 @@ Two version numbers move independently:
 
 ## Bot
 
+### 1.9.6 — 2026-10-25
+
+* **The Mini App shows your Telegram profile picture.** It used to draw a
+  generic logo (or your initials) because a browser cannot request a picture
+  with `X-Init-Data` on an `<img>`. The server resolves it now: `/api/avatar`
+  takes the signed `photo_url` Telegram puts in `initData`, falls back to the
+  bot's own `get_chat`, and returns the bytes — cached for six hours, with a
+  ten-minute negative cache so a user who hides their picture is not asked
+  again on every screen.
+* **One avatar everywhere.** A new `Avatar` component draws the picture over
+  the person's initials (deterministic colour per name), fades it in when it
+  arrives, and keeps the initials if the image fails — there is never an empty
+  circle waiting on a network. It sits in the topbar (the way to *You* on a
+  phone) and on the profile card, where the picture is now a ringed squircle
+  with a live status dot.
+* **Instant on reopen.** The last picture is kept on the device, so a Mini App
+  that Telegram killed (which is every time you leave the chat) paints your face
+  before the first request finishes — and still shows it with no network.
+* **Fixed: a stale version literal.** `runtime.version` defaulted to `1.3.0`,
+  so the app footer and `/health` reported a version from months ago whenever
+  the process did not come through `__main__` (the preview server, tooling).
+  It now reads the package version, and the footer says 1.9.6.
+* Version 1.9.6.
+
 ### 1.9.5 — 2026-10-25
 
 * **The now-playing message is the mock, line for line.** Exactly four facts,

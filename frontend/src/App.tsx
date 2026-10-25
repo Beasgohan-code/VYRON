@@ -1,5 +1,6 @@
 import { ArrowUpRight, Compass, Download, Lock, WifiOff } from "lucide-react";
 import { useEffect, useState } from "react";
+import { Avatar } from "./components/Avatar";
 import { BootScreen } from "./components/BootScreen";
 import { Dock } from "./components/Dock";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -149,6 +150,20 @@ export default function App() {
               <Compass size={18} />
             </button>
             <span className={`status-dot ${state?.streaming ? "on" : ""}`} title={state?.streaming ? "voice chat ready" : "voice engine offline"} />
+            {/* Phone shell: the rail is gone, so the face lives here. */}
+            <button
+              type="button"
+              className="topbar-avatar"
+              aria-label="Your profile"
+              onClick={() => setView("profile")}
+            >
+              <Avatar
+                name={state?.user?.name}
+                userId={state?.user?.id}
+                photo={state?.user?.photo}
+                size={30}
+              />
+            </button>
           </div>
         </header>
 
@@ -206,7 +221,7 @@ export default function App() {
         )}
 
         <footer className="foot">
-          <span>VYRON v{state?.version ?? "1.2.0"}</span>
+          <span>{state?.version ? `VYRON v${state.version}` : "VYRON"}</span>
           <span className="foot-dot" />
           <span>{state?.streaming ? "voice chat" : "engine off"}</span>
           <span className="foot-dot" />

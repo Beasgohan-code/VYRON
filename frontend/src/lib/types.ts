@@ -184,7 +184,17 @@ export interface AppState {
   version?: string;
   bot?: string;
   streaming?: boolean;
-  user?: { id?: number; name?: string; username?: string; owner?: boolean; access?: string };
+  user?: {
+    id?: number;
+    name?: string;
+    username?: string;
+    owner?: boolean;
+    access?: string;
+    /** Signed Telegram picture URL — a cache seed, not something we render. */
+    photo?: string;
+    /** Where the picture itself comes from. */
+    avatar?: string;
+  };
   owner?: boolean;
   chat?: { id?: number; title?: string; is_group?: boolean };
   now?: NowPlaying | null;

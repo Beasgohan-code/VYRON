@@ -2,8 +2,8 @@ import { Crown, Download, Gauge, History, Link2, Moon, Palette, ShieldCheck, Spa
 import { useApp } from "../lib/store";
 import { fmtDuration } from "../lib/format";
 import type { AccentName, ThemeName } from "../lib/store";
+import { Avatar } from "../components/Avatar";
 import { Count } from "../components/Count";
-import { Cover } from "../components/Cover";
 import { useViewReveal } from "../lib/anim";
 
 const THEMES: { key: ThemeName; label: string; icon: typeof Sun }[] = [
@@ -36,11 +36,15 @@ export function You() {
     <div className="stage" ref={stage}>
       <section className="profile-card stage-block">
         <div className="profile-art">
-          {user?.name ? (
-            <Cover track={{ title: user.name }} monogram />
-          ) : (
-            <img className="profile-logo" src="/brand/avatar.jpg" alt="" />
-          )}
+          <Avatar
+            name={user?.name}
+            userId={user?.id}
+            photo={user?.photo}
+            size={96}
+            shape="squircle"
+            ring
+            status={state?.streaming ? "on" : "off"}
+          />
         </div>
         <div className="profile-main">
           <span className="eyebrow">
@@ -51,7 +55,7 @@ export function You() {
           <div className="profile-tags">
             {state?.chat?.is_group && <span className="tag">{state.chat.title}</span>}
             <span className="tag">{state?.streaming ? "voice chat ready" : "voice engine offline"}</span>
-            <span className="tag">v{state?.version ?? "1.2.0"}</span>
+            {state?.version && <span className="tag">v{state.version}</span>}
           </div>
         </div>
       </section>

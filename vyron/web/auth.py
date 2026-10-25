@@ -31,6 +31,9 @@ class WebUser:
     auth_date: int = 0
     owner: bool = False
     epoch: int = 0
+    # Telegram hands the Mini App a signed profile-picture URL inside initData.
+    # It is a *hint*, not a requirement: `/api/avatar` falls back to the bot.
+    photo: str = ""
 
     @property
     def authenticated(self) -> bool:
@@ -39,6 +42,30 @@ class WebUser:
 
 def _secret(bot_token: str) -> bytes:
     return hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
+
+
+# Telegram serves profile pictures from these hosts. Anything else in a
+# `photo_url` is not something the app should put in an <img> tag, so the field
+# is dropped rather than trusted: initData is signed, but its *contents* are
+# still a URL somebody else's account controls.
+_PHOTO_HOSTS = (
+    "t.me",
+    "telegram.me",
+    "telegram.org",
+    "telegram-cdn.org",
+    "cdn-telegram.org",
+)
+
+
+def safe_photo_url(value: str) -> str:
+    """Return *value* when it is an https Telegram picture URL, else ``""``."""
+    value = (value or "").strip()
+    if not value.lower().startswith("https://") or len(value) > 512:
+        return ""
+    host = value.split("/", 3)[2].split(":")[0].lower()
+    if not any(host == allowed or host.endswith(f".{allowed}") for allowed in _PHOTO_HOSTS):
+        return ""
+    return value
 
 
 def verify_init_data(init_data: str, bot_token: str, *, max_age: int = 86400) -> WebUser | None:
@@ -74,6 +101,7 @@ def verify_init_data(init_data: str, bot_token: str, *, max_age: int = 86400) ->
                 filter(None, [payload.get("first_name"), payload.get("last_name")])
             ).strip()
             user.username = str(payload.get("username") or "")
+            user.photo = safe_photo_url(str(payload.get("photo_url") or ""))
         except Exception:
             pass
 
@@ -208,6 +236,7 @@ def resolve_user(
 
     if signed and telegram:
         signed.name, signed.username = telegram.name, telegram.username
+        signed.photo = telegram.photo
         signed.user_id = signed.user_id or telegram.user_id
         return signed
     if signed:
@@ -306,4 +335,5 @@ __all__ = [
     "identify",
     "make_token",
     "resolve_user",
+    "safe_photo_url",
 ]

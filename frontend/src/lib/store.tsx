@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { ApiError, api, haptic, notify, setToken, telegram } from "./api";
+import { primeAvatar } from "./avatar";
 import { resolveTrack, useAudioEngine, type AudioEngine } from "./audio";
 import type { AppState, HomePayload, Playlist, Room, Track, View } from "./types";
 
@@ -168,6 +169,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const payload = await api.state();
       setState(payload);
       setAccess("ok");
+      // Fetch the profile picture now, so the first render that shows a face
+      // already has one instead of a grey circle that fills in a beat later.
+      primeAvatar(payload.user);
     } catch (error) {
       if (error instanceof ApiError) {
         setAccess(error.status === 401 ? "locked" : "offline");
