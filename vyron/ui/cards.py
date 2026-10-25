@@ -42,24 +42,22 @@ def _requester(track: Track) -> str:
     return f'<a href="tg://user?id={int(track.requested_by)}">{esc(truncate(track.requested_name, 28))}</a>'
 
 
-def _source_badge(track: Track) -> str:
-    return small_caps(track.source[:12] or "youtube")
+def progress_block(
+    state: ChatState,
+    track: Track,
+    *,
+    status_label: str = "",
+    live_label: str = "",
+) -> str:
+    """The live block: the bar, then the clock, then how loud.
 
-
-def _watch_link(track: Track) -> str:
-    url = track.watch_url
-    return f'<a href="{esc(url)}">{esc(truncate(track.title, 68))}</a>' if url else esc(truncate(track.title, 68))
-
-
-def progress_block(state: ChatState, track: Track) -> str:
-    """The live block: bar, then the clock, then who asked, then how loud.
-
-    Four short lines, top to bottom, the way a player on a phone reads::
+    Three lines, top to bottom, the way a player on a phone reads::
 
         ██████◉▬▬▬▬▬▬▬▬▬
         📡 streaming · 1:03 · 39% · 2:44
-        👤 Rinu
         🔊 100%
+
+    Who asked lives in the card header, so it is not repeated here.
 
     The bar gets its own line because it is the thing you glance at; the
     numbers under it are what you read when you actually care. The digits are
@@ -69,7 +67,10 @@ def progress_block(state: ChatState, track: Track) -> str:
     total = int(track.duration or 0)
     paused = bool(getattr(state, "paused", False))
     glyph = E("pause") if paused else E("live")
-    status = "paused" if paused else "streaming"
+    # A caller with a translation catalog passes the label in; the card lane is
+    # English, the poster caption follows the chat's language.
+    status = status_label or ("paused" if paused else "streaming")
+    live = live_label or small_caps("live")
 
     bar = progress_bar(elapsed, total, length=15)
     if total:
@@ -80,13 +81,10 @@ def progress_block(state: ChatState, track: Track) -> str:
     else:
         clock = (
             f"{glyph} <b>{status}</b> · <code>{fmt_duration(elapsed)}</code>"
-            f" · <i>{small_caps('live')}</i>"
+            f" · <i>{live}</i>"
         )
 
     lines = [f"<code>{bar}</code>", clock]
-    requester = _requester(track)
-    if requester:
-        lines.append(f"{E('user')} {requester}")
     volume = int(getattr(state, "volume", 0) or 0)
     lines.append(f"{E('volume')} {volume}%" if volume else f"{E('mute')} muted")
     return "\n".join(lines)
@@ -448,12 +446,169 @@ def help_card(section: str = "main") -> str:
     )
 
 # ── now playing (live, editable) ────────────────────────────────────────────
+def _np_heading(track: Track) -> str:
+    """``Artist - Title``, linked so a tap opens the video.
+
+    The link is invisible: what a person reads is the line they expect, and
+    the words are the whole message — never a bare URL.
+    """
+    artist = esc(truncate(track.uploader, 40))
+    title = esc(truncate(track.title, 64))
+    text = f"{artist} - {title}" if artist else title
+    url = track.watch_url
+    return f'<a href="{esc(url)}">{text}</a>' if url else text
+
+
+def _np_header(track: Track) -> list[str]:
+    """The five lines every now-playing surface starts with::
+
+        1
+        ✨ Now playing
+        Chris Grey - LET THE WORLD BURN (Official Lyric Video)
+        ⏱ Duration: 2:44
+        👥 Requested by: Rinu
+
+    The number is the track's place in the play order — what is playing is
+    always 1 — and it is printed even with an empty queue so the card does not
+    change shape depending on what happens to be queued.
+    """
+    total = int(track.duration or 0)
+    length = fmt_duration(total) if total else small_caps("live")
+    lines = [
+        "<b>1</b>",
+        f"{E('spark')} <b>{small_caps('now playing')}</b>",
+        f"<b>{_np_heading(track)}</b>",
+        f"{E('clock')} <b>{small_caps('duration')}:</b> <code>{length}</code>",
+    ]
+    requester = _requester(track)
+    if requester:
+        lines.append(f"{E('users')} <b>{small_caps('requested by')}:</b> {requester}")
+    return lines
+
+
+def _np_flags(state: ChatState, catalog=None) -> list[str]:
+    """Loop, 24/7, autoplay and how much is waiting — one quiet line, if any."""
+    flags = []
+    if getattr(state.loop, "value", "off") != "off":
+        flags.append(f"{E('loop')} {state.loop.label}")
+    if state.always_on:
+        flags.append(f"{E('clock')} 24/7")
+    if state.autoplay:
+        flags.append(f"{E('spark')} autoplay")
+    if state.queue:
+        queued = (
+            catalog.t("np.queued", count=len(state.queue))
+            if catalog is not None
+            else f"{len(state.queue)} queued"
+        )
+        flags.append(f"{E('queue')} {queued}")
+    return [f"<i>{' · '.join(flags)}</i>"] if flags else []
+
+
+def _np_up_next(state: ChatState, catalog=None) -> list[str]:
+    """One line for what follows, with the queue length only when it matters."""
+    if not state.queue:
+        return []
+    upcoming = state.queue[0]
+    label = (
+        catalog.t("np.up_next")
+        if catalog is not None
+        else small_caps("up next")
+    )
+    line = (
+        f"{E('skip')} <i>{label}</i> "
+        f"{esc(truncate(upcoming.title, 40))} · {fmt_duration(upcoming.duration)}"
+    )
+    if len(state.queue) > 1:
+        line += f" · <i>{len(state.queue)} queued</i>"
+    return [line]
+
+
+def _np_heading(track: Track) -> str:
+    """``Artist - Title``, linked so a tap opens the video.
+
+    The link is invisible: what a person reads is the line they expect, and
+    the words are the whole message — never a bare URL.
+    """
+    artist = esc(truncate(track.uploader, 40))
+    title = esc(truncate(track.title, 64))
+    text = f"{artist} - {title}" if artist else title
+    url = track.watch_url
+    return f'<a href="{esc(url)}">{text}</a>' if url else text
+
+
+def _np_header(track: Track) -> list[str]:
+    """The five lines every now-playing surface starts with::
+
+        1
+        ✨ Now playing
+        Chris Grey - LET THE WORLD BURN (Official Lyric Video)
+        ⏱ Duration: 2:44
+        👥 Requested by: Rinu
+
+    The number is the track's place in the play order — what is playing is
+    always 1 — and it is printed even with an empty queue so the card does not
+    change shape depending on what happens to be queued.
+    """
+    total = int(track.duration or 0)
+    length = fmt_duration(total) if total else small_caps("live")
+    lines = [
+        "<b>1</b>",
+        f"{E('spark')} <b>{small_caps('now playing')}</b>",
+        f"<b>{_np_heading(track)}</b>",
+        f"{E('clock')} <b>{small_caps('duration')}:</b> <code>{length}</code>",
+    ]
+    requester = _requester(track)
+    if requester:
+        lines.append(f"{E('users')} <b>{small_caps('requested by')}:</b> {requester}")
+    return lines
+
+
+def _np_flags(state: ChatState, catalog=None) -> list[str]:
+    """Loop, 24/7, autoplay and how much is waiting — one quiet line, if any."""
+    flags = []
+    if getattr(state.loop, "value", "off") != "off":
+        flags.append(f"{E('loop')} {state.loop.label}")
+    if state.always_on:
+        flags.append(f"{E('clock')} 24/7")
+    if state.autoplay:
+        flags.append(f"{E('spark')} autoplay")
+    if state.queue:
+        queued = (
+            catalog.t("np.queued", count=len(state.queue))
+            if catalog is not None
+            else f"{len(state.queue)} queued"
+        )
+        flags.append(f"{E('queue')} {queued}")
+    return [f"<i>{' · '.join(flags)}</i>"] if flags else []
+
+
+def _np_up_next(state: ChatState, catalog=None) -> list[str]:
+    """One line for what follows, with the queue length only when it matters."""
+    if not state.queue:
+        return []
+    upcoming = state.queue[0]
+    label = (
+        catalog.t("np.up_next")
+        if catalog is not None
+        else small_caps("up next")
+    )
+    line = (
+        f"{E('skip')} <i>{label}</i> "
+        f"{esc(truncate(upcoming.title, 40))} · {fmt_duration(upcoming.duration)}"
+    )
+    if len(state.queue) > 1:
+        line += f" · <i>{len(state.queue)} queued</i>"
+    return [line]
+
+
 def now_playing_card(state: ChatState, track: Track | None = None) -> str:
     """The live card — edited in place every few seconds, so it stays short.
 
-    Read top to bottom it answers: what is this, who made it, where am I in
-    it, and what is next. The buttons live on the attached keyboard, not in
-    the text, because this message is edited rather than re-sent.
+    Read top to bottom: which track this is, how long it is, who asked for it,
+    where it is in the song, and what is next. The buttons live on the attached
+    keyboard, not in the text, because this message is edited rather than
+    re-sent.
     """
     track = track or state.current
     if not track:
@@ -464,93 +619,36 @@ def now_playing_card(state: ChatState, track: Track | None = None) -> str:
             )
         )
 
-    total = int(track.duration or 0)
-    artist = esc(truncate(track.uploader, 32) or "unknown artist")
-    length = fmt_duration(total) if total else small_caps("live")
-    meta = f"{artist} · {length} · {_source_badge(track)}"
-
-    lines = [progress_block(state, track)]
-    flags = []
-    if getattr(state.loop, "value", "off") != "off":
-        flags.append(f"{E('loop')} {state.loop.label}")
-    if state.always_on:
-        flags.append(f"{E('clock')} 24/7")
-    if state.autoplay:
-        flags.append(f"{E('spark')} autoplay")
-    if flags:
-        lines.append(f"<i>{' · '.join(flags)}</i>")
-
-    if state.queue:
-        upcoming = state.queue[0]
-        lines.append(
-            f"{E('skip')} <i>{small_caps('up next')}</i> "
-            f"{esc(truncate(upcoming.title, 40))} · {fmt_duration(upcoming.duration)}"
-            + (f" · <i>{len(state.queue)} queued</i>" if len(state.queue) > 1 else "")
-        )
-
-    return (
-        B.banner("now playing", glyph="live")
-        + B.context(f"<b>{_watch_link(track)}</b>\n{meta}")
-        + "\n".join(lines)
-    )
+    lines = _np_header(track)
+    lines.append("")
+    lines.append(progress_block(state, track))
+    lines += _np_flags(state)
+    lines += _np_up_next(state)
+    return "\n".join(lines)
 
 
 def now_playing_caption(state: ChatState, catalog=None) -> str:
-    """Caption for the poster: the live clock, nothing the picture already says.
+    """The same card as a poster caption.
 
     ``catalog`` is an i18n catalog; without one the English labels are used.
+    The poster and the text card never disagree because they are built from
+    the same lines.
     """
     track = state.current
     if not track:
         return ""
+    status_label = live_label = ""
+    if catalog is not None:
+        status_label = catalog.t("np.paused" if state.paused else "np.streaming")
+        live_label = catalog.t("np.live")
 
-    def label(key: str, fallback: str, **values) -> str:
-        return catalog.t(key, **values) if catalog is not None else fallback.format(**values)
-
-    elapsed = max(0.0, float(state.elapsed() or 0))
-    total = int(track.duration or 0)
-    status = (
-        label("np.paused", "paused") if state.paused else label("np.streaming", "streaming")
+    lines = _np_header(track)
+    lines.append("")
+    lines.append(
+        progress_block(state, track, status_label=status_label, live_label=live_label)
     )
-    status_glyph = E("pause") if state.paused else E("live")
-
-    # Line 1 — the bar alone, so it can be read at a glance while the poster
-    # is still loading. Same shape as the card's live block.
-    lines = [f"<code>{progress_bar(elapsed, total, length=15)}</code>"]
-
-    # Line 2 — what it is doing, then the clock in the order it is heard.
-    if total:
-        lines.append(
-            f"{status_glyph} {status} · <code>{fmt_duration(elapsed)}</code>"
-            f" · {percentage(elapsed, total)}% · <code>{fmt_duration(total)}</code>"
-        )
-    else:
-        lines.append(
-            f"{status_glyph} {status} · <code>{fmt_duration(elapsed)}</code>"
-            f" · <i>{label('np.live', 'live')}</i>"
-        )
-
-    # Line 3 — anything that changes how the queue behaves, then who asked.
-    flags = [
-        f"{E('loop')} {state.loop.label}" if getattr(state.loop, "value", "off") != "off" else "",
-        f"{E('clock')} 24/7" if state.always_on else "",
-        f"{E('queue')} {label('np.queued', '{count} queued', count=len(state.queue))}"
-        if state.queue
-        else "",
-        f"{E('user')} {_requester(track)}" if _requester(track) else "",
-        f"{E('volume')} {int(state.volume)}%" if state.volume else f"{E('mute')} muted",
-    ]
-    meta = [flag for flag in flags if flag]
-    if meta:
-        lines.append(f"<i>{' · '.join(meta)}</i>")
-
-    # Line 4 — only when there is one, and always last: it is the future.
-    if state.queue:
-        upcoming = state.queue[0]
-        lines.append(
-            f"{E('skip')} <i>{label('np.up_next', 'up next')}</i> "
-            f"{esc(truncate(upcoming.title, 34))}"
-        )
+    lines += _np_flags(state, catalog)
+    lines += _np_up_next(state, catalog)
     return "\n".join(lines)
 
 

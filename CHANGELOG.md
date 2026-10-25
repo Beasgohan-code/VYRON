@@ -7,6 +7,32 @@ Two version numbers move independently:
 
 ## Bot
 
+### 1.9.4 — 2026-10-25
+
+* **The now-playing card is the card people already know.** One look at the
+  message the user pasted, and the shape became::
+
+      1
+      ✨ Now playing
+      Chris Grey - LET THE WORLD BURN (Official Lyric Video)
+      ⏱ Duration: 2:44
+      👥 Requested by: Rinu
+
+  Then the live block — bar, `📡 streaming · 1:03 · 39% · 2:44`, `🔊 100%` —
+  then loop/autoplay and what plays next. No rule masthead above it: the ✨ line
+  is the heading, so the card is six short lines instead of a decorated page.
+* **Artist - Title, in that order.** The title alone told you the song but not
+  who sang it; the line is now "Chris Grey - LET THE WORLD BURN", still linked
+  so a tap opens the video, with no URL on screen.
+* **Duration and requester are fields, not a sentence.** `⏱ Duration:` and
+  `👥 Requested by:` are labels you scan, and the requester appears once
+  instead of twice (it used to be in the header *and* under the bar).
+* **The poster caption is the same card.** It is built from the same lines, so
+  the picture message and the text fallback can never drift apart; the only
+  difference is that the caption translates "streaming"/"paused" through the
+  chat's catalog.
+* Version 1.9.4.
+
 ### 1.9.3 — 2026-10-25
 
 * **Search → play is one step when the answer is obvious.** Play bots split

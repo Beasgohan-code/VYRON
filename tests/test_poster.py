@@ -74,7 +74,10 @@ def test_caption_is_short_and_live():
     caption = rich.to_caption(cards.now_playing_caption(state))
     assert "streaming" in caption.lower()
     assert "3:24" in caption  # duration
-    assert "Believer" not in caption  # the poster already says it
+    # the caption is the same card as the text lane, not a second design
+    plain = rich.to_plain_text(caption).lower()
+    assert "now playing" in plain
+    assert "Next one" in caption  # up next
     assert len(caption) <= 1024
 
 

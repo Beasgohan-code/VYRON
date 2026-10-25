@@ -83,12 +83,13 @@ def test_the_live_block_is_a_bar_over_a_clock():
     state = ChatState(chat_id=1, current=track, playing=True, offset=50, volume=100)
     lines = progress_block(state, track).splitlines()
 
-    assert len(lines) == 4
+    assert len(lines) == 3
     assert lines[0].startswith("<code>") and KNOB in lines[0] and BAR_FULL in lines[0]
     assert "streaming" in lines[1]
     assert "0:50" in lines[1] and "25%" in lines[1] and "3:20" in lines[1]
-    assert lines[2].startswith("👤") and "Rinu" in lines[2]
-    assert "100%" in lines[3]
+    assert "100%" in lines[2]
+    # who asked is in the card header, not repeated under the bar
+    assert "Rinu" not in "\n".join(lines)
 
 
 def test_the_live_block_says_paused_and_live():
@@ -98,9 +99,35 @@ def test_the_live_block_says_paused_and_live():
     state = ChatState(chat_id=1, current=live, playing=True, offset=61, paused=True)
     lines = progress_block(state, live).splitlines()
 
-    assert len(lines) == 3          # no requester
+    assert len(lines) == 3          # bar, clock, volume
     clock = to_plain_text(lines[1])
     assert "paused" in clock and "1:01" in clock and "live" in clock
+
+
+def test_the_now_playing_card_is_the_shape_the_user_asked_for():
+    """1 / ✨ Now playing / Artist - Title / ⏱ Duration / 👥 Requested by,
+    then the live block — exactly the card they pasted."""
+    from vyron.ui.rich import to_plain_text
+
+    track = Track(
+        id="abc",
+        title="LET THE WORLD BURN (Official Lyric Video)",
+        uploader="Chris Grey",
+        duration=164,
+        requested_name="Rinu",
+        requested_by=7,
+    )
+    state = ChatState(chat_id=1, current=track, playing=True, offset=0, volume=100)
+    lines = to_plain_text(cards.now_playing_card(state)).splitlines()
+
+    assert lines[0] == "1"
+    assert lines[1].endswith("now playing") and "✨" in lines[1]
+    assert lines[2] == "Chris Grey - LET THE WORLD BURN (Official Lyric Video)"
+    assert lines[3].endswith("duration: 2:44") and "⏱" in lines[3]
+    assert lines[4].endswith("requested by: Rinu") and "👥" in lines[4]
+    # and the live block still follows it
+    assert any("streaming" in line for line in lines[5:])
+    assert len(lines[5]) == 0
 
 
 def test_queue_card_pages():
