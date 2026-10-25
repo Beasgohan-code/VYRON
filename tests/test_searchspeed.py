@@ -90,15 +90,22 @@ def test_the_playable_lane_wins_and_youtube_is_cancelled(monkeypatch):
     assert engine.yt_calls == 1, "YouTube should have been started, then abandoned"
 
 
-def test_a_walled_youtube_is_not_asked_at_all(monkeypatch):
+def test_a_walled_youtube_is_still_asked_for_its_results(monkeypatch):
+    """The wall is about streams, not about naming a song.
+
+    Skipping the YouTube half once a stream had failed is what made every text
+    query answer "No results" for hours afterwards: the catalogues alone were
+    left doing the work, and they throttle.
+    """
     fast = [_track("a", "Kesariya")]
     monkeypatch.setattr(search_module.alternate, "search_all", FakeAlternate(fast).search_all)
-    engine = FakeYouTube(tracks=[], walled=True)
+    engine = FakeYouTube(tracks=[_track("yt1", "Kesariya (Official)", "youtube")], walled=True)
 
     result = _run(engine, "Kesariya", limit=6)
 
-    assert [track.id for track in result] == ["a"]
-    assert engine.yt_calls == 0
+    assert engine.yt_calls == 1, "a wall must not hide the whole catalogue from us"
+    assert result[0].id == "a", "the playable lane still ranks first"
+    assert {track.id for track in result} == {"a", "yt1"}
 
 
 def test_thin_catalogues_fall_back_to_youtube(monkeypatch):

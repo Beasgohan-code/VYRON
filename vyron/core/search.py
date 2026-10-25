@@ -663,12 +663,15 @@ class YouTube:
             alternate.search_all(query, count, settings=self.settings),
             name="search:catalogues",
         )
-        yt_task: asyncio.Task | None = None
-        if not self.walled():
-            yt_task = asyncio.create_task(
-                self._search_youtube(query, fetch, count, requester),
-                name="search:youtube",
-            )
+        # YouTube is asked *every* time, wall or no wall. The wall says its
+        # streams are refused from this IP; it does not say `ytsearch` cannot
+        # name a song, and the stream is fetched by the substitution tier
+        # anyway. Skipping it turned one failed stream into a server that
+        # answered "No results" to every text query for the next few hours.
+        yt_task = asyncio.create_task(
+            self._search_youtube(query, fetch, count, requester),
+            name="search:youtube",
+        )
         try:
             tracks = await self._race(alt_task, yt_task, count, query)
         finally:
@@ -683,7 +686,16 @@ class YouTube:
                 if again:
                     return again
         if not tracks:
-            raise MediaError("No results found for that query.")
+            # One last, unguarded pass over the catalogues before giving up: the
+            # first round may have lost a race against a slow catalogue, and a
+            # second try costs a second while a false "No results" costs the
+            # listener their trust in the bot.
+            tracks = await alternate.search_all(query, count, settings=self.settings)
+        if not tracks:
+            raise MediaError(
+                "nothing came back for that — the sources may be throttling this "
+                "server. Try again in a moment, or send a link."
+            )
         ranked = self.rank(query, tracks)[:count]
         _cache_put(query, count, ranked)
         return _stamp(ranked, requester)
