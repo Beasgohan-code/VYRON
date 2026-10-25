@@ -8,6 +8,7 @@
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 
@@ -52,6 +53,12 @@ async def record_errors(request: web.Request, handler) -> web.StreamResponse:
         # normal end to a stream request, not a server fault — logging it as an
         # error buried the requests that really were broken.
         logger.debug("%s %s: client went away (%s)", request.method, request.path, exc)
+        if request.path.startswith(_STREAMING):
+            # Streaming routes prepare the response themselves, so its bytes are
+            # already on the wire; sending a 499 now would write a second status
+            # line into the body (aiohttp then reads "Invalid character in chunk
+            # size"). Cancelling is how this request actually ended: quietly.
+            raise asyncio.CancelledError() from None
         return web.Response(status=499)
     except Exception as exc:
         # The type and message go in the *message*, not only in the metadata:

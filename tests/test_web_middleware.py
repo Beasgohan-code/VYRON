@@ -8,6 +8,7 @@ import pytest
 
 pytest.importorskip("aiohttp")
 
+import aiohttp
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
@@ -90,9 +91,13 @@ def test_a_client_that_hangs_up_is_not_a_crash(quiet_journal):
 
     async def scenario():
         async with TestClient(TestServer(app)) as client:
-            for path in ("/api/stream/abc", "/api/audio/abc"):
-                response = await client.get(path)
-                assert response.status == 499
+            response = await client.get("/api/audio/abc")
+            assert response.status == 499
+            # A streaming route has already sent its status line, so the only
+            # correct thing to do is close: answering 499 there wrote a second
+            # status line into the chunked body.
+            with pytest.raises(aiohttp.ServerDisconnectedError):
+                await client.get("/api/stream/abc")
         assert quiet_journal == [], "a disconnect must stay out of the journal"
 
     asyncio.run(scenario())
