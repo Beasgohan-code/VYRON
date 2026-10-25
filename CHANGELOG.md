@@ -7,6 +7,36 @@ Two version numbers move independently:
 
 ## Bot
 
+### 1.10.12 — 2026-10-25
+
+**Search and download got their seconds back.** Three separate things were each
+costing the listener a timeout, and they added up to the seven-second picker and
+the "this song will not download" card.
+
+*Every catalogue call opened its own HTTP session.* JioSaavn, Audius, the public
+mirrors and the artwork proxy each built a `ClientSession`, which on a cold
+container is a fresh TCP handshake and a fresh TLS handshake — per lane, per
+keystroke, per retry. They all go through one keep-alive session now
+(`utils/net.py`): connections are reused, the DNS answer is cached for five
+minutes, and the connect timeout is 3.5 s rather than "however long the kernel
+feels".
+
+*The substitution tier waited for its slowest lane.* `search_all` gathered every
+engine and returned when the last one finished, so a SoundCloud lane extracting
+a page per result set the price of every substitution at the full timeout. Lanes
+are gathered **as they complete** now, deduped, and the stragglers are cancelled
+the moment the page is full; the per-engine timeout is 4 s instead of 7. When no
+engine answers at all, `find` no longer asks a second identical query — it says
+so and stops, and a *miss* is remembered for two minutes instead of an hour, so
+one throttled minute cannot mark a song unplayable for the rest of the session.
+
+*The wall made YouTube the most expensive thing in a search.* Its streams are
+refused from a walled IP, but its *names* are still worth having — so a walled
+YouTube now gets a 0.6 s glance (`WALLED_GLANCE`) instead of the six-second
+deadline, and the catalogue page is returned immediately. The picker answers in
+about a second while the wall is up, and still merges in whatever YouTube named
+in time.
+
 ### 1.10.11 — 2026-10-25
 
 **A group `/start` now answers the question a group actually has.** The private

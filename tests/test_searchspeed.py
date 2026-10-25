@@ -207,3 +207,18 @@ def test_an_expired_cache_entry_is_not_served(monkeypatch):
     _run(engine, "Kesariya", limit=6)
 
     assert fake.calls == 2
+
+
+def test_a_walled_youtube_gets_a_glance_not_the_deadline(monkeypatch):
+    """Its names are worth 0.6 s, not six: nothing it finds can be played here."""
+    monkeypatch.setattr(
+        search_module.alternate, "search_all", FakeAlternate([_track("a", "Kesariya")]).search_all
+    )
+    engine = FakeYouTube(tracks=[_track("yt1", "Kesariya (Official)", "youtube")], delay=4.0, walled=True)
+
+    started = time.monotonic()
+    result = _run(engine, "Kesariya", limit=6)
+    elapsed = time.monotonic() - started
+
+    assert [track.id for track in result] == ["a"]
+    assert elapsed < search_module.WALLED_GLANCE + 1.0, f"took {elapsed:.1f}s"

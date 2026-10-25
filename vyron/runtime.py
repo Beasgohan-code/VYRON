@@ -161,6 +161,12 @@ class Runtime:
             await self.player.shutdown()
         if self.lyrics:
             await self.lyrics.close()
+        try:
+            from vyron.utils import net
+
+            await net.close()
+        except Exception:  # pragma: no cover - shutdown must never raise
+            pass
         if self.storage:
             await self.storage.close()
 

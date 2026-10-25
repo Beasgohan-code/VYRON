@@ -21,8 +21,6 @@ import random
 import re
 from urllib.parse import quote, urlsplit
 
-import aiohttp
-
 from vyron.core.queue import Track
 
 logger = logging.getLogger(__name__)
@@ -41,17 +39,16 @@ def is_audius(url: str) -> bool:
 
 
 async def _json(url: str) -> dict | None:
-    try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=TIMEOUT)) as session:
-            async with session.get(url, headers=_UA) as response:
-                if response.status != 200:
-                    logger.debug("audius %s → HTTP %s", url, response.status)
-                    return None
-                payload = await response.json(content_type=None)
-                return payload if isinstance(payload, dict) else None
-    except Exception as exc:
-        logger.debug("audius %s failed: %s", url, exc)
-        return None
+    """One request over the shared keep-alive session (see utils.net).
+
+    Audius is the slowest of the three catalogues because it also has to pick a
+    discovery node first; sharing the connection turns that from two handshakes
+    into one.
+    """
+    from vyron.utils import net
+
+    payload = await net.get_json(url, timeout=TIMEOUT, headers=_UA)
+    return payload if isinstance(payload, dict) else None
 
 
 async def host() -> str:

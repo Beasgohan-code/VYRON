@@ -32,6 +32,12 @@ logger = logging.getLogger(__name__)
 
 #: How long the catalogue lane gets before YouTube is even consulted.
 CATALOGUE_GRACE = 1.3
+#: How long a *walled* YouTube gets to add names the catalogues missed. Its
+#: streams cannot play from this IP, so this is a glance, not a wait.
+WALLED_GLANCE = 0.6
+#: The last pass over the catalogues when the race came back empty. A false
+#: "no results" costs more than two seconds, but not four.
+SECOND_CHANCE = 2.5
 #: And how long anything gets after that. A search that has not answered by
 #: now is not going to feel fast, whatever it contains.
 YOUTUBE_DEADLINE = 6.0
@@ -718,7 +724,9 @@ class YouTube:
             # first round may have lost a race against a slow catalogue, and a
             # second try costs a second while a false "No results" costs the
             # listener their trust in the bot.
-            tracks = await alternate.search_all(query, count, settings=self.settings)
+            tracks = await alternate.search_all(
+                query, count, settings=self.settings, budget=SECOND_CHANCE
+            )
         if not tracks:
             raise MediaError(
                 "nothing came back for that — the sources may be throttling this "
@@ -837,6 +845,12 @@ class YouTube:
         real answer still beats an empty one.
         """
         need = max(2, count // 2)
+        # While YouTube is refusing this server, nothing it *names* can be
+        # streamed from here: the substitution tier fetches the audio, and the
+        # catalogue lane is the one whose results actually play. Waiting the
+        # full deadline for the other lane only made the picker slower.
+        walled = self.walled()
+        yt_deadline = 2.5 if walled else YOUTUBE_DEADLINE
         fast: list[Track] = []
         try:
             fast = await asyncio.wait_for(asyncio.shield(alt_task), CATALOGUE_GRACE)
@@ -851,6 +865,27 @@ class YouTube:
         # query count towards "the page is full"; the rest are still offered,
         # ranked last, if nothing better arrives.
         relevant = self._relevant(query, fast)
+        if fast and walled:
+            # The wall is about *streams*, not about naming a song: YouTube can
+            # still find songs the catalogues miss, so it gets a glance — not
+            # the full deadline it used to get.
+            slow: list[Track] = []
+            started = time.monotonic()
+            if yt_task is not None:
+                try:
+                    slow = await asyncio.wait_for(asyncio.shield(yt_task), WALLED_GLANCE)
+                except Exception:  # a timeout included: its names are a bonus
+                    slow = []
+            elapsed = time.monotonic() - started
+            logger.info(
+                "%d result(s) for %r from %s · YouTube is walled, its names took %.1fs (+%d)",
+                len(fast),
+                query,
+                alternate.describe(self.settings),
+                elapsed,
+                len(slow),
+            )
+            return _merge(relevant, [*(t for t in fast if t not in relevant), *slow])
         if len(relevant) >= need or yt_task is None:
             if fast:
                 logger.info(
@@ -865,15 +900,15 @@ class YouTube:
         if not alt_task.done():
             # Still worth waiting for: it is the lane that can actually play.
             try:
-                fast = await asyncio.wait_for(alt_task, YOUTUBE_DEADLINE)
+                fast = await asyncio.wait_for(alt_task, yt_deadline)
             except (asyncio.TimeoutError, Exception):
                 pass
 
         try:
-            slow = await asyncio.wait_for(asyncio.shield(yt_task), YOUTUBE_DEADLINE)
+            slow = await asyncio.wait_for(asyncio.shield(yt_task), yt_deadline)
         except asyncio.TimeoutError:
             slow = []
-            logger.info("YouTube search for %r did not answer in %.1fs", query, YOUTUBE_DEADLINE)
+            logger.info("YouTube search for %r did not answer in %.1fs", query, yt_deadline)
         except Exception as exc:
             slow = []
             logger.info("YouTube search failed for %r: %s", query, exc)

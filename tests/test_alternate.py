@@ -230,3 +230,97 @@ def test_a_walled_video_request_is_served_as_the_same_song(monkeypatch):
     assert info.url == "https://cdn/copy.mp3"
     # the substitution tier is asked for *audio*, never for video it cannot have
     assert asked and asked[0] is False
+
+
+# ── how long the tier is allowed to take ────────────────────────────────────
+def _saavn(ident: str = "s1") -> Track:
+    return Track(id=ident, title="Kesariya", duration=268, uploader="Arijit Singh", source="jiosaavn", url=f"https://cdn/{ident}.m4a")
+
+
+def test_a_lane_that_answers_is_not_held_back_by_a_lane_that_never_will(monkeypatch):
+    """Gathered as they finish: one fast engine is a page, not a partial answer."""
+    import time
+
+    async def lane(name, query, limit, timeout=None):
+        if name == "jiosaavn":
+            return [_saavn()]
+        await asyncio.sleep(5.0)  # the SoundCloud lane, extracting one page per hit
+        return []
+
+    monkeypatch.setattr(alternate, "_from_source", lane)
+
+    started = time.monotonic()
+    found = asyncio.run(
+        alternate.search_all("Kesariya", 1, settings=FakeSettings(), order=["jiosaavn", "soundcloud"])
+    )
+    elapsed = time.monotonic() - started
+
+    assert [track.id for track in found] == ["s1"]
+    assert elapsed < 1.0, f"took {elapsed:.1f}s — the slow lane was awaited"
+
+
+def test_the_tier_gives_up_at_its_budget(monkeypatch):
+    """Four seconds, then the answer is "nothing", not a longer wait."""
+    import time
+
+    async def lane(name, query, limit, timeout=None):
+        await asyncio.sleep(5.0)
+        return []
+
+    monkeypatch.setattr(alternate, "_from_source", lane)
+
+    started = time.monotonic()
+    found = asyncio.run(alternate.search_all("Kesariya", 6, settings=FakeSettings(), budget=0.2))
+    elapsed = time.monotonic() - started
+
+    assert found == []
+    assert elapsed < 1.0, f"took {elapsed:.1f}s — the budget was not enforced"
+
+
+def test_a_lane_that_raises_does_not_hide_the_other_lane(monkeypatch):
+    async def lane(name, query, limit, timeout=None):
+        if name == "audius":
+            raise RuntimeError("audius is down")
+        return [_saavn()]
+
+    monkeypatch.setattr(alternate, "_from_source", lane)
+
+    found = asyncio.run(alternate.search_all("Kesariya", 2, settings=FakeSettings()))
+
+    assert [track.id for track in found] == ["s1"]
+
+
+def test_silence_is_not_asked_for_twice(monkeypatch):
+    """No engine answering means the lanes are throttled, not that we misspelled.
+
+    The second query in `find` used to cost another full four-second timeout for
+    the same empty answer — the substitution was already ten seconds late.
+    """
+    asked: list[str] = []
+
+    async def nothing(query, limit=6, **kwargs):
+        asked.append(query)
+        return []
+
+    monkeypatch.setattr(alternate, "search_all", nothing)
+    wanted = Track(id="yt1", title="Kesariya (Official Video)", duration=268, uploader="Sony Music India")
+
+    assert asyncio.run(alternate.find(wanted, settings=FakeSettings())) is None
+    assert len(asked) == 1, asked
+
+
+def test_a_miss_is_forgotten_in_minutes_not_an_hour(monkeypatch):
+    """One throttled minute must not mark a song unplayable for the session."""
+
+    async def nothing(query, limit=6, **kwargs):
+        return []
+
+    monkeypatch.setattr(alternate, "search_all", nothing)
+    wanted = Track(id="yt2", title="Kesariya (Official Video)", duration=268, uploader="Sony Music India")
+    assert asyncio.run(alternate.find(wanted, settings=FakeSettings())) is None
+
+    import time
+
+    expires, value = alternate._CACHE["youtube:yt2"]
+    assert value is None
+    assert expires - time.time() <= alternate.MISS_TTL + 1.0

@@ -32,8 +32,6 @@ import re
 import time
 from dataclasses import dataclass, field
 
-import aiohttp
-
 from vyron.core.resolvers import HEALTH
 
 logger = logging.getLogger(__name__)
@@ -349,21 +347,21 @@ class PublicStreams:
 
     # ── transport ──────────────────────────────────────────────────────────
     async def _fetch(self, url: str, *, body: dict | None = None) -> dict | None:
-        timeout = aiohttp.ClientTimeout(total=self.timeout)
-        headers = dict(_UA)
-        if body is not None:
-            headers.update({"Accept": "application/json", "Content-Type": "application/json"})
-        async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
-            if body is None:
-                call = session.get(url)
-            else:
-                call = session.post(url, json=body)
-            async with call as response:
-                if response.status != 200:
-                    logger.debug("fallback %s → HTTP %s", url, response.status)
-                    return None
-                payload = await response.json(content_type=None)
-                return payload if isinstance(payload, dict) else None
+        """One request over the shared session.
+
+        Ten mirrors, ten `ClientSession`s, ten TLS handshakes at once was the
+        reason a walled deployment resolved nothing: the container was still
+        shaking hands when the deadline fired. The keep-alive session in
+        `utils.net` reuses the connection and the DNS answer.
+        """
+        from vyron.utils import net
+
+        payload = (
+            await net.get_json(url, timeout=self.timeout, headers=_UA)
+            if body is None
+            else await net.post_json(url, body, timeout=self.timeout, headers=_UA)
+        )
+        return payload if isinstance(payload, dict) else None
 
     async def _json(self, url: str) -> dict | None:
         try:

@@ -61,10 +61,19 @@ _WORD_RE = re.compile(r"[^\W_]+", re.UNICODE)
 ACCEPT_SCORE = 0.65
 # Nothing older than this is re-used; a catalogue URL can expire.
 CACHE_TTL = 3600.0
-# One source gets this long before it is skipped for this lookup.
-SOURCE_TIMEOUT = 7.0
+# A *miss* is cached for two minutes, not an hour. Every lane timing out once is
+# a bad minute on the host, not a fact about the song — and an hour-long "no
+# catalogue has this" is how one throttled minute turned into "downloads are
+# broken" for the rest of the session.
+MISS_TTL = 120.0
+# One source gets this long before it is skipped for this lookup. Four
+# seconds, not seven: a lane that has not answered while two others have is not
+# about to win the race, and the listener is watching a spinner.
+SOURCE_TIMEOUT = 4.0
 
 _CACHE: dict[str, tuple[float, Track | None]] = {}
+#: How many candidates the last lookup saw (0 means no engine answered).
+_last_pool = 0
 
 
 # ── text ────────────────────────────────────────────────────────────────────
@@ -148,22 +157,25 @@ def source_order(settings=None) -> list[str]:
     return names or ["jiosaavn", "audius", "soundcloud"]
 
 
-async def _from_source(name: str, query: str, limit: int) -> list[Track]:
+async def _from_source(
+    name: str, query: str, limit: int, timeout: float | None = None
+) -> list[Track]:
     """One engine's search, never raising and never hanging."""
+    timeout = SOURCE_TIMEOUT if timeout is None else float(timeout)
     try:
         if name == "jiosaavn":
             from vyron.core import jiosaavn
 
-            return await asyncio.wait_for(jiosaavn.search(query, limit), timeout=SOURCE_TIMEOUT)
+            return await asyncio.wait_for(jiosaavn.search(query, limit), timeout=timeout)
         if name == "audius":
             from vyron.core import audius
 
-            return await asyncio.wait_for(audius.search(query, limit), timeout=SOURCE_TIMEOUT)
+            return await asyncio.wait_for(audius.search(query, limit), timeout=timeout)
         if name == "soundcloud":
             from vyron.core import extract
 
             return await asyncio.wait_for(
-                extract.search_soundcloud(query, limit), timeout=SOURCE_TIMEOUT
+                extract.search_soundcloud(query, limit), timeout=timeout
             )
         logger.debug("unknown alternate source %r", name)
         return []
@@ -181,26 +193,61 @@ async def search_all(
     *,
     settings=None,
     order: list[str] | None = None,
+    budget: float | None = None,
 ) -> list[Track]:
-    """Search every configured engine at once and return what is playable."""
+    """Search every configured engine at once and return what is playable.
+
+    The lanes are gathered *as they finish*, not all at the end: JioSaavn
+    answers in a few hundred milliseconds and SoundCloud (which extracts a page
+    per result) usually does not answer at all. Waiting for the slowest lane
+    made every search cost the slowest timeout, which is precisely the seven
+    seconds the Mini App was showing. Whichever lanes have answered by the time
+    we have enough results are the ones that count; the rest are cancelled.
+    """
     query = (query or "").strip()
     if not query:
         return []
     names = order if order is not None else source_order(settings)
     if not names:
         return []
-    pages = await asyncio.gather(*(_from_source(name, query, limit) for name in names))
+    timeout = float(budget or SOURCE_TIMEOUT)
+    loop = asyncio.get_event_loop()
+    deadline = loop.time() + timeout
+
     found: list[Track] = []
     seen: set[str] = set()
-    for page in pages:
-        for track in page:
-            if not track or not track.url:
-                continue
-            key = f"{track.source}:{track.id}"
-            if key in seen:
-                continue
-            seen.add(key)
-            found.append(track)
+    pending: dict[asyncio.Task, str] = {
+        asyncio.ensure_future(_from_source(name, query, limit)): name for name in names
+    }
+    try:
+        while pending and len(found) < limit:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                break
+            done, _ = await asyncio.wait(
+                pending, timeout=remaining, return_when=asyncio.FIRST_COMPLETED
+            )
+            if not done:
+                break
+            for task in done:
+                pending.pop(task, None)
+                if task.cancelled():
+                    continue
+                if task.exception() is not None:
+                    continue
+                for track in task.result() or ():
+                    if not track or not track.url:
+                        continue
+                    key = f"{track.source}:{track.id}"
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    found.append(track)
+    finally:
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
     return found[:limit]
 
 
@@ -219,13 +266,23 @@ async def find(track: Track, *, settings=None, fresh: bool = False) -> Track | N
     if cached and not fresh and cached[0] > time.time():
         return cached[1]
 
+    global _last_pool
     order = source_order(settings)
     found: Track | None = None
     if order:
         title = clean_title(track.title) or track.title
         queries = [f"{title} {track.uploader}".strip(), title]
-        for query in dict.fromkeys(q for q in queries if q):
-            candidates = await search_all(query, 8, settings=settings, order=order)
+        for index, query in enumerate(dict.fromkeys(q for q in queries if q)):
+            if index and _last_pool == 0:
+                # The first query came back from *no* engine at all: the lanes
+                # are down or throttled, and a second round of the same four
+                # seconds would only make the listener wait for the same answer.
+                logger.info("no catalogue answered for %r — not asking a second time", query)
+                break
+            candidates = await search_all(
+                query, 8, settings=settings, order=order, budget=SOURCE_TIMEOUT
+            )
+            _last_pool = len(candidates)
             best: tuple[float, Track] | None = None
             for candidate in candidates:
                 value = score(track, candidate)
@@ -246,7 +303,7 @@ async def find(track: Track, *, settings=None, fresh: bool = False) -> Track | N
                 )
                 break
 
-    _CACHE[key] = (time.time() + CACHE_TTL, found)
+    _CACHE[key] = (time.time() + (CACHE_TTL if found is not None else MISS_TTL), found)
     return found
 
 

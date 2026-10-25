@@ -17,8 +17,6 @@ import logging
 import re
 from urllib.parse import quote, urlsplit
 
-import aiohttp
-
 from vyron.core.queue import Track
 
 logger = logging.getLogger(__name__)
@@ -136,17 +134,11 @@ def parse_song(entry: dict) -> Track | None:
 
 
 async def _json(url: str) -> dict | None:
-    try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=TIMEOUT)) as session:
-            async with session.get(url, headers=_UA) as response:
-                if response.status != 200:
-                    logger.debug("jiosaavn %s → HTTP %s", url, response.status)
-                    return None
-                payload = await response.json(content_type=None)
-                return payload if isinstance(payload, dict) else None
-    except Exception as exc:
-        logger.debug("jiosaavn %s failed: %s", url, exc)
-        return None
+    """One request over the shared keep-alive session (see utils.net)."""
+    from vyron.utils import net
+
+    payload = await net.get_json(url, timeout=TIMEOUT, headers=_UA)
+    return payload if isinstance(payload, dict) else None
 
 
 async def search(query: str, limit: int = 5) -> list[Track]:
