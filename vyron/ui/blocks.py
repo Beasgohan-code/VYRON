@@ -244,12 +244,10 @@ def banner(title: str, *, glyph: str = "brand", meta: str = "", width: int = RUL
         # A heading is already bold; nesting <b> inside it makes Telegram's
         # classic fallback emit "<b><b>…</b></b>".
         return f"<h2>{plain}</h2>\n<hr/>\n"
-    line = f"{E(glyph)} <b>{small_caps(title)}</b>"
-    if meta:
-        line += f"  {meta}"
-    # Trailing newline: these pieces are concatenated, and a bare text line
-    # glued to the next block is how "v1.9.0✦ what i can do" happens.
-    return f"{rule(width)}\n{line}\n{rule(width)}\n"
+    # Classic lane: a quoted line. Telegram draws the quote bar for us, which
+    # reads as a header on a phone — and unlike a line of "━━━━━━" it is not a
+    # wall of characters sitting between every section of every card.
+    return f"<blockquote>{E(glyph)} <b>{small_caps(title)}</b>{('  ' + meta) if meta else ''}</blockquote>\n"
 
 
 def fields(rows: Sequence[tuple[str, str, str]]) -> str:
@@ -268,15 +266,25 @@ def fields(rows: Sequence[tuple[str, str, str]]) -> str:
 
 
 def items(rows: Sequence[tuple[str, str, str]]) -> str:
-    """``◈ 📥 ꜱᴀᴠᴇ — what it does`` — the feature list under a section title."""
+    """``◈ 📥 ꜱᴀᴠᴇ — what it does`` — the feature list under a section title.
+
+    In the rich lane this is a real ``<ul>``: Telegram draws the bullets, hangs
+    the second line, and the block reads as a list instead of as prose with
+    marks in front of it. The classic lane keeps the ``◈`` line form, which is
+    what ``to_html`` would turn a list into anyway.
+    """
     from vyron.ui.theme import small_caps
 
     lines: list[str] = []
     for glyph, name, text in rows:
         prefix = f"{E(glyph)} " if glyph else ""
         label = f"<b>{small_caps(name)}</b>"
-        lines.append(f"{FIELD_MARK} {prefix}{label} — {text}" if text else f"{FIELD_MARK} {prefix}{label}")
-    return "\n".join(lines) + "\n" if lines else ""
+        lines.append(f"{prefix}{label} — {text}" if text else f"{prefix}{label}")
+    if not lines:
+        return ""
+    if rich_lane():
+        return "<ul>" + "".join(f"<li>{line}</li>" for line in lines) + "</ul>\n"
+    return "\n".join(f"{FIELD_MARK} {line}" for line in lines) + "\n"
 
 
 def section_title(label: str, *, glyph: str | None = None) -> str:
@@ -286,7 +294,7 @@ def section_title(label: str, *, glyph: str | None = None) -> str:
     prefix = f"{E(glyph)} " if glyph else ""
     if rich_lane():
         return f"\n<h3>{SECTION_MARK} {prefix}{small_caps(label)}</h3>\n"
-    return f"\n{SECTION_MARK} {prefix}<b>{small_caps(label)}</b> {SECTION_MARK}\n"
+    return f"\n{SECTION_MARK} <b>{prefix}{small_caps(label)}</b>\n"
 
 
 def head(title: str, *, glyph: str = "spark", meta: str = "", level: int = 2) -> str:
@@ -310,10 +318,18 @@ def pill(text: str, tone: str = "info") -> str:
 
 
 def section(label: str, body: str, *, glyph: str | None = None, rule: bool = True) -> str:
+    """A labelled block: hairline, label, body.
+
+    The label is a heading in the rich lane so it is visibly a section of the
+    card rather than another bold line inside it.
+    """
     from vyron.ui.theme import small_caps
 
     prefix = f"{E(glyph)} " if glyph else ""
-    label = f"<b>{prefix}{small_caps(label)}</b>"
+    if rich_lane():
+        label = heading(f"{prefix}{small_caps(label)}", 4)
+    else:
+        label = f"<b>{prefix}{small_caps(label)}</b>"
     return (divider() if rule else "") + label + body
 
 
@@ -324,9 +340,17 @@ def meter(value: float, total: float, *, width: int = 12, full: str = "▰", emp
 
 
 def actions(*rows: str) -> str:
-    """The action block: a hairline, then the buttons in the order given."""
+    """The action block: a hairline, then the buttons in the order given.
+
+    The hairline only exists in the rich lane. In the classic lane the buttons
+    are stripped and a real ``reply_markup`` keyboard is attached instead, so
+    drawing a divider there left a bare line of dashes with nothing under it —
+    the most "the design gave up here" part of the old cards.
+    """
     body = "".join(row_ for row_ in rows if row_)
-    return (divider() + body) if body else ""
+    if not body:
+        return ""
+    return (divider() + body) if rich_lane() else body
 
 
 def meta_line(*bits: str) -> str:
@@ -335,6 +359,9 @@ def meta_line(*bits: str) -> str:
 
 
 def empty_state(glyph: str, title: str, hint: str) -> str:
+    """The one screen that must never look broken: nothing here yet, and why."""
+    if rich_lane():
+        return heading(f"{E(glyph)} {title}", 3) + note(hint)
     return f"{E(glyph)} <b>{title}</b>\n" + note(hint)
 
 

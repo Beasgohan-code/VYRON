@@ -200,10 +200,10 @@ def test_a_card_is_a_masthead_fields_and_sections():
     rich.set_rich_enabled(False)
     try:
         top = B.banner("vyron · player")
-        lines = top.splitlines()
-        assert lines[0] == lines[2] == B.rule()
-        assert "ᴘʟᴀʏᴇʀ" in lines[1] and lines[1].startswith(B.E("brand"))
-        assert top.endswith("\n")  # so the next block starts on its own line
+        assert top.startswith("<blockquote>") and top.endswith("</blockquote>\n")
+        assert "ᴘʟᴀʏᴇʀ" in top and top.count("<b>") == 1
+        assert B.rule() not in top, "a wall of ━ is not a header"
+        assert B.actions(B.row(B.btn("x", data="v:np"))) .startswith("<tg-button-row")
     finally:
         rich.set_rich_enabled(None)
 
@@ -214,10 +214,15 @@ def test_a_card_is_a_masthead_fields_and_sections():
     rich.set_rich_enabled(False)
     try:
         section = B.section_title("what i can do")
-        assert section.strip() == "✦ <b>ᴡʜᴀᴛ ɪ ᴄᴀɴ ᴅᴏ</b> ✦"
+        assert section.strip() == "✦ <b>ᴡʜᴀᴛ ɪ ᴄᴀɴ ᴅᴏ</b>"
     finally:
         rich.set_rich_enabled(None)
-    assert B.items([("download", "save", "MP3 320")]).strip().endswith("MP3 320")
+    rich.set_rich_enabled(False)
+    try:
+        line_items = B.items([("download", "save", "MP3 320")]).strip()
+        assert line_items.startswith("◈ ") and line_items.endswith("MP3 320")
+    finally:
+        rich.set_rich_enabled(None)
 
 
 def test_the_rich_lane_makes_the_masthead_a_real_heading():
@@ -232,6 +237,13 @@ def test_the_rich_lane_makes_the_masthead_a_real_heading():
         assert rich.has_rich_tags(top)
         section = B.section_title("what i can do")
         assert "<h3>" in section
+        # lists become lists, and a labelled block becomes a real heading
+        listed = B.items([("download", "save", "MP3 320"), ("search", "find", "")])
+        assert listed.startswith("<ul><li>") and listed.count("<li>") == 2
+        assert "<b>ꜱᴀᴠᴇ</b> — MP3 320" in listed
+        block = B.section("levels", "body text", glyph="bolt")
+        assert "<h4>" in block and "<b>ʟᴇᴠᴇʟꜱ</b>" not in block
+        assert B.empty_state("moon", "nothing queued", "add a song").startswith("<h3>")
         # and the classic lane still gets readable text out of it
         plain = rich.to_html(B.banner("vyron · player") + B.context("hi"))
         assert "ᴘʟᴀʏᴇʀ" in plain and "──────────" in plain
