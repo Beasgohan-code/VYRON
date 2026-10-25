@@ -7,6 +7,22 @@ Two version numbers move independently:
 
 ## Bot
 
+### 1.9.3 — 2026-10-25
+
+* **Search → play is one step when the answer is obvious.** Play bots split
+  into "plays the first hit and is often wrong" and "always shows five choices
+  and costs a tap every time". VYRON now measures how well the top result
+  matches the query (`match_confidence`): a full match starts immediately, a
+  partial one or a variant (slowed, nightcore, cover, 10-hour loop) opens the
+  picker. The started card carries **other results**, so a wrong guess is one
+  tap from the list.
+* **Every result is three choices.** The picker's buttons are titled, numbered
+  the way the list is, and offer **play**, **next** (jump the queue) and
+  **queue** (leave the current song alone) — `/play` no longer has to interrupt
+  what is playing to add something.
+* **`/play` with no arguments explains itself** with a card and real buttons
+  instead of a blockquote of examples.
+
 ### 1.9.2 — 2026-10-24
 
 * **Every reply is a card.** A one-line `B.note` answer was the last thing that
@@ -61,7 +77,6 @@ Two version numbers move independently:
   is written with its real extension and transcoded to MP3 at 320 kbps when
   ffmpeg is present — the old code renamed every AAC stream to `.mp3`, which
   strict players refused.
-
 ### 1.9.1 — 2026-10-24
 
 * **A walled server still plays music.** `Failed to extract any player response`

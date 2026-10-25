@@ -202,3 +202,59 @@ def test_the_started_card_offers_video_only_when_it_makes_sense():
 
     saavn = cards.started_card(Track(id="y", title="Believer", source="jiosaavn"))
     assert 'data="v:video"' not in saavn
+
+
+# ── the search → play workflow ──────────────────────────────────────────────
+def test_a_clear_query_is_recognised_as_the_song():
+    from vyron.core.queue import Track
+    from vyron.core.search import is_confident_match, match_confidence
+
+    track = Track(id="1", title="Kesariya (Official Video)", uploader="Arijit Singh", duration=268)
+    assert is_confident_match("kesariya", track)
+    assert is_confident_match("kesariya arijit", track)
+    assert is_confident_match("kesariya song", track)  # filler words do not hurt
+
+    # a different thing is not the song, however many words it shares
+    slowed = Track(id="2", title="Kesariya slowed + reverb", uploader="edits", duration=300)
+    assert match_confidence("kesariya", slowed) < 0.75
+    assert not is_confident_match("kesariya", slowed)
+
+    # never auto-play a Short, and never a result that shares no word
+    short = Track(id="3", title="Kesariya", uploader="x", duration=20)
+    assert not is_confident_match("kesariya", short)
+    other = Track(id="4", title="Tum Hi Ho", uploader="Arijit Singh", duration=260)
+    assert not is_confident_match("kesariya", other)
+
+
+def test_the_picker_puts_the_winning_result_first_and_numbers_the_rest():
+    from vyron.core.queue import Track
+
+    tracks = [
+        Track(id="1", title="Believer", uploader="Imagine Dragons", duration=204),
+        Track(id="2", title="Believer (Live)", uploader="Imagine Dragons", duration=240),
+        Track(id="3", title="Believer cover", uploader="someone", duration=200),
+    ]
+    card = cards.search_card("believer", tracks)
+
+    # the winner is shown once, marked, above the list — not repeated as row 1
+    assert card.count("Believer</mark>") == 1
+    assert "<b>2.</b>" in card and "<b>3.</b>" in card
+    assert "<b>1.</b>" not in card
+    # the buttons carry the same numbers as the list
+    assert 'data="v:pick:0"' in card and 'data="v:pick:2"' in card
+    # and the three ways to take a result: now, next, or at the end
+    assert 'data="v:pick:n0"' in card and 'data="v:pick:q0"' in card
+
+
+def test_the_started_card_can_carry_a_way_back_to_the_results():
+    from vyron.core.queue import Track
+    from vyron.ui import blocks as B
+
+    track = Track(id="1", title="Believer", source="youtube", duration=204)
+    card = cards.started_card(
+        track,
+        note="the closest match",
+        extra_actions=B.row(B.btn("other results", data="v:pick:list")),
+    )
+    assert "the closest match" in card
+    assert 'data="v:pick:list"' in card

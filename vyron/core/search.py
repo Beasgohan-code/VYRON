@@ -218,6 +218,74 @@ class StreamInfo:
     source: str = ""
 
 
+#: Words that say *how* to listen, not *what* to listen to. They are dropped
+#: before a query is compared with a result, so "/play believer song" still
+#: matches "Believer" with full confidence.
+_QUERY_NOISE = {
+    "song", "songs", "music", "track", "audio", "video", "official", "full",
+    "the", "and", "by", "of", "an", "for", "me", "please", "play",
+    "youtube", "yt", "hd", "hq", "lyrics", "lyric", "new", "latest", "best",
+}
+
+
+def _match_words(text: str) -> set[str]:
+    return {
+        word
+        for word in re.findall(r"[a-z0-9]+", (text or "").lower())
+        if len(word) > 1 and word not in _QUERY_NOISE
+    }
+
+
+def match_confidence(query: str, track) -> float:
+    """How sure we are that *track* is the song someone typed — 0.0 … 1.0.
+
+    Play bots split into two camps: one plays the first search hit and is wrong
+    often, the other always shows a list and costs a tap every single time.
+    This number lets VYRON do both — play immediately when the match is
+    obvious, show the picker when it is not.
+
+    Coverage of the *query* is what matters (did every word they asked for
+    appear?), with the artist counting for extra, because "kesariya arijit"
+    matching an upload by "Arijit Singh - Topic" is a far stronger signal than
+    the same words appearing in some random title.
+    """
+    wanted = _match_words(query)
+    if not wanted:
+        return 0.0
+    title_words = _match_words(getattr(track, "title", "") or "")
+    uploader_words = _match_words(getattr(track, "uploader", "") or "")
+    covered = wanted & (title_words | uploader_words)
+    if not covered:
+        return 0.0
+    score = len(covered) / len(wanted)
+    artist_hits = wanted & uploader_words
+    if artist_hits:
+        score = min(1.0, score + 0.15 * len(artist_hits) / len(wanted))
+    # A 20-second Short is never "the song", however well the words match.
+    seconds = int(getattr(track, "duration", 0) or 0)
+    if 0 < seconds < 30:
+        return 0.0
+    # Every word has to land: a half match is exactly the case where a human
+    # should choose.
+    full = score if covered == wanted else score * 0.6
+    # …and a result that is a *different thing* than what was asked for is not
+    # a match at all, however well the words line up: nobody typing "believer"
+    # wants the nightcore cover or the ten-hour loop.
+    query_low, title_low = query.lower(), str(getattr(track, "title", "")).lower()
+    for variant in (
+        "slowed", "reverb", "nightcore", "8d", "karaoke", "instrumental",
+        "cover", "remix", "reaction", "1 hour", "10 hours", "loop", "sped up",
+    ):
+        if variant in title_low and variant not in query_low:
+            return min(full, 0.4)
+    return full
+
+
+def is_confident_match(query: str, track, *, floor: float = 0.75) -> bool:
+    """True when playing *track* without asking is the right call."""
+    return match_confidence(query, track) >= floor
+
+
 def looks_like_url(text: str) -> bool:
     return bool(_URL_RE.match((text or "").strip()))
 

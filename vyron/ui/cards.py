@@ -591,7 +591,7 @@ def _track_fields(track: Track, *, extra: tuple[str, str, str] | None = None) ->
     return B.fields(rows)
 
 
-def queued_card(track: Track, position: int) -> str:
+def queued_card(track: Track, position: int, *, extra_actions: str = "") -> str:
     """`/play` → it is in the queue. Say where, and give the next action."""
     return (
         B.banner("added to queue", glyph="check", meta=f"<i>#{position}</i>")
@@ -604,16 +604,20 @@ def queued_card(track: Track, position: int) -> str:
                 B.btn(f"{E('queue')} Queue", data="v:queue", style="primary"),
                 B.btn(f"{E('now')} Now playing", data="v:np"),
             ),
+            # No "play it now" here: skipping would not necessarily reach this
+            # track, and a button that does not do what it says is worse than
+            # no button. It becomes current on its own when its turn comes.
             B.row(
-                B.btn(f"{E('now')} Playing", data="v:np"),
+                B.btn(f"{E('search')} Find another", data="v:help:playback"),
                 B.btn(f"{E('close')} Close", data="v:close"),
             ),
+            extra_actions,
         )
         + B.footer(f"{E('download')} the same track is never queued twice")
     )
 
 
-def started_card(track: Track, *, note: str = "") -> str:
+def started_card(track: Track, *, note: str = "", extra_actions: str = "") -> str:
     """`/play` → it started right away. ``note`` explains a downgrade.
 
     A YouTube track can play with its picture too, so the card offers that in
@@ -647,6 +651,7 @@ def started_card(track: Track, *, note: str = "") -> str:
                 B.btn(f"{E('now')} Now playing", data="v:np"),
             ),
             last_row,
+            extra_actions,
         )
         + B.footer(f"{E('spark')} {BRAND} {BULLET} /song sends the file here")
     )
@@ -726,10 +731,54 @@ def _meta_line(track: Track) -> str:
     return f" {DOT} ".join(bits)
 
 
-def search_card(query: str, tracks: Iterable[Track], *, mode: str = "play") -> str:
-    """Results as a ranked list: the top hit is marked and carries the artwork."""
+def usage_card() -> str:
+    """What `/play` accepts — shown when someone sends it with nothing after it."""
+    return (
+        B.banner("how to play", glyph="info")
+        + B.context(
+            "One command, three ways in. A link and a reply are detected "
+            "automatically; words go to search."
+        )
+        + B.fields(
+            [
+                ("search", "words", "<code>/play believer</code>"),
+                ("link", "link", "<code>/play https://youtu.be/…</code>"),
+                ("note", "a file", "reply to any audio / video with <code>/play</code>"),
+            ]
+        )
+        + B.context(
+            "The closest match starts straight away — if it is not the one you "
+            "meant, <b>other results</b> is one tap away."
+        )
+        + B.actions(
+            B.row(
+                B.btn(f"{E('play')} Playback guide", data="v:help:playback", style="primary"),
+                B.btn(f"{E('download')} Get a file", data="v:help:tools"),
+                B.btn(f"{E('close')} Close", data="v:close"),
+            )
+        )
+        + B.footer(f"{E('spark')} the same words also work with /song for an MP3")
+    )
+
+
+def search_card(
+    query: str,
+    tracks: Iterable[Track],
+    *,
+    mode: str = "play",
+    first: int = 0,
+    note: str = "",
+) -> str:
+    """Results as a ranked list, with the top hit ready to play in one tap.
+
+    ``first`` is the index of the result the buttons start at, so a second page
+    can reuse this card without renumbering anything the user saw.
+    ``note`` is the line above the list ("I started the obvious match — these
+    are the others"), used when autoplay already did something.
+    """
     tracks = list(tracks)
     verb = "play" if mode == "play" else "download"
+    action = "pick" if mode == "play" else "dl"
     if not tracks:
         return (
             B.banner("no results", glyph="search")
@@ -745,35 +794,63 @@ def search_card(query: str, tracks: Iterable[Track], *, mode: str = "play") -> s
             )
         )
 
+    top = tracks[first]
+    # The top hit gets its own block (it is what the picture shows); the list
+    # below starts at #2 so nothing is printed twice.
     rows: list[str] = []
-    for index, track in enumerate(tracks):
-        title = _watch_link(track)
-        if index == 0:
-            title = f"<mark>{title}</mark>"
-        rows.append(f"{title}\n<i>{_meta_line(track)}</i>")
+    for offset, track in enumerate(tracks[first + 1 : first + 8], start=1):
+        number = first + offset + 1
+        title = esc(truncate(track.title, 54))
+        rows.append(f"<b>{number}.</b> {title}\n<i>{_meta_line(track)}</i>")
 
+    # One button per result, titled, in two columns: a number alone makes the
+    # reader count back to the list, and the list is right above the buttons.
     buttons = B.grid(
         [
             B.btn(
-                f"{index + 1} · {fmt_duration(track.duration)}",
-                data=f"v:{'pick' if mode == 'play' else 'dl'}:{index}",
+                f"{first + index + 1} · {truncate(track.title, 20)}",
+                data=f"v:{action}:{first + index}",
                 style="primary" if index == 0 else None,
             )
-            for index, track in enumerate(tracks[:6])
+            for index, track in enumerate(tracks[first : first + 8])
         ],
-        columns=3,
+        columns=2,
     )
-    actions = B.row(
-        B.btn(f"{E('play')} {verb} top result", data=f"v:{'pick' if mode == 'play' else 'dl'}:0", style="success"),
-        B.btn(f"{E('close')} Cancel", data="v:close", style="danger"),
+    quick_buttons = [
+        B.btn(f"{E('play')} {verb} #1", data=f"v:{action}:{first}", style="success"),
+    ]
+    if mode == "play":
+        quick_buttons.append(B.btn(f"{E('next')} next #1", data=f"v:pick:n{first}"))
+        quick_buttons.append(B.btn(f"{E('queue')} queue #1", data=f"v:pick:q{first}"))
+    quick_buttons.append(B.btn(f"{E('close')} cancel", data="v:close", style="danger"))
+    quick = B.row(*quick_buttons)
+    header = (
+        f"<b>{E('play')} <mark>{esc(truncate(top.title, 52))}</mark></b>\n"
+        f"<i>{_meta_line(top)}</i>"
+    )
+    hint = (
+        B.context(
+            f"Tap a numbered button to {verb} that result — the number matches "
+            "the list above it."
+        )
+        if len(tracks) > 1
+        else ""
     )
     return (
-        B.banner(f"results · {esc(truncate(query, 30))}", glyph="search", meta=f"<i>{len(tracks)}</i>")
-        + B.image(tracks[0].thumbnail)
-        + B.bullets(rows, ordered=True)
-        + B.actions(buttons, actions)
-        + B.footer("ranked by relevance, length and reach")
+        B.banner(
+            f"results · {esc(truncate(query, 26))}",
+            glyph="search",
+            meta=f"<i>{len(tracks)}</i>",
+        )
+        + B.image(top.thumbnail)
+        + (B.context(note) if note else "")
+        + B.context(header)
+        + (B.bullets(rows) if rows else "")
+        + B.actions(buttons, quick)
+        + hint
+        + B.footer(f"{E('spark')} ranked by relevance, length and reach")
     )
+
 
 def download_choice_card(track: Track) -> str:
     return (

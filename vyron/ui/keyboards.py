@@ -115,29 +115,40 @@ def _duration(seconds: int) -> str:
 
 
 def search_results(tracks) -> KM:
-    """Classic-lane keyboard: numbered, titled, with the length on the button."""
+    """Classic-lane keyboard: the same numbered, titled choices as the card.
+
+    The rich lane carries the buttons inside the card; a bot running without
+    rich messages needs them on the message, and they must look the same —
+    a number alone makes the reader count back to the list.
+    """
     rows = [
         [
             _btn(
-                f"{G('play')} {index + 1} · {_duration(track.duration)} · {track.title[:30]}",
+                f"{G('play')} {index + 1} · {_duration(track.duration)} · {track.title[:26]}",
                 f"v:pick:{index}",
             )
         ]
-        for index, track in enumerate(tracks[:5])
+        for index, track in enumerate(tracks[:8])
     ]
-    rows.append([_btn(f"{G('close')} Cancel", "v:close")])
+    rows.append(
+        [
+            _btn(f"{G('queue')} Queue #1", "v:pick:q0"),
+            _btn(f"{G('close')} Cancel", "v:close"),
+        ]
+    )
     return KM(rows)
 
 
 def results_page(tracks) -> KM:
+    """The download lane's picker — same numbered, titled choices as /play."""
     rows = [
         [
             _btn(
-                f"{G('download')} {index + 1} · {_duration(track.duration)} · {track.title[:28]}",
+                f"{G('download')} {index + 1} · {_duration(track.duration)} · {track.title[:26]}",
                 f"v:dl:{index}",
             )
         ]
-        for index, track in enumerate(tracks[:5])
+        for index, track in enumerate(tracks[:8])
     ]
     rows.append([_btn(f"{G('close')} Close", "v:close")])
     return KM(rows)

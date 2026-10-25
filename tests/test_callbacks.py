@@ -285,3 +285,93 @@ def test_the_video_button_replays_the_track_with_its_picture(wired, monkeypatch)
     assert played[0]["seek"] == 42  # continues, does not restart
     # the card that replaced it is the started card again
     assert "ɴᴏᴡ ꜱᴛʀᴇᴀᴍɪɴɢ" in edited[-1] or "now streaming" in edited[-1].lower()
+
+
+def _picker_state(monkeypatch, tracks):
+    """Wire a real pending search + a stub player, and return the edits list."""
+    from vyron.core import pending
+    from vyron.runtime import runtime
+
+    state = types.SimpleNamespace(current=tracks[0], queue=[], is_video=False)
+
+    class Player:
+        def __init__(self):
+            self.queues = types.SimpleNamespace(get=lambda _chat: state)
+            self.added: list[dict] = []
+
+        async def enqueue(self, _chat, track, **kwargs):
+            self.added.append({"track": track, **kwargs})
+            return len(self.added) + 1
+
+    player = Player()
+    monkeypatch.setattr(runtime, "player", player, raising=False)
+    pending.put(424242, 11, 1, "believer", list(tracks), mode="play")
+    return player
+
+
+def test_the_search_expiry_message_is_not_a_crash(wired, monkeypatch):
+    """No pending search (expired, or a restarted process) is a toast, not a crash."""
+    from vyron.runtime import runtime
+
+    client, _tokens, _edited = wired
+    state = types.SimpleNamespace(current=None, queue=[], is_video=False)
+    monkeypatch.setattr(
+        runtime,
+        "player",
+        types.SimpleNamespace(queues=types.SimpleNamespace(get=lambda _chat: state)),
+        raising=False,
+    )
+    query = _dispatch(client, "v:pick:3")
+    assert query.answers[-1][1] is True  # a toast, because there is no search
+    assert "expired" in query.answers[-1][0].lower()
+
+
+def test_other_results_reopens_the_picker(wired, monkeypatch):
+    from vyron.core.queue import Track
+
+    client, _tokens, edited = wired
+    tracks = [
+        Track(id="1", title="Believer", uploader="Imagine Dragons", duration=204),
+        Track(id="2", title="Believer live", uploader="Imagine Dragons", duration=240),
+    ]
+    _picker_state(monkeypatch, tracks)
+
+    _dispatch(client, "v:pick:list")
+
+    from vyron.ui.rich import to_plain_text
+
+    assert "results" in to_plain_text(edited[-1]).lower()
+    assert 'data="v:pick:1"' in edited[-1]
+
+
+def test_queueing_a_result_does_not_interrupt_the_song(wired, monkeypatch):
+    from vyron.core.queue import Track
+
+    client, _tokens, _edited = wired
+    tracks = [
+        Track(id="1", title="Believer", uploader="Imagine Dragons", duration=204),
+        Track(id="2", title="Thunder", uploader="Imagine Dragons", duration=190),
+    ]
+    player = _picker_state(monkeypatch, tracks)
+
+    query = _dispatch(client, "v:pick:q1")
+
+    assert player.added[0]["track"].id == "2"
+    assert player.added[0].get("index") is None  # appended, not jumped
+    assert "Queued" in query.answers[-1][0]
+
+
+def test_play_next_puts_the_result_at_the_front(wired, monkeypatch):
+    from vyron.core.queue import Track
+
+    client, _tokens, _edited = wired
+    tracks = [
+        Track(id="1", title="Believer", uploader="Imagine Dragons", duration=204),
+        Track(id="2", title="Thunder", uploader="Imagine Dragons", duration=190),
+    ]
+    player = _picker_state(monkeypatch, tracks)
+
+    query = _dispatch(client, "v:pick:n1")
+
+    assert player.added[0]["index"] == 0
+    assert "next" in query.answers[-1][0].lower()

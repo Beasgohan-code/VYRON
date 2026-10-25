@@ -730,10 +730,58 @@ def register(client: Client) -> None:
         # ── search results ─────────────────────────────────────────────────
         if action in {"pick", "dl"}:
             entry = pending.get(chat.id, cq.message.id)
-            if not entry or not arg.isdigit() or int(arg) >= len(entry.tracks):
+            if entry is None:
                 await cq.answer("That search expired — run the command again.", show_alert=True)
                 return
-            index = int(arg)
+
+            # `v:pick:list` reopens the picker. /play already started the
+            # obvious match, so this is the "no, not that one" door.
+            if action == "pick" and arg == "list":
+                await _show(
+                    client,
+                    cq,
+                    cards.search_card(
+                        entry.query,
+                        entry.tracks,
+                        mode=entry.mode,
+                        note="These are the other matches for that search.",
+                    ),
+                    keyboards.search_results(entry.tracks),
+                )
+                await cq.answer("Pick one")
+                return
+
+            # `v:pick:q2` queues result #3 and `v:pick:n2` puts it *next*,
+            # so a good search does not have to interrupt the song playing now.
+            queued = arg[:1] in {"q", "n"}
+            digits = arg[1:] if queued else arg
+            if not digits.isdigit() or int(digits) >= len(entry.tracks):
+                await cq.answer("That search expired — run the command again.", show_alert=True)
+                return
+            index = int(digits)
+            if queued and action == "pick":
+                track = entry.tracks[index]
+                next_up = arg.startswith("n")
+                position = await player.enqueue(
+                    chat.id,
+                    track,
+                    video=entry.video or track.is_video,
+                    index=0 if next_up else None,
+                )
+                if position == 1:
+                    reply = f"Starting · {truncate(track.title, 32)}"
+                elif position > 0:
+                    reply = (
+                        f"Playing next · {truncate(track.title, 32)}"
+                        if next_up
+                        else f"Queued at #{position} · {truncate(track.title, 32)}"
+                    )
+                elif position == -1:
+                    reply = "That is already in the queue"
+                else:
+                    reply = "The queue is full — skip or clear something first"
+                await cq.answer(reply)
+                return
             if action == "dl":
                 await _show(client, cq, cards.download_choice_card(entry.tracks[index]))
                 await cq.answer()

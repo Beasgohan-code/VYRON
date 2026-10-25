@@ -14,7 +14,7 @@ from vyron.core import chatcfg, metasources
 from vyron.core.pending import put as remember_search
 from vyron.core.player import StreamError
 from vyron.core.queue import Track
-from vyron.core.search import MediaError, looks_like_url
+from vyron.core.search import MediaError, is_confident_match, looks_like_url
 from vyron.runtime import runtime
 from vyron.ui import blocks as B
 from vyron.ui import cards, keyboards, rich
@@ -33,14 +33,9 @@ from vyron.utils.commands import cmd
 
 logger = logging.getLogger(__name__)
 
-USAGE = (
-    f"{E('info')} <b>How to use</b>\n"
-    f"<blockquote><code>/play believer</code>\n"
-    f"<code>/play https://youtu.be/…</code>\n"
-    f"reply to any audio / video / file with <code>/play</code>\n"
-    f"<code>/song …</code> — get the file instead</blockquote>\n"
-    f"<footer>{E('spark')} audio or video is detected automatically</footer>"
-)
+def USAGE() -> str:
+    """The usage card, built on demand so it follows the live glyph pack."""
+    return cards.usage_card()
 
 
 def _player():
@@ -123,6 +118,40 @@ def _honest_kind(requested_video: bool, chat_id: int) -> str:
     return ""
 
 
+def _should_autoplay(query: str, tracks: list[Track], *, video: bool = False) -> bool:
+    """Play the top hit without asking — but only when that is obviously right.
+
+    The two failure modes of a play bot are "it made me tap for every song" and
+    "it played the wrong song". A confidence gate keeps both away: something to
+    play, a player to play it with, and a top result that *is* the query rather
+    than a plausible neighbour of it.
+    """
+    if not tracks or runtime.player is None:
+        return False
+    if len(tracks) == 1:
+        return True
+    return is_confident_match(query, tracks[0])
+
+
+def _queue_position(chat_id: int, track: Track) -> int:
+    """Where *track* sits in the chat's queue, 1-based (0 when unknown)."""
+    if runtime.player is None:
+        return 0
+    state = runtime.player.queues.get(chat_id)
+    for index, queued in enumerate(getattr(state, "queue", []) or [], start=1):
+        if queued.id == track.id:
+            return index
+    return 0
+
+
+def _autoplay_note(query: str, outcome: str) -> str:
+    where = "queued behind what is playing" if outcome == "queued" else "starting now"
+    return (
+        f"<b>{rich.esc(truncate(query, 40))}</b> — the closest match, {where}. "
+        "Other results are one tap away."
+    )
+
+
 def register(client: Client) -> None:
     # ── /play ──────────────────────────────────────────────────────────────
     # One command, three inputs (text, link, replied file) and no format
@@ -185,7 +214,7 @@ def register(client: Client) -> None:
                 return
 
         if not query:
-            await rich.send(client, chat_id, USAGE, reply_to=message.id)
+            await rich.send(client, chat_id, USAGE(), reply_to=message.id)
             return
 
         # 2a) catalogue album/playlist (Spotify, Deezer, Apple Music) → queue it
@@ -278,6 +307,43 @@ def register(client: Client) -> None:
                 mode="play",
                 video=video,
             )
+
+        # One command, music. When the top result is unmistakably the song that
+        # was asked for, playing it beats asking "which of these five?" — the
+        # picker is one tap away ("other results") if the guess was wrong.
+        if tracks and status and _should_autoplay(query, tracks, video=video):
+            outcome = await begin(
+                client,
+                chat_id,
+                tracks[0],
+                video=video or tracks[0].is_video,
+                status_id=status.id,
+                reply_to=message.id,
+            )
+            if outcome != "error":
+                others = B.row(
+                    B.btn(
+                        f"{E('search')} other results",
+                        data="v:pick:list",
+                        style="primary",
+                    )
+                )
+                await _edit(
+                    client,
+                    chat_id,
+                    status.id,
+                    cards.started_card(
+                        tracks[0],
+                        note=_autoplay_note(query, outcome),
+                        extra_actions=others,
+                    )
+                    if outcome == "streamed"
+                    else cards.queued_card(
+                        tracks[0], _queue_position(chat_id, tracks[0]), extra_actions=others
+                    ),
+                )
+                return
+
         await _edit(
             client,
             chat_id,
@@ -294,7 +360,7 @@ def register(client: Client) -> None:
         query = command_args(message)
         chat_id = message.chat.id
         if not query:
-            await rich.send(client, chat_id, USAGE, reply_to=message.id)
+            await rich.send(client, chat_id, USAGE(), reply_to=message.id)
             return
 
         status = await _thinking(client, message, "Searching…")
@@ -336,8 +402,7 @@ def register(client: Client) -> None:
                 client,
                 chat_id,
                 status.id if status else None,
-                cards.search_card(query, tracks)
-                + "\n<footer>Choose a result, then pick a format.</footer>",
+                cards.search_card(query, tracks, mode="download"),
                 keyboards.results_page(tracks),
             )
 
@@ -346,7 +411,7 @@ def register(client: Client) -> None:
     async def _search_cmd(_: Client, message: Message) -> None:
         query = command_args(message)
         if not query:
-            await rich.send(client, message.chat.id, USAGE, reply_to=message.id)
+            await rich.send(client, message.chat.id, USAGE(), reply_to=message.id)
             return
         status = await _thinking(client, message, "Searching…")
         requester = (
