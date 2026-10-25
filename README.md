@@ -273,7 +273,7 @@ and translated instead of being flattened into "nothing could be extracted":
 | *cannot reach YouTube* | egress/DNS on the host | `PROXY` or a different region |
 
 `/doctor` prints the same sentence, and its first row is the **build**
-(`v1.10.15 · 2026-10-25`): if it still shows an older one, the deploy did not
+(`v1.10.16 · 2026-10-25`): if it still shows an older one, the deploy did not
 land — that is a different problem from a broken track.
 
 ### Every source, and how they back each other up
@@ -486,6 +486,27 @@ loudness, mono, double/half speed (max 3 at once, applied from the next track).
 Everything above also works from the inline buttons on the now-playing card.
 
 ---
+
+## 🥊 Compared with the other music bots
+
+VYRON is measured against the three bots this project started from —
+**ShizuMusic**, **Videl** and **FallenMusic** — command by command and file by
+file. The full audit lives in [`docs/COMPARISON.md`](docs/COMPARISON.md): every
+one of their 133 files and 173 command names appears there with a verdict and a
+one-line reason, including the ones deliberately not copied.
+
+The short version:
+
+| | ShizuMusic | Videl | FallenMusic | **VYRON** |
+|---|---|---|---|---|
+| code | 10,232 lines | 10,169 | 3,447 | **40,454** |
+| command names | 51 | 78 | 44 | **163** |
+| rich cards (no fallback text) | ✗ | ✗ | ✗ | **✓** |
+| Mini App with browser streaming | ✗ | ✗ | ✗ | **✓** |
+| public HTTP API + keys | ✗ | partial | ✗ | **✓** |
+| multi-connection download accelerator | ✗ | ✗ | ✗ | **✓** |
+| mirror fallbacks (Piped/Invidious/Cobalt) | ✗ | ✓ | ✗ | **✓** |
+| tests | none | none | none | **900+ passing** |
 
 ## 🔌 Music API — v2, on the same URL
 

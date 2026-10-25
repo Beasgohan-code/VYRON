@@ -7,6 +7,17 @@ Two version numbers move independently:
 
 ## Bot
 
+### 1.10.16 — 2026-10-25
+
+**The comparison, written down.** [`docs/COMPARISON.md`](docs/COMPARISON.md)
+audits VYRON against ShizuMusic (49 files / 51 commands), Videl (45 / 78) and
+FallenMusic (39 / 44): every file and every command name, with a verdict and a
+one-line reason — including the ones deliberately not copied (the force-play
+family, `/speedtest`, and the dozen pure aliases).
+
+Two findings from the audit are already shipped: the missing chat cleanup
+(1.10.15) and the download-side browser impersonation (1.10.13).
+
 ### 1.10.15 — 2026-10-25
 
 **A group that removes the bot gets its resources back.** Until now, being
