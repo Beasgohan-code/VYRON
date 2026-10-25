@@ -37,6 +37,8 @@ COMMANDS = [
     ("seek", "jump inside the track"),
     ("volume", "set assistant volume"),
     ("loop", "repeat mode"),
+    ("vplay", "play the video in the voice chat"),
+    ("vsong", "send the video file"),
     ("shuffle", "shuffle the queue"),
     ("np", "now playing"),
     ("queue", "show the queue"),

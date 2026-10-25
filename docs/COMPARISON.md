@@ -237,8 +237,8 @@ leaves when the queue ends.
 
 | Fallen command(s) | VYRON | verdict |
 |---|---|---|
-| `/play` `/vplay` `/p` | `/play` | same (`vplay`, `p` removed by the owner) |
-| `/song` `/vsong` `/video` `/music` | `/song` | same |
+| `/play` `/vplay` `/p` | `/play` (+`/vplay`: the same track, streamed as video) | same (`/p` removed by the owner) |
+| `/song` `/vsong` `/video` `/music` | `/song` (+`/vsong`: the video file) | same |
 | `/search` | `/search` + inline | same |
 | `/skip` `/next` `/pause` `/resume` `/stop` `/end` | `/skip` (+`/next`) `/pause` `/resume` `/stop` (+`/end`) | same |
 | `/activevc` | `/vc` `/active` | same |
@@ -271,6 +271,8 @@ Each item below came out of this comparison and is shipped:
 | 1.10.19 | a source search stops at half a page instead of waiting for every source to answer | the Render log's 4.8–6.3 s `POST /api/search` |
 | 1.10.20 | `/dban` `/dkick` `/dwarn`: the message that earned it is deleted before the action, and a failed delete never cancels the ban | Videl's and Fallen's `d*` moderation set |
 | 1.10.20 | `/cpplay`: a saved playlist played into the linked channel's voice chat | Shizu's `/cpplay` |
+| 1.10.21 | `/vplay` and `/vsong` restored: auto-detection can never choose video for a music video, so the picture was unreachable | Fallen's `/vplay` `/vsong` |
+| 1.10.21 | a video request that fell back to disk crashed with `UnboundLocalError`, and a virtual file from cache was never checked for a picture | found while wiring `/vplay` |
 
 Deliberately **not** copied, with reasons:
 
@@ -281,6 +283,6 @@ Deliberately **not** copied, with reasons:
 | `/sh` (Fallen) | shell from chat on a host holding the bot token |
 | Fallen's `audio_dl()` shape (re-encode every id) | slower and lossier than copying the stream |
 | Shizu's `_SEEK_STATE` tracker | a second source of truth next to `player.started_at`; it drifts |
-| `/vplay`, `/p`, `/cvplay`, `/playforce` family, `/speedtest`, `/spt`, `/reboot` | removed or never added by the owner; `/restart` is the equivalent of `/reboot` |
+| `/p`, `/cvplay`, `/playforce` family, `/speedtest`, `/spt`, `/reboot` | removed or never added by the owner; `/restart` is the equivalent of `/reboot` |
 
 Old names are kept as **aliases on the same handler** rather than second implementations, so a user arriving from another bot can keep typing what they know and behaviour cannot drift between the two names: `/q` `/end` `/cend` `/next` `/clear` `/removechannel` `/rmdownloads` `/ly` `/lyric` `/cleanup` `/config` `/variables` `/rmsudo` `/sudo` `/myplaylists` `/listpl` `/saveplaylist` `/loadpl` `/loadplaylist` `/delpl` `/rmplaylist` `/deleteplaylist` `/asspfp` `/assbio` `/assname` `/delasspfp` `/setflood` `/setlang` `/activevc` `/contentlocks` `/gcast` `/assleaveall` `/skipvotes` `/rmwarns` `/welcomemode` `/adminlist` `/channelplay` `/setchannel`.

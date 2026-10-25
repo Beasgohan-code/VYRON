@@ -423,11 +423,30 @@ def register(client: Client) -> None:
     # questions: the track carries `is_video` and the player streams whatever
     # it is. There is deliberately no `/playforce` — an admin who wants to cut
     # in can `/skip` first.
-    @client.on_message(cmd(["play"]))
+    @client.on_message(cmd(["play", "vplay"]))
     async def _play_cmd(_: Client, message: Message) -> None:
-        if not runtime.player or not await may_request(client, message):
+        if not await may_request(client, message):
             return
-        video = False  # replaced by the detected kind below
+        if runtime.player is None:
+            # Silence here was the worst possible answer: the command looked
+            # accepted and nothing at all happened. Say what is missing.
+            await rich.send(
+                client,
+                message.chat.id,
+                cards.error_card(
+                    "<b>The voice engine is not running yet.</b>\n"
+                    "<blockquote>Playback needs <code>STRING_SESSION</code> and a "
+                    "moment after boot. <code>/song</code> works without it.</blockquote>"
+                ),
+                reply_to=message.id,
+            )
+            return
+        # `/vplay` is `/play` with the picture forced on. Auto-detection can
+        # never choose video for a music video — it has an audio stream too,
+        # and "is there sound" is the question that decides the kind — so the
+        # only way to ask for the video is to say so.
+        wanted_video = (message.command[0] if message.command else "").lower() == "vplay"
+        video = wanted_video
         chat_id = message.chat.id
         _prejoin(chat_id)
         query = command_args(message)
@@ -469,7 +488,9 @@ def register(client: Client) -> None:
                     # A replied video plays as video, a voice note as audio —
                     # the kind came from `track_from_message`, not a command.
                     await runtime.player.play_track(
-                        chat_id, media_track, video=media_track.is_video
+                        chat_id,
+                        media_track,
+                        video=wanted_video or media_track.is_video,
                     )
                     await _settle(
                         client, chat_id, status.id if status else None,
@@ -561,7 +582,7 @@ def register(client: Client) -> None:
                     client,
                     chat_id,
                     track,
-                    video=track.is_video,
+                    video=wanted_video or track.is_video,
                     status_id=status.id if status else None,
                     reply_to=message.id,
                 )
@@ -569,7 +590,10 @@ def register(client: Client) -> None:
                     await _settle(
                         client, chat_id, status.id if status else None,
                         cards.started_card(
-                            track, note=_honest_kind(bool(track.is_video), chat_id)
+                            track,
+                            # `/vplay` asked for the picture, so a silent
+                            # downgrade to audio would look like a bug.
+                            note=_honest_kind(wanted_video or bool(track.is_video), chat_id),
                         ),
                     )
                 elif outcome != "error":
@@ -643,11 +667,12 @@ def register(client: Client) -> None:
                     )
                 )
                 if outcome == "streamed":
+                    honest = _honest_kind(video or tracks[0].is_video, chat_id)
                     await _settle(
                         client, chat_id, status.id,
                         cards.started_card(
                             tracks[0],
-                            note=_autoplay_note(query, outcome),
+                            note=_autoplay_note(query, outcome) + (f" {honest}" if honest else ""),
                             extra_actions=others,
                         ),
                     )
@@ -671,10 +696,13 @@ def register(client: Client) -> None:
         )
 
     # ── /song (the file, one command) ──────────────────────────────────────
-    @client.on_message(cmd(["song"]))
+    @client.on_message(cmd(["song", "vsong"]))
     async def _download_cmd(_: Client, message: Message) -> None:
         if not await may_request(client, message):
             return
+        # `/vsong` sends the video file instead of the MP3 — same search, same
+        # cache, one flag apart.
+        wanted_video = (message.command[0] if message.command else "").lower() == "vsong"
         query = command_args(message)
         chat_id = message.chat.id
         if not query:
@@ -714,6 +742,11 @@ def register(client: Client) -> None:
             await _edit(client, chat_id, status.id if status else None,
                         _nothing_found(exc))
             return
+        except Exception as exc:      # a bug in one source is not a dead card
+            logger.warning("song search for %r crashed: %s", query, exc, exc_info=True)
+            await _edit(client, chat_id, status.id if status else None,
+                        _nothing_found(exc))
+            return
 
         if status:
             remember_search(
@@ -723,7 +756,7 @@ def register(client: Client) -> None:
                 query,
                 tracks,
                 mode="download",
-                video=tracks[0].is_video if len(tracks) == 1 else False,
+                video=wanted_video or (tracks[0].is_video if len(tracks) == 1 else False),
             )
 
         if len(tracks) == 1:
@@ -731,6 +764,7 @@ def register(client: Client) -> None:
                 client,
                 chat_id,
                 tracks[0],
+                want_video=wanted_video,
                 status_id=status.id if status else None,
                 reply_to=message.id,
             )

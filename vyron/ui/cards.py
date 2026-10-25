@@ -438,7 +438,9 @@ _HELP: dict[str, tuple[str, list[tuple[str, str]]]] = {
         [
             ("/start", "open the home card"),
             ("/play <song|link>", "stream audio in the voice chat"),
+            ("/vplay <song|link>", "stream the video instead"),
             ("/song <song|link>", "send the MP3 here"),
+            ("/vsong <song|link>", "send the video file here"),
             ("/search <text>", "browse results, then pick"),
             ("/lyrics [song]", "lyrics for the current track"),
             ("/ping", "latency + uptime"),
@@ -447,6 +449,7 @@ _HELP: dict[str, tuple[str, list[tuple[str, str]]]] = {
     "playback": (
         "Playback",
         [
+            ("/vplay", "stream the picture, not just the sound"),
             ("/pause · /resume", "hold or continue the stream"),
             ("/skip [n]", "jump forward n tracks"),
             ("/seek 1:30", "jump inside the track"),
@@ -1065,7 +1068,9 @@ def usage_card() -> str:
                 B.btn(f"{E('close')} Close", data="v:close"),
             )
         )
-        + B.footer(f"{E('spark')} the same words also work with /song for an MP3")
+        + B.footer(
+            f"{E('spark')} /vplay streams the video · /song sends an MP3 · /vsong the video file"
+        )
     )
 
 

@@ -144,9 +144,11 @@ def test_removed_commands_stay_removed():
     registered = set(_commands())
     for gone in (
         "speedtest", "whoami", "emojis", "dj", "random", "daemons", "replay", "timer",
-        # one /play and one /cplay: force variants were removed in favour of
-        # auto-detection, so these must never come back.
-        "playforce", "cplayforce", "vplay", "vsong", "vplayforce", "cvplayforce",
+        # The *force* variants stay gone: a group that wants to cut in changes
+        # its own settings, not a command. `/vplay` and `/vsong` came back on
+        # request — auto-detection cannot tell a music video from a song, so
+        # without them there was no way to ask for the picture at all.
+        "playforce", "cplayforce", "vplayforce", "cvplayforce",
     ):
         assert gone not in registered, f"/{gone} is back"
         assert gone not in {name for name, _ in COMMANDS}, f"/{gone} is back in the menu"
@@ -227,6 +229,8 @@ PARITY_ALIASES = {
     "dkick": "kick",
     "dwarn": "warn",
     "cpplay": "pplay",
+    "vplay": "play",
+    "vsong": "song",
 }
 
 

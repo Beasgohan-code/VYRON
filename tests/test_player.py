@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 from pytgcalls.exceptions import NoActiveGroupCall
+from pytgcalls.types import MediaStream
 
 from vyron.core.player import Player, StreamError
 from vyron.core.queue import ChatState, LoopMode, Track
@@ -22,12 +23,16 @@ class FakeCalls:
         self.left: list[int] = []
         self.paused: list[int] = []
         self.fail_first_with: Exception | None = None
+        #: True when ntgcalls was told to expect a picture.
+        self.video_flags: list[bool] = []
 
     async def play(self, chat_id, stream, config=None):
         if self.fail_first_with is not None:
             error, self.fail_first_with = self.fail_first_with, None
             raise error
         self.played.append(str(stream._media_path))
+        # Flags.IGNORE is *truthy*, so the raw flag is what must be compared.
+        self.video_flags.append(getattr(stream, "_video_flags", None))
 
     async def change_volume_call(self, chat_id, volume):
         self.volume.append(int(volume))
@@ -995,3 +1000,84 @@ def test_inviting_the_assistant_still_makes_the_track_current(monkeypatch):
     assert state.playing is True
     assert state.started_at > 0
     assert storage.counters["tracks"] == 1
+
+
+# ── `/vplay`: the picture must survive every route to the bytes ────────────
+def _video_flags(calls) -> list:
+    return calls.video_flags
+
+
+def test_a_cached_video_file_keeps_the_picture(monkeypatch, tmp_path):
+    """The cached-file route used to skip the video check entirely.
+
+    `_is_video_stream(info)` sat inside the `if not url` block, so a video
+    played from the cache or from disk was never verified — and worse, a
+    resolve failure with a working disk fallback left `info` unbound, which
+    raised UnboundLocalError *only* for video. `/vplay` hit both.
+    """
+    video_path = tmp_path / "clip.mp4"
+    video_path.write_bytes(b"\x00" * 64)
+
+    class Downloader:
+        def cached(self, track, *, video=False):
+            return video_path if video else None
+
+        async def fetch(self, track, video=False, on_progress=None):  # pragma: no cover
+            raise AssertionError("a cached file must not be downloaded again")
+
+    player, calls, _, _ = make_player(downloader=Downloader())
+    track = Track(id="vvvvvvvvvvv", title="clip", duration=60, url="https://youtu.be/v")
+
+    run(player.play_track(31, track, video=True))
+
+    assert calls.played == [str(video_path)]
+    assert calls.video_flags == [MediaStream.Flags.REQUIRED], "the picture was dropped for a cached file"
+
+
+def test_a_video_that_falls_back_to_disk_does_not_crash(monkeypatch, tmp_path):
+    """UnboundLocalError: `info` is only set on the resolve path."""
+    from vyron.core.search import MediaError
+
+    video_path = tmp_path / "clip.mp4"
+    video_path.write_bytes(b"\x00" * 64)
+
+    class Downloader:
+        def cached(self, track, *, video=False):
+            return None
+
+        async def fetch(self, track, video=False, on_progress=None):
+            return video_path
+
+    player, calls, youtube, _ = make_player(downloader=Downloader())
+
+    async def broken(track, video=False):
+        raise MediaError("Failed to extract any player response")
+
+    monkeypatch.setattr(youtube, "stream_info", broken)
+    monkeypatch.setattr(Player, "_substitute_first", staticmethod(lambda track: False))
+    track = Track(id="wwwwwwwwwww", title="clip", duration=60, url="https://youtu.be/w")
+
+    run(player.play_track(32, track, video=True))
+
+    assert calls.played == [str(video_path)]
+    assert calls.video_flags == [MediaStream.Flags.REQUIRED], "an mp4 on disk carries a picture"
+
+
+def test_a_catalogue_substitution_still_downgrades_to_audio(monkeypatch):
+    """No picture in the bytes → ntgcalls must not be told to expect one."""
+    from vyron.core.search import StreamInfo
+
+    player, calls, youtube, _ = make_player()
+
+    async def audio_only(track, video=False):
+        # what a JioSaavn/Audius substitution answers for a video request
+        return StreamInfo(url="https://cdn/x.m4a", mime="audio/mp4", ext="m4a")
+
+    monkeypatch.setattr(youtube, "stream_info", audio_only)
+    monkeypatch.setattr(Player, "_substitute_first", staticmethod(lambda track: False))
+    track = Track(id="xxxxxxxxxxx", title="song", duration=60, url="https://youtu.be/x")
+
+    run(player.play_track(33, track, video=True))
+
+    assert calls.played == ["https://cdn/x.m4a"]
+    assert calls.video_flags == [MediaStream.Flags.IGNORE], "audio bytes were offered as a video track"

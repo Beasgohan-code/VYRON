@@ -7,6 +7,38 @@ Two version numbers move independently:
 
 ## Bot
 
+### 1.10.21 — 2026-10-25
+
+**`/vplay` is back, because auto-detection could never replace it.** Every
+music video on YouTube carries an audio stream as well, and VYRON decides
+"audio or video?" by asking whether there is anything to *listen* to — so a
+video request could only ever be answered with the song. `/vplay` forces the
+picture for a link, a search result and a replied file, and `/vsong` sends the
+video file instead of the MP3. Both are the same handlers as `/play` and
+`/song` with one flag flipped, so nothing about them can drift. The *force*
+variants (`/playforce`, `/vplayforce`, `/cplayforce`, `/cvplayforce`) stay
+removed: cutting into a queue is a settings question, not a command.
+
+**A video request that fell back to disk crashed.** `_is_video_stream(info)`
+was checked inside the "resolve gave us a URL" branch, but `info` is only
+bound on that branch. When the resolver failed and the disk fallback worked —
+exactly what a `/vplay` on a walled host does — the code read an unbound
+variable and the whole play raised `UnboundLocalError` instead of starting.
+The check now happens after both routes, so a video played from cache or from
+a downloaded mp4 keeps its picture, and a catalogue substitution (audio only)
+still downgrades to audio instead of asking ntgcalls for a picture that is not
+there.
+
+**`/play` no longer goes silent when the voice engine is not up.** A
+deployment without a working `STRING_SESSION` used to accept `/play` and do
+literally nothing. It now says what is missing and points at `/song`, which
+works without the assistant.
+
+**`/song` could leave its card spinning.** A search that raised anything other
+than `MediaError` escaped the handler, and the "searching" card stayed on
+screen for ever. It now becomes the same honest "nothing for that" card as
+every other search failure.
+
 ### 1.10.20 — 2026-10-25
 
 **Moderation that takes the message with it.** `/dban`, `/dkick` and `/dwarn`

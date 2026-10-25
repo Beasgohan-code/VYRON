@@ -56,6 +56,19 @@ def _is_video_stream(info) -> bool:
     return str(getattr(info, "ext", "") or "").lower() in _VIDEO_EXTS
 
 
+def _looks_like_video(url: str) -> bool:
+    """Does a bare URL/path name a video container?
+
+    Used when the stream came from the cache or from a download and there is
+    no ``StreamInfo`` to ask. A YouTube *googlevideo* URL has no extension at
+    all, so this only ever answers "yes" for a real file name — and guessing
+    wrong there is harmless, because ntgcalls reads the container itself.
+    """
+    name = str(url or "").split("?", 1)[0].rsplit("/", 1)[-1]
+    suffix = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    return suffix in _VIDEO_EXTS
+
+
 def _is_local_file(url: str) -> bool:
     """Is this a path we already downloaded? A stat, so stay synchronous."""
     try:
@@ -506,6 +519,7 @@ class Player:
                         logger.warning(
                             "disk fallback failed for %s (%s)", track.id, fallback_exc
                         )
+        info = None
         if not url:
             try:
                 info = await self.youtube.stream_info(track, video=video)
@@ -523,20 +537,30 @@ class Player:
                     raise StreamError(f"Could not resolve that track: {exc}") from exc
             else:
                 url = info.url
-            # The answer can be audio even when video was asked for: a walled
-            # YouTube falls back to the same song from a catalogue, and those
-            # only carry audio. Asking ntgcalls for a video track that is not
-            # in the stream fails the whole play, so the flag follows the
-            # bytes and the chat is told the truth instead.
-            if video and not _is_video_stream(info):
+
+        # The answer can be audio even when video was asked for: a walled
+        # YouTube falls back to the same song from a catalogue, and those only
+        # carry audio. Asking ntgcalls for a video track that is not in the
+        # stream fails the whole play, so the flag follows the bytes and the
+        # chat is told the truth instead.
+        #
+        # This check used to sit *inside* the `if not url` block and read
+        # `info` unguarded, so a `/vplay` whose resolve failed and whose disk
+        # fallback worked crashed with UnboundLocalError instead of playing.
+        # A cached file skips that branch entirely, which is the other half of
+        # the same bug: the picture was dropped without a word.
+        if video:
+            carries_picture = _is_video_stream(info) if info is not None else _looks_like_video(url)
+            if not carries_picture:
                 video = False
-                state.is_video = False
+                if state is not None:
+                    state.is_video = False
                 logger.info("playing %s as audio (no video available)", track.id)
                 journal.warn(
                     "player",
                     "no video for this one — streaming the same song as audio",
                     track=track.id,
-                    source=info.source or "youtube",
+                    source=(info.source if info is not None else "") or "youtube",
                 )
 
         stream = MediaStream(
