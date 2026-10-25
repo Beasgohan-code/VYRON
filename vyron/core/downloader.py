@@ -56,6 +56,39 @@ class DownloadError(RuntimeError):
     pass
 
 
+class Meter:
+    """Turn raw byte counts into the line a listener reads under the card.
+
+    ``42% · 3.1 MB / 7.4 MB · 2.4 MB/s · 2s left`` — because "downloading…"
+    that never changes is indistinguishable from a hung bot, and the difference
+    between a download and a dead one is *movement*.
+    """
+
+    def __init__(self, label: str = "downloading") -> None:
+        self.label = label
+        self.started = time.monotonic()
+        self._bytes = 0
+        self._at = self.started
+        self.speed = 0.0
+
+    def sample(self, done: int, total: int = 0) -> tuple[float, str]:
+        from vyron.ui.progress import human_size, human_time
+
+        now = time.monotonic()
+        window = now - self._at
+        if window >= 0.5:
+            self.speed = max(0.0, (done - self._bytes) / window)
+            self._bytes, self._at = done, now
+        fraction = (done / total) if total else 0.0
+        bits = [human_size(done) + (f" / {human_size(total)}" if total else "")]
+        if self.speed:
+            bits.append(f"{human_size(self.speed)}/s")
+        if total and self.speed and total > done:
+            bits.append(f"{human_time((total - done) / self.speed)} left")
+        head = f"{int(fraction * 100)}% · " if total else ""
+        return fraction, f"{self.label} · {head}" + " · ".join(bits)
+
+
 def safe_stem(text: str, limit: int = 70) -> str:
     cleaned = _SAFE_RE.sub("_", text or "track").strip(" ._")
     return (cleaned or "track")[:limit]
@@ -64,6 +97,20 @@ def safe_stem(text: str, limit: int = 70) -> str:
 def ffmpeg_path() -> str:
     """`ffmpeg` on PATH, or "" — the Docker image ships it, bare hosts may not."""
     return shutil.which("ffmpeg") or ""
+
+
+def _task(make_coroutine, name: str) -> asyncio.Task:
+    """Schedule an engine without letting a *synchronous* failure escape.
+
+    The engines are called through a lambda so an exception raised before the
+    first ``await`` lands inside the task — otherwise it would fly out of
+    `_audio_tail` and skip the sibling that is about to succeed.
+    """
+
+    async def runner():
+        return await make_coroutine()
+
+    return asyncio.create_task(runner(), name=name)
 
 
 def _atomic_move(source: Path, target: Path) -> Path:
@@ -238,6 +285,8 @@ class Downloader:
 
     @staticmethod
     def _hook(on_progress: ProgressHook | None, label: str):
+        from vyron.ui.progress import human_size, human_time
+
         def hook(data: dict) -> None:
             if not on_progress:
                 return
@@ -246,7 +295,20 @@ class Downloader:
                 total = data.get("total_bytes") or data.get("total_bytes_estimate") or 0
                 done = data.get("downloaded_bytes") or 0
                 fraction = float(done) / float(total) if total else 0.0
-                on_progress(min(0.99, fraction), f"{label} {int(fraction * 100)}%")
+                # yt-dlp already measured these; no point guessing them again.
+                bits = []
+                if total:
+                    bits.append(f"{human_size(done)} / {human_size(total)}")
+                else:
+                    bits.append(human_size(done))
+                speed = data.get("speed") or 0
+                if speed:
+                    bits.append(f"{human_size(speed)}/s")
+                eta = data.get("eta")
+                if eta:
+                    bits.append(f"{human_time(eta)} left")
+                head = f"{int(fraction * 100)}% · " if total else ""
+                on_progress(min(0.99, fraction), f"{label} · {head}" + " · ".join(bits))
             elif status == "finished":
                 on_progress(0.99, f"{label} — converting")
             elif status == "postprocessing":
@@ -385,7 +447,9 @@ class Downloader:
         work.mkdir(parents=True, exist_ok=True)
         raw = work / f"source.{direct.ext or 'm4a'}"
         try:
-            await self._fetch_to(direct.url, raw, direct.headers, on_progress)
+            await self._fetch_to(
+                direct.url, raw, direct.headers, on_progress, total=int(track.filesize or 0)
+            )
             if raw.stat().st_size == 0:
                 raise DownloadError("the mirror sent an empty file")
             if raw.stat().st_size > self.settings.max_download_mb * 1024 * 1024:
@@ -519,6 +583,7 @@ class Downloader:
         target: Path,
         headers: dict[str, str],
         on_progress: ProgressHook | None,
+        total: int = 0,
     ) -> None:
         """Fetch *url* into *target* with aria2 → curl → aiohttp.
 
@@ -530,10 +595,14 @@ class Downloader:
         from vyron.core import accelerator
 
         cap = self.settings.max_download_mb * 1024 * 1024
+        meter = Meter("downloading")
 
-        def progress(written: int, total: int) -> None:
-            if on_progress and total:
-                on_progress(min(0.8, 0.1 + 0.7 * written / total), "downloading")
+        def progress(written: int, served: int) -> None:
+            if not on_progress:
+                return
+            size = served or total
+            fraction, text = meter.sample(written, size)
+            on_progress(min(0.8, 0.1 + 0.7 * fraction) if size else 0.2, text)
 
         try:
             await accelerator.fetch(
@@ -544,6 +613,7 @@ class Downloader:
                 cap=cap,
                 on_progress=progress,
                 order=self.accelerator_order(),
+                total=total,
             )
         except Exception as exc:
             raise DownloadError(f"could not fetch the file ({exc})") from exc
@@ -592,47 +662,97 @@ class Downloader:
                 except Exception as exc:
                     errors.append(f"yt-dlp: {exc}")
                     logger.warning("yt-dlp download failed for %s: %s", track.id, exc)
-            try:
-                return await self._download_direct(
-                    track, video=video, on_progress=on_progress
-                )
-            except Exception as exc:
-                errors.append(f"mirror: {exc}")
-                logger.warning("direct download failed for %s: %s", track.id, exc)
-            # The same song from a catalogue that serves its own audio (JioSaavn,
-            # Audius…). A listener who asked for "Kesariya" wants the song, not
-            # the exact upload — and a 403 from YouTube is not their problem.
-            if not video:
-                try:
-                    from vyron.core import alternate
-                    from vyron.core.sources import DIRECT_SOURCES
+            if video:
+                return await self._video_tail(track, on_progress=on_progress, errors=errors)
+            return await self._audio_tail(track, on_progress=on_progress, errors=errors)
 
-                    found = await alternate.find(track, settings=self.settings)
-                    if found is not None:
-                        logger.info(
-                            "downloading %r from %s instead (%s)", track.title, found.source, found.id
-                        )
-                        if found.source in DIRECT_SOURCES and found.url:
-                            # A URL that *is* the audio.
-                            return await self._download_stream(found, on_progress=on_progress)
-                        # SoundCloud / Bandcamp: `url` is a page that has to be
-                        # extracted. Fetching it as bytes wrote the HTML into a
-                        # .mp3 and the stream then failed on the listener's side.
-                        return await asyncio.to_thread(
-                            self._download_ytdlp, found, video=False, on_progress=on_progress
-                        )
-                except Exception as exc:
-                    errors.append(f"substitute: {exc}")
-                    logger.warning("substitution download failed for %s: %s", track.id, exc)
-            else:
-                # A video request has a third engine the audio path does not
-                # need: the same song, wrapped in its own artwork.
-                try:
-                    return await self._video_from_substitute(track, on_progress=on_progress)
-                except Exception as exc:
-                    errors.append(f"video: {exc}")
-                    logger.warning("video fallback failed for %s: %s", track.id, exc)
-            raise DownloadError(" · ".join(errors))
+    async def _catalogue_copy(
+        self, track: Track, *, on_progress: ProgressHook | None = None
+    ) -> Path:
+        """The same song from a catalogue that serves its own audio.
+
+        A listener who asked for "Kesariya" wants the song, not the exact
+        upload — and a 403 from YouTube is not their problem.
+        """
+        from vyron.core import alternate
+        from vyron.core.sources import DIRECT_SOURCES
+
+        found = await alternate.find(track, settings=self.settings)
+        if found is None:
+            raise DownloadError("no catalogue had a copy of this song")
+        logger.info("downloading %r from %s instead (%s)", track.title, found.source, found.id)
+        if found.source in DIRECT_SOURCES and found.url:
+            # A URL that *is* the audio.
+            return await self._download_stream(found, on_progress=on_progress)
+        # SoundCloud / Bandcamp: `url` is a page that has to be extracted.
+        # Fetching it as bytes wrote the HTML into a .mp3 and the stream then
+        # failed on the listener's side.
+        return await asyncio.to_thread(
+            self._download_ytdlp, found, video=False, on_progress=on_progress
+        )
+
+    async def _audio_tail(
+        self,
+        track: Track,
+        *,
+        on_progress: ProgressHook | None,
+        errors: list[str],
+    ) -> Path:
+        """The two audio engines that are left, run *at the same time*.
+
+        A mirror (Invidious/Piped + the accelerator) and a catalogue copy
+        (JioSaavn/Audius/SoundCloud) both end in a real file, they use
+        different hosts, and neither knows the other exists — so running them
+        one after the other only ever added their latencies up. Whichever
+        produces a file first wins and the other is cancelled; when both fail
+        the card gets both reasons, not just the last one.
+        """
+        mirror = _task(
+            lambda: self._download_direct(track, video=False, on_progress=on_progress),
+            "download:mirror",
+        )
+        catalogue = _task(
+            lambda: self._catalogue_copy(track, on_progress=on_progress),
+            "download:catalogue",
+        )
+        names = {mirror: "mirror", catalogue: "substitute"}
+        pending: set[asyncio.Task] = {mirror, catalogue}
+        try:
+            while pending:
+                done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+                for task in done:
+                    if not task.cancelled() and task.exception() is None:
+                        return task.result()
+                    reason = (
+                        "cancelled" if task.cancelled() else f"{task.exception()}"
+                    )
+                    label = names[task]
+                    errors.append(f"{label}: {reason}")
+                    logger.warning("%s download failed for %s: %s", label, track.id, reason)
+        finally:
+            for task in pending:
+                task.cancel()
+        raise DownloadError(" · ".join(errors))
+
+    async def _video_tail(
+        self,
+        track: Track,
+        *,
+        on_progress: ProgressHook | None,
+        errors: list[str],
+    ) -> Path:
+        """Video has one engine the audio path does not: the song, re-wrapped."""
+        try:
+            return await self._download_direct(track, video=True, on_progress=on_progress)
+        except Exception as exc:
+            errors.append(f"mirror: {exc}")
+            logger.warning("direct download failed for %s: %s", track.id, exc)
+        try:
+            return await self._video_from_substitute(track, on_progress=on_progress)
+        except Exception as exc:
+            errors.append(f"video: {exc}")
+            logger.warning("video fallback failed for %s: %s", track.id, exc)
+        raise DownloadError(" · ".join(errors))
 
     @staticmethod
     def _stream_suffix(track: Track) -> str:
@@ -664,9 +784,15 @@ class Downloader:
         raw = work / f"source.{suffix}"
         partial = raw.with_suffix(raw.suffix + ".part")
 
-        def _progress(done: int, total: int) -> None:
-            if on_progress and total:
-                on_progress(min(0.9, done / total), "download")
+        meter = Meter("downloading")
+        size = int(track.filesize or 0)
+
+        def _progress(done: int, served: int) -> None:
+            if not on_progress:
+                return
+            known = served or size
+            fraction, text = meter.sample(done, known)
+            on_progress(min(0.9, fraction) if known else 0.3, text)
 
         try:
             await accelerator.fetch(
@@ -675,6 +801,7 @@ class Downloader:
                 cap=self.settings.max_download_mb * 1024 * 1024,
                 on_progress=_progress,
                 order=self.accelerator_order(),
+                total=size,
             )
             partial.replace(raw)
             if on_progress:

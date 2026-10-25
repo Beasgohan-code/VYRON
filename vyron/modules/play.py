@@ -44,6 +44,21 @@ def _player():
     return runtime.require_player()
 
 
+def _nothing_found(exc: Exception) -> str:
+    """A search that came back empty, said once.
+
+    The old card printed "No results" as a heading and then the exception —
+    which said "No results found for that query." — right underneath it. Two
+    lines of the same sentence, and neither one told the listener what to do.
+    """
+    reason = truncate(str(exc), 150) or "the sources did not answer"
+    return cards.error_card(
+        f"<blockquote>{rich.esc(reason)}</blockquote>"
+        "\n<footer>a shorter query · the artist name · or a link</footer>",
+        headline="nothing for that",
+    )
+
+
 async def may_request(client: Client, message: Message) -> bool:
     """Honour the chat's play mode.
 
@@ -169,6 +184,61 @@ async def _edit(client: Client, chat_id: int, message_id: int | None, markup: st
         await rich.edit(client, chat_id, message_id, markup, markup_keyboard=keyboard)
 
 
+class _Painter:
+    """Keep one card alive while a file is being fetched.
+
+    Download callbacks arrive from several places — the yt-dlp progress hook
+    runs in a worker *thread*, the accelerator reports from the event loop —
+    and Telegram will flood-ban a bot that edits faster than about once a
+    second. So the callback only stores the newest card (an attribute write,
+    safe from any thread) and this loop paints it, at most ``interval`` apart,
+    onto the same message. That is the difference between "downloading…" that
+    never changes and a card that visibly moves.
+    """
+
+    def __init__(self, client: Client, chat_id: int, message_id: int | None, *, interval: float = 1.0):
+        self.client = client
+        self.chat_id = chat_id
+        self.message_id = message_id
+        self.interval = interval
+        self.latest: str | None = None
+        self.shown: str | None = None
+        self.task: asyncio.Task | None = None
+
+    def start(self) -> "_Painter":
+        if self.message_id and self.task is None:
+            self.task = asyncio.create_task(self._run(), name="play:painter")
+        return self
+
+    def show(self, markup: str | None) -> None:
+        if markup:
+            self.latest = markup
+
+    async def _run(self) -> None:
+        while True:
+            try:
+                await asyncio.sleep(self.interval)
+                markup, self.latest = self.latest, None
+                if not markup or markup == self.shown:
+                    continue
+                self.shown = markup
+                _stop_ticker(self.message_id)
+                await rich.edit(self.client, self.chat_id, self.message_id, markup)
+            except asyncio.CancelledError:
+                return
+            except Exception:  # an edit that lost the race is not an error
+                continue
+
+    async def stop(self) -> None:
+        task, self.task = self.task, None
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+
 def _honest_kind(requested_video: bool, chat_id: int) -> str:
     """Say it out loud when a video request ends up playing as audio.
 
@@ -199,6 +269,38 @@ def _should_autoplay(query: str, tracks: list[Track], *, video: bool = False) ->
     if len(tracks) == 1:
         return True
     return is_confident_match(query, tracks[0])
+
+
+#: A join that has already been started for a chat. The search takes a second
+#: or two; the assistant's arrival is network-bound and unrelated, so it is the
+#: one piece of `/play` that can happen entirely *inside* that second.
+_PREJOIN: dict[int, asyncio.Task] = {}
+
+
+def _prejoin(chat_id: int) -> None:
+    """Start the assistant's join now so playback does not wait for it."""
+    player = runtime.player
+    if player is None:
+        return
+    task = _PREJOIN.get(chat_id)
+    if task is not None and not task.done():
+        return
+    _PREJOIN[chat_id] = asyncio.create_task(
+        player.ensure_assistant(chat_id), name="play:prejoin"
+    )
+
+
+async def _await_prejoin(chat_id: int, *, timeout: float = 12.0) -> None:
+    """Consume the started join — by now it has usually already finished."""
+    task = _PREJOIN.pop(chat_id, None)
+    if task is None:
+        return
+    if task.done():
+        return
+    try:
+        await asyncio.wait_for(task, timeout)
+    except Exception:  # a failed join is the player's problem to report
+        pass
 
 
 def _queue_position(chat_id: int, track: Track) -> int:
@@ -232,6 +334,7 @@ def register(client: Client) -> None:
             return
         video = False  # replaced by the detected kind below
         chat_id = message.chat.id
+        _prejoin(chat_id)
         query = command_args(message)
         reply = message.reply_to_message
         requester = (
@@ -381,7 +484,7 @@ def register(client: Client) -> None:
             tracks = await runtime.youtube.search(query, requester=requester)
         except MediaError as exc:
             await _edit(client, chat_id, status.id if status else None,
-                        cards.error_card(f"<b>No results</b>\n<blockquote>{truncate(str(exc), 160)}</blockquote>"))
+                        _nothing_found(exc))
             return
         if status:
             remember_search(
@@ -465,7 +568,7 @@ def register(client: Client) -> None:
                 tracks = await runtime.youtube.search(query, requester=requester)
         except MediaError as exc:
             await _edit(client, chat_id, status.id if status else None,
-                        cards.error_card(f"<b>No results</b>\n<blockquote>{truncate(str(exc), 160)}</blockquote>"))
+                        _nothing_found(exc))
             return
 
         if status:
@@ -516,7 +619,7 @@ def register(client: Client) -> None:
             tracks = await runtime.youtube.search(query, requester=requester, limit=5)
         except MediaError as exc:
             await _edit(client, message.chat.id, status.id if status else None,
-                        cards.error_card(f"<b>No results</b>\n<blockquote>{truncate(str(exc), 160)}</blockquote>"))
+                        _nothing_found(exc))
             return
         if status:
             remember_search(
@@ -654,6 +757,9 @@ async def begin(
     # Auto-detect: a video source streams video, everything else audio.
     if video is None:
         video = bool(track.is_video)
+    # The join was started while the search was running; by the time we get
+    # here it has almost always finished, so it costs nothing.
+    await _await_prejoin(chat_id)
     try:
         position = await _player().enqueue(chat_id, track, video=video, play_now=True)
     except StreamError as exc:
@@ -688,18 +794,62 @@ async def deliver(
     """
     if want_video is None:
         want_video = False
-    markup = cards.download_card(track, "video" if want_video else "audio")
+    kind = "video" if want_video else "audio"
+
+    # A file we already have is not a download: say so and go straight to the
+    # upload, which is what makes asking twice feel instant.
+    cached = runtime.downloader.cached(track, video=want_video) if runtime.downloader else None
+    markup = cards.download_card(
+        track, kind, step="already downloaded — sending it" if cached else ""
+    )
     if hint:
         markup = B.note(hint) + markup
     await _edit(client, chat_id, status_id, markup)
 
-    path = None
-    if not want_video:
-        try:
-            path = await runtime.downloader.audio(track)
-        except Exception as exc:
-            # A video-only source: the honest answer is the video, not an error.
-            if not (track.is_video or track.url):
+    left = 0.0
+    painter = _Painter(client, chat_id, status_id).start()
+
+    def on_progress(fraction: float, text: str) -> None:
+        nonlocal left
+        # Two engines may report at once (mirror + catalogue copy); the bar
+        # only ever grows, so it never jumps backwards mid-download.
+        left = max(left, min(1.0, float(fraction or 0.0)))
+        painter.show(cards.download_card(track, kind, step=text, fraction=left))
+
+    # The cover comes down the wire while the audio does, instead of adding up
+    # to eight seconds of thumbnail time to the upload.
+    thumb_task = asyncio.create_task(fetch_bytes(track.thumbnail), name="play:thumb")
+    path = cached
+    try:
+        if path is None and not want_video:
+            try:
+                path = await runtime.downloader.audio(track, on_progress=on_progress)
+            except Exception as exc:
+                # A *video* link with no audio-only stream is the one case where
+                # the video is the honest answer. Anything else would just cost
+                # another minute for the same failure.
+                if not track.is_video:
+                    await painter.stop()
+                    await _edit(
+                        client,
+                        chat_id,
+                        status_id,
+                        cards.error_card(
+                            f"<b>Download failed</b>\n"
+                            f"<blockquote>{truncate(str(exc), 170)}</blockquote>"
+                        ),
+                    )
+                    thumb_task.cancel()
+                    return
+                logger.info("audio download failed for %s, trying video: %s", track.id, exc)
+                painter.show(cards.download_card(track, "video", step="fetching the video instead"))
+        if path is None:
+            try:
+                path = await runtime.downloader.video(track, on_progress=on_progress)
+                want_video = True
+                kind = "video"
+            except Exception as exc:
+                await painter.stop()
                 await _edit(
                     client,
                     chat_id,
@@ -708,28 +858,26 @@ async def deliver(
                         f"<b>Download failed</b>\n<blockquote>{truncate(str(exc), 170)}</blockquote>"
                     ),
                 )
+                thumb_task.cancel()
                 return
-            logger.info("audio download failed for %s, trying video: %s", track.id, exc)
-    if path is None:
-        try:
-            path = await runtime.downloader.video(track)
-            want_video = True
-            await _edit(client, chat_id, status_id, cards.download_card(track, "video"))
-        except Exception as exc:
-            await _edit(
-                client,
-                chat_id,
-                status_id,
-                cards.error_card(
-                    f"<b>Download failed</b>\n<blockquote>{truncate(str(exc), 170)}</blockquote>"
-                ),
-            )
-            return
+    finally:
+        await painter.stop()
 
-    thumb = await fetch_bytes(track.thumbnail)
+    thumb = None
+    try:
+        thumb = await thumb_task
+    except Exception:  # the picture is a nicety, the file is the answer
+        thumb = None
     caption = (
         f"{E('song')} <b>{rich.esc(truncate(track.title, 60))}</b>\n"
         f"{E('microphone')} {rich.esc(truncate(track.uploader, 40) or 'unknown')}"
+    )
+    # Telegram's own upload is the last visible wait; name it.
+    await _edit(
+        client,
+        chat_id,
+        status_id,
+        cards.download_card(track, kind, step="uploading to Telegram", fraction=1.0),
     )
     try:
         if want_video:

@@ -126,3 +126,31 @@ def test_no_working_card_mentions_a_single_engine(title):
     """The card used to promise YouTube; the catalogues answer first now."""
     text = _plain(cards.working_card(title, "", query="x", step="working")).lower()
     assert "youtube" not in text
+
+
+# ── the download card is a live card ───────────────────────────────────────
+def test_the_download_card_shows_where_the_bytes_are():
+    """"preparing audio" used to sit at one italic sentence for a whole minute."""
+    from vyron.core.queue import Track
+
+    track = Track(id="abcdefghijk", title="Kesariya", duration=268, uploader="Arijit")
+    idle = _plain(cards.download_card(track, "audio"))
+    assert "fetching the best quality" in idle
+    assert "%" not in idle
+
+    live = _plain(cards.download_card(track, "audio", step="downloading · 2.1 MB / 7.4 MB", fraction=0.28))
+    assert "downloading" in live and "2.1 MB" in live
+    assert "28%" in live
+    assert "▰" in live and "▱" in live
+
+
+def test_the_download_card_survives_text_it_did_not_write():
+    """Progress text comes from yt-dlp, aria2 and the mirror — never trust it."""
+    from vyron.core.queue import Track
+
+    track = Track(id="x", title="t")
+    markup = cards.download_card(track, "audio", step="<script>alert(1)</script>", fraction=2.0)
+    text = _plain(markup)
+    assert "alert(1)" in text and "<script>" not in text
+    # a fraction outside 0..1 must clamp rather than draw a negative bar
+    assert "100%" in text and "▱" not in text

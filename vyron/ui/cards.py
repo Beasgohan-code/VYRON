@@ -892,10 +892,25 @@ def download_choice_card(track: Track) -> str:
     )
 
 
-def download_card(track: Track, kind: str = "audio") -> str:
-    """Shown the moment a download starts, then edited into the file itself."""
+def download_card(
+    track: Track,
+    kind: str = "audio",
+    *,
+    step: str = "",
+    fraction: float = 0.0,
+) -> str:
+    """Shown the moment a download starts, then edited into the file itself.
+
+    ``step``/``fraction`` make it a *live* card: the same message is repainted
+    as the bytes arrive, so a slow source looks slow instead of looking broken.
+    """
     icon = E("song") if kind == "audio" else E("video")
     quality = "MP3 320" if kind == "audio" else "MP4 720p"
+    status = esc(step) if step else "fetching the best quality…"
+    bar = ""
+    if fraction > 0:
+        done = max(0.0, min(1.0, float(fraction)))
+        bar = f"{B.meter(done, 1.0)} <b>{int(done * 100)}%</b>\n"
     return (
         B.banner(f"preparing {kind}", glyph="download", meta=f"<i>{quality}</i>")
         + B.context(
@@ -903,7 +918,8 @@ def download_card(track: Track, kind: str = "audio") -> str:
             f"{E('clock')} {fmt_duration(track.duration)} {BULLET} "
             f"{esc(truncate(track.uploader, 28) or 'unknown artist')}"
         )
-        + B.fields([("download", "status", f"{B.think()} <i>fetching the best quality…</i>")])
+        + B.fields([("download", "status", f"{B.think()} <i>{status}</i>")])
+        + bar
         + B.footer(f"{E('cloud')} the file is cached — asking again is instant")
     )
 

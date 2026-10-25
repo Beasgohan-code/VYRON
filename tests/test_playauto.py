@@ -127,11 +127,14 @@ def test_song_falls_back_to_the_video_file_when_audio_is_impossible(monkeypatch,
         def __init__(self):
             self.tried = []
 
-        async def audio(self, track):
+        def cached(self, track, *, video=False):
+            return None
+
+        async def audio(self, track, *, on_progress=None):
             self.tried.append("audio")
             raise RuntimeError("no audio stream")
 
-        async def video(self, track):
+        async def video(self, track, *, on_progress=None):
             self.tried.append("video")
             return video_path
 
@@ -147,10 +150,13 @@ def test_song_falls_back_to_the_video_file_when_audio_is_impossible(monkeypatch,
 
 def test_song_reports_an_error_when_neither_format_works(monkeypatch):
     class Downloader:
-        async def audio(self, track):
+        def cached(self, track, *, video=False):
+            return None
+
+        async def audio(self, track, *, on_progress=None):
             raise RuntimeError("nope")
 
-        async def video(self, track):
+        async def video(self, track, *, on_progress=None):
             raise RuntimeError("nope either")
 
     _patch_runtime(monkeypatch, Downloader())
@@ -166,10 +172,13 @@ def test_deliver_accepts_an_explicit_video_choice(monkeypatch, tmp_path):
     video_path.write_bytes(b"\x00" * 32)
 
     class Downloader:
-        async def audio(self, track):  # pragma: no cover - must not be used
+        def cached(self, track, *, video=False):
+            return None
+
+        async def audio(self, track, *, on_progress=None):  # pragma: no cover - unused
             raise AssertionError("audio should be skipped")
 
-        async def video(self, track):
+        async def video(self, track, *, on_progress=None):
             return video_path
 
     _patch_runtime(monkeypatch, Downloader())

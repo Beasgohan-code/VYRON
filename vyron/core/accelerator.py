@@ -115,8 +115,65 @@ def curl_command(url: str, target: Path, headers: dict[str, str] | None = None) 
     return command
 
 
-async def _run(command: list[str], *, timeout: float, cap: int) -> tuple[bool, str]:
-    """Run a downloader with a hard timeout and a size ceiling."""
+def _size(path: Path) -> int:
+    """Bytes on disk so far — ``os.stat`` so the poll stays off the event loop's
+    blocking-pathlib list and costs one syscall."""
+    import os
+
+    try:
+        return os.stat(path).st_size
+    except (OSError, ValueError):
+        return 0
+
+
+#: How often the size of an in-flight download is read. Four polls a second is
+#: one `stat` per 250 ms — free — and fast enough for a progress bar a human
+#: reads rather than measures.
+WATCH_INTERVAL = 0.25
+
+
+async def _watch(
+    target: Path | None,
+    on_progress: Progress | None,
+    total: int,
+    stop: asyncio.Event,
+) -> None:
+    """Report the growing file size while a binary downloader works.
+
+    aria2c and curl talk to us over a pipe we are not reading until they exit,
+    so without this the bar sat at zero for the whole transfer — the single
+    most "is it broken?" part of downloading a song.
+    """
+    if target is None or on_progress is None:
+        return
+    seen = -1
+    while not stop.is_set():
+        try:
+            size = _size(target)
+        except OSError:  # pragma: no cover - the file is being renamed
+            size = 0
+        if size != seen:
+            seen = size
+            try:
+                on_progress(size, total)
+            except Exception:  # a broken callback must not kill the download
+                pass
+        try:
+            await asyncio.wait_for(stop.wait(), WATCH_INTERVAL)
+        except asyncio.TimeoutError:
+            continue
+
+
+async def _run(
+    command: list[str],
+    *,
+    timeout: float,
+    cap: int,
+    target: Path | None = None,
+    total: int = 0,
+    on_progress: Progress | None = None,
+) -> tuple[bool, str]:
+    """Run a downloader with a hard timeout, a size ceiling and live progress."""
     try:
         process = await asyncio.create_subprocess_exec(
             *command,
@@ -128,12 +185,24 @@ async def _run(command: list[str], *, timeout: float, cap: int) -> tuple[bool, s
     except Exception as exc:  # pragma: no cover - permissions, exec format …
         return False, f"{type(exc).__name__}: {exc}"
 
+    stop = asyncio.Event()
+    watcher = asyncio.create_task(
+        _watch(target, on_progress, total, stop), name="accelerator:watch"
+    )
     try:
         _, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
     except asyncio.TimeoutError:
         process.kill()
         await process.wait()
         return False, "timed out"
+    finally:
+        stop.set()
+        if not watcher.done():
+            watcher.cancel()
+            try:
+                await watcher
+            except (asyncio.CancelledError, Exception):  # pragma: no cover
+                pass
     # The size cap is checked by the caller on the finished file, but kill the
     # process early when it is obviously overshooting.
     if stderr and len(stderr) > cap:  # pragma: no cover - defensive
@@ -153,6 +222,7 @@ async def fetch(
     cap: int = 0,
     on_progress: Progress | None = None,
     order: tuple[str, ...] | None = None,
+    total: int = 0,
 ) -> str:
     """Download *url* into *target* with the best available accelerator.
 
@@ -167,9 +237,23 @@ async def fetch(
 
     for name in chosen:
         if name == "aria2" and _which("aria2c"):
-            ok, why = await _run(aria2_command(url, target, headers), timeout=timeout, cap=cap)
+            ok, why = await _run(
+                aria2_command(url, target, headers),
+                timeout=timeout,
+                cap=cap,
+                target=target,
+                total=total,
+                on_progress=on_progress,
+            )
         elif name == "curl" and _which("curl"):
-            ok, why = await _run(curl_command(url, target, headers), timeout=timeout, cap=cap)
+            ok, why = await _run(
+                curl_command(url, target, headers),
+                timeout=timeout,
+                cap=cap,
+                target=target,
+                total=total,
+                on_progress=on_progress,
+            )
         else:
             continue
         if ok:

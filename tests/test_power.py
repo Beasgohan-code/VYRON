@@ -152,11 +152,14 @@ def test_play_refuses_without_a_voice_engine(tmp_path, monkeypatch):
     edits: list = []
 
     class FakeDownloader:
-        async def audio(self, track):  # pragma: no cover - must not be called
+        def cached(self, track, *, video=False):
+            return None
+
+        async def audio(self, track, *, on_progress=None):  # pragma: no cover
             sent["download"] = True
             return audio
 
-        async def video(self, track):  # pragma: no cover
+        async def video(self, track, *, on_progress=None):  # pragma: no cover
             return audio
 
     class FakeClient:
@@ -203,10 +206,13 @@ def test_song_command_still_sends_a_file(tmp_path, monkeypatch):
     sent: dict = {}
 
     class FakeDownloader:
-        async def audio(self, track):
+        def cached(self, track, *, video=False):
+            return None
+
+        async def audio(self, track, *, on_progress=None):
             return audio
 
-        async def video(self, track):  # pragma: no cover
+        async def video(self, track, *, on_progress=None):  # pragma: no cover
             return audio
 
     class FakeClient:

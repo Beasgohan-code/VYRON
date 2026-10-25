@@ -194,3 +194,73 @@ def test_an_engine_chain_is_not_pasted_into_the_chat():
     assert "Could not reach the audio" in text
     assert "/sources" in text          # where the owner looks
     assert "/song" in text             # what the listener can do instead
+
+
+# ── the two audio engines run at once ──────────────────────────────────────
+def test_a_slow_mirror_does_not_hold_up_a_catalogue_copy(downloader, monkeypatch):
+    """Mirror *and* catalogue copy, in parallel — never one after the other.
+
+    A dead Invidious instance used to add its whole timeout to a download that
+    JioSaavn could have answered immediately.
+    """
+    import time as _time
+
+    from vyron.core import alternate
+    from vyron.core.downloader import DownloadError
+
+    monkeypatch.setattr(downloader, "_youtube_walled", lambda: True)
+    stopped: list[str] = []
+
+    async def slow_mirror(*args, **kwargs):
+        try:
+            await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            stopped.append("mirror")
+            raise
+        raise DownloadError("the mirror never answered")
+
+    found = Track(id="jx9Yg", title="Kesariya", source="jiosaavn", url="https://cdn/k.m4a")
+
+    async def substitute(*args, **kwargs):
+        return found
+
+    async def fake_stream(track, *, on_progress=None):
+        target = downloader.audio_path(track)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"ID3" + b"0" * 64)
+        return target
+
+    monkeypatch.setattr(downloader, "_download_direct", slow_mirror)
+    monkeypatch.setattr(alternate, "find", substitute)
+    monkeypatch.setattr(downloader, "_download_stream", fake_stream)
+
+    track = Track(id="dQw4w9WgXcQ", title="Kesariya", source="youtube")
+    started = _time.monotonic()
+    path = asyncio.run(downloader.fetch(track))
+    elapsed = _time.monotonic() - started
+
+    assert path.exists()
+    assert elapsed < 5, f"the catalogue copy waited for the mirror ({elapsed:.1f}s)"
+    assert stopped == ["mirror"], "the losing engine must be cancelled"
+
+
+def test_both_engines_failing_reports_both_reasons(downloader, monkeypatch):
+    from vyron.core.downloader import DownloadError
+
+    monkeypatch.setattr(downloader, "_youtube_walled", lambda: True)
+
+    async def no_mirror(*args, **kwargs):
+        raise DownloadError("no mirror had a downloadable URL")
+
+    monkeypatch.setattr(downloader, "_download_direct", no_mirror)
+
+    async def no_copy(*args, **kwargs):
+        raise DownloadError("the catalogues had no copy")
+
+    monkeypatch.setattr(downloader, "_catalogue_copy", no_copy)
+
+    track = Track(id="dQw4w9WgXcQ", title="Song", source="youtube")
+    with pytest.raises(DownloadError) as caught:
+        asyncio.run(downloader.fetch(track))
+    message = str(caught.value)
+    assert "mirror" in message and "substitute" in message

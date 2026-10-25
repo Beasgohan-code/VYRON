@@ -244,7 +244,7 @@ def test_downloader_falls_back_to_a_mirror(tmp_path, monkeypatch):
     dl = _downloader(tmp_path)
     dl.settings = dataclasses.replace(dl.settings, stream_fallback=True)
 
-    async def fake_fetch(url, target, headers, on_progress):
+    async def fake_fetch(url, target, headers, on_progress, total=0):
         target.write_bytes(b"ID3" + b"0" * 32)
 
     monkeypatch.setattr(dl, "_fetch_to", fake_fetch)
