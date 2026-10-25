@@ -783,6 +783,32 @@ class Player:
         )
         return True
 
+    async def reapply_effects(self, chat_id: int) -> bool:
+        """Re-open the current stream so an effects change is heard *now*.
+
+        ntgcalls takes the ``-af`` chain when a stream starts, so a filter
+        switched on mid-song would otherwise wait for the next track — which
+        reads as "the button did nothing". Restart the same song at the second
+        it is sitting on: no new card, no extra play counted, no gap.
+        """
+        state = self.queues.get(chat_id)
+        if not state.current or not state.playing or not self.calls:
+            return False
+        elapsed = int(state.elapsed())
+        try:
+            await self.play_track(
+                chat_id,
+                state.current,
+                video=state.is_video,
+                seek=max(0, elapsed),
+                announce=False,
+                count_play=False,
+            )
+        except Exception as exc:  # a filter is never worth killing a session
+            logger.warning("could not re-apply effects in %s: %s", chat_id, exc)
+            return False
+        return True
+
     async def set_volume(self, chat_id: int, volume: int) -> int:
         state = self.queues.get(chat_id)
         state.volume = max(1, min(200, int(volume)))

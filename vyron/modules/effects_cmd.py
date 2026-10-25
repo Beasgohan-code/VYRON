@@ -19,6 +19,28 @@ async def _active(chat_id: int) -> list[str]:
     return effects.resolve(await chatcfg.get(chat_id, "effects", []) or [])
 
 
+async def save(chat_id: int, names: list[str]) -> bool:
+    """Store the filters and make the *playing* song follow them.
+
+    Both the /effects card and the button board go through here, so a filter
+    cannot be saved in one place and silently ignored by the other. Returns
+    True when a live stream was restarted at its current position.
+    """
+    active = effects.resolve(names)
+    await chatcfg.set(chat_id, "effects", active)
+    if not runtime.player:
+        return False
+    runtime.player.queues.get(chat_id).effects = active
+    return await runtime.player.reapply_effects(chat_id)
+
+
+def _heard(live: bool, when_next: str) -> str:
+    """The one line that says whether they can hear it yet."""
+    if live:
+        return "Heard right now — the track picked up at this second."
+    return when_next
+
+
 def panel(active: list[str]) -> str:
     """The effects board — every filter, what it sounds like, one tap each."""
     rows: list[tuple[str, str, str]] = []
@@ -36,8 +58,8 @@ def panel(active: list[str]) -> str:
     return (
         B.banner("audio effects", glyph="spark", meta=f"<i>{len(active)}/{effects.MAX_ACTIVE}</i>")
         + B.context(
-            "Changes the sound of the live stream. Picks up from the next track — "
-            "nothing restarts."
+            "Changes the sound of the live stream. A song already playing picks "
+            "the new filter up from the second it is on — it does not jump back."
         )
         + B.fields(
             [
@@ -84,9 +106,7 @@ def register(client: Client) -> None:
             return
 
         accepted, rejected = effects.parse(arg)
-        await chatcfg.set(chat_id, "effects", accepted)
-        if runtime.player:
-            runtime.player.queues.get(chat_id).effects = accepted
+        live = await save(chat_id, accepted)
 
         await rich.send(
             client,
@@ -97,9 +117,10 @@ def register(client: Client) -> None:
                 label="active",
                 value=f"<b>{effects.labels(accepted)}</b>",
                 note=(
-                    "One of those is not a filter I know — the rest were kept."
+                    "One of those is not a filter I know — the rest were kept. "
+                    + _heard(live, "They apply from the next track.")
                     if rejected
-                    else "Applied from the next track."
+                    else _heard(live, "Applied from the next track.")
                 ),
                 extra=(
                     [("warn", "ignored", f"<code>{rich.esc(', '.join(rejected))}</code>")]
@@ -159,9 +180,7 @@ def register(client: Client) -> None:
             updated = effects.resolve([*current, name])
         else:
             updated = [item for item in current if item != name]
-        await chatcfg.set(chat_id, "effects", updated)
-        if runtime.player:
-            runtime.player.queues.get(chat_id).effects = updated
+        live = await save(chat_id, updated)
         await rich.send(
             client,
             chat_id,
@@ -170,7 +189,7 @@ def register(client: Client) -> None:
                 glyph="check" if enable else "cross",
                 label="active",
                 value=f"<b>{effects.labels(updated)}</b>",
-                note="The next track comes through with it.",
+                note=_heard(live, "The next track comes through with it."),
                 actions=B.row(
                     B.btn(f"{E('spark')} The board", data="v:fx", style="primary"),
                     B.btn("↩ Undo", data=f"v:fx:{name}"),
@@ -193,9 +212,7 @@ def register(client: Client) -> None:
     async def _effect_off(_: Client, message: Message) -> None:
         arg = command_args(message).strip()
         if not arg:
-            await chatcfg.set(message.chat.id, "effects", [])
-            if runtime.player:
-                runtime.player.queues.get(message.chat.id).effects = []
+            live = await save(message.chat.id, [])
             await rich.send(
                 client,
                 message.chat.id,
@@ -204,7 +221,7 @@ def register(client: Client) -> None:
                     glyph="cross",
                     label="active",
                     value="<b>none</b>",
-                    note="The stream is back to the original audio from the next track.",
+                    note=_heard(live, "The stream is back to the original audio from the next track."),
                     actions=B.row(
                         B.btn(f"{E('spark')} The board", data="v:fx", style="primary"),
                         B.btn(f"{E('close')} Close", data="v:close"),

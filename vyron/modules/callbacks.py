@@ -946,8 +946,8 @@ def register(client: Client) -> None:
 
         # ── audio effects ──────────────────────────────────────────────────
         if action == "fx":
-            from vyron.core import chatcfg, effects as audio_fx
-            from vyron.modules.effects_cmd import panel as fx_panel
+            from vyron.core import effects as audio_fx
+            from vyron.modules.effects_cmd import panel as fx_panel, save as save_fx
 
             active = audio_fx.resolve(await chatcfg.get(chat.id, "effects", []) or [])
             if arg == "off":
@@ -957,11 +957,13 @@ def register(client: Client) -> None:
                     active = [name for name in active if name != arg]
                 else:
                     active = audio_fx.resolve(active + [arg])
-            await chatcfg.set(chat.id, "effects", active)
-            if player:
-                player.queues.get(chat.id).effects = active
+            # The board toggles the live stream too: a filter you can see
+            # switched on should be a filter you can already hear.
+            live = await save_fx(chat.id, active)
             await _show(client, cq, fx_panel(active))
-            await cq.answer(f"Active: {audio_fx.labels(active)}")
+            await cq.answer(
+                f"{'Live: ' if live else 'Next track: '}{audio_fx.labels(active)}"
+            )
             return
 
         # ── owner panel ────────────────────────────────────────────────────

@@ -926,6 +926,19 @@ async def _mirror_now_playing(user: WebUser, chat_id: int) -> None:
     await nowplaying.mirror_to_dm(bot, user.user_id, state, chat_title=title)
 
 
+async def _clear_dm_mirror(user: WebUser) -> None:
+    """Stop should not leave a "now playing" card sitting in the DM."""
+    bot = getattr(runtime, "bot", None)
+    if bot is None or not user.user_id:
+        return
+    from vyron.ui import nowplaying
+
+    try:
+        await nowplaying.clear_mirror(bot, user.user_id)
+    except Exception as exc:  # pragma: no cover - cosmetic
+        logger.debug("could not clear the DM mirror for %s: %s", user.user_id, exc)
+
+
 async def action(request: web.Request) -> web.Response:
     user = await _identify(request)
     denied = _denied(user)
@@ -992,6 +1005,7 @@ async def action(request: web.Request) -> web.Response:
             return ok(track=_track_json(track))
         if name == "stop":
             await player.stop(chat_id, leave=True)
+            await _clear_dm_mirror(user)
             return ok()
         if name == "seek":
             return ok(changed=await player.seek(chat_id, int(float(value or 0))))
@@ -1029,6 +1043,9 @@ async def action(request: web.Request) -> web.Response:
             active = audio_fx.resolve(value if isinstance(value, list) else [])
             await chatcfg.set(chat_id, "effects", active)
             state_obj.effects = active
+            # The same rule as the chat card and the button board: if it shows
+            # as switched on, it is already audible in the song that is playing.
+            await player.reapply_effects(chat_id)
             return ok(effects=active, labels=audio_fx.labels(active))
 
         # ── library ───────────────────────────────────────────────────────

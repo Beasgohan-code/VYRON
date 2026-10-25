@@ -405,6 +405,71 @@ def test_a_dm_keeps_one_mirrored_card(monkeypatch):
     assert len(bot.photos) == 2
     assert (4242, first) in bot.deleted, "the previous mirror is removed"
     nowplaying._DM_LAST.clear()
+    nowplaying._DM_TRACK.clear()
+
+
+def test_the_same_song_is_not_mirrored_twice(monkeypatch):
+    """A second tap on Play, or a skip that lands on the same song, must not
+    delete the DM card and post it again."""
+    from vyron.ui import nowplaying
+
+    if not thumbnails.PIL_AVAILABLE:
+        pytest.skip("Pillow is not installed")
+
+    async def fake_poster(state, track, **_):
+        return b"\xff\xd8fake"
+
+    monkeypatch.setattr(nowplaying, "poster", fake_poster)
+    nowplaying._DM_LAST.clear()
+    nowplaying._DM_TRACK.clear()
+
+    class Bot(_TrackingBot):
+        async def send_photo(self, **kwargs):
+            self.photos.append(kwargs)
+            return await self._fresh()
+
+    bot = Bot()
+    state = _state()
+
+    asyncio.run(nowplaying.mirror_to_dm(bot, 4242, state, chat_title="Room"))
+    asyncio.run(nowplaying.mirror_to_dm(bot, 4242, state, chat_title="Room"))
+
+    assert len(bot.photos) == 1
+    assert bot.deleted == []
+    nowplaying._DM_LAST.clear()
+    nowplaying._DM_TRACK.clear()
+
+
+def test_stopping_removes_the_dm_card(monkeypatch):
+    """A finished session must not leave "now playing" in the listener's DM."""
+    from vyron.ui import nowplaying
+
+    if not thumbnails.PIL_AVAILABLE:
+        pytest.skip("Pillow is not installed")
+
+    async def fake_poster(state, track, **_):
+        return b"\xff\xd8fake"
+
+    monkeypatch.setattr(nowplaying, "poster", fake_poster)
+    nowplaying._DM_LAST.clear()
+    nowplaying._DM_TRACK.clear()
+
+    class Bot(_TrackingBot):
+        async def send_photo(self, **kwargs):
+            self.photos.append(kwargs)
+            return await self._fresh()
+
+    bot = Bot()
+    state = _state()
+
+    asyncio.run(nowplaying.mirror_to_dm(bot, 4242, state, chat_title="Room"))
+    message_id = nowplaying._DM_LAST[4242][1]
+
+    asyncio.run(nowplaying.clear_mirror(bot, 4242))
+
+    assert (4242, message_id) in bot.deleted
+    assert 4242 not in nowplaying._DM_LAST
+    assert 4242 not in nowplaying._DM_TRACK
 
 
 def test_a_song_without_cover_art_gets_a_lettered_sleeve():

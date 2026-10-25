@@ -901,3 +901,38 @@ def test_radio_mode_is_off_unless_someone_chose_it():
     assert run(player.restore_settings(11)).autoplay is False
     chosen = run(player.restore_settings(12))
     assert chosen.autoplay is True and chosen.autoplay_set is True
+
+
+# ── effects ─────────────────────────────────────────────────────────────────
+def test_switching_a_filter_on_is_heard_in_the_song_that_is_playing():
+    """ntgcalls takes ``-af`` at stream start, so a live change re-opens the
+    stream where it is: same song, same second, same one play."""
+    player, calls, _, storage = make_player()
+    run(player.play_track(10, track("abc", duration=200)))
+    player.queues.get(10).started_at -= 42          # 42 s into the song
+    filters: list = []
+
+    async def play(chat_id, stream, config=None):
+        filters.append(stream._ffmpeg_parameters)
+        calls.played.append(str(stream._media_path))
+
+    calls.play = play
+    player.queues.get(10).effects = ["bass"]
+
+    changed = run(player.reapply_effects(10))
+
+    state = player.queues.get(10)
+    assert changed is True
+    assert filters == ['-ss 42 -af "bass=g=12:f=110:w=0.6"']
+    assert state.current is not None and state.current.id == "abc"
+    assert storage.counters["tracks"] == 1          # not a second play
+    assert len(storage.history) == 1
+    assert state.offset >= 42
+
+
+def test_an_effects_change_with_nothing_playing_does_not_touch_the_call():
+    player, calls, _, _ = make_player()
+    player.queues.get(10).current = track("abc")
+
+    assert run(player.reapply_effects(10)) is False
+    assert calls.played == []

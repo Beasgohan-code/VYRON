@@ -7,6 +7,21 @@ Two version numbers move independently:
 
 ## Bot
 
+### 1.10.8 — 2026-10-25
+
+**A filter you switch on is a filter you hear.** ntgcalls takes the `-af` chain
+when a stream *starts*, so turning bass or nightcore on mid-song used to do
+nothing until the next track — which reads as a button that does not work. The
+stream now re-opens at the second it is sitting on (same track, same card, the
+play counter untouched). The `-af` chain, the chat's stored setting and the
+live re-open all go through one helper, so the `/effects` card, the button
+board and the Mini App cannot disagree.
+
+**The Mini App's DM card follows the song, not every tap.** Mirroring skipped a
+song that is already on the card, so pressing play twice or skipping onto the
+track that just started no longer deletes the card and posts it again, and
+`stop` removes it instead of leaving "now playing" in a chat where nothing is.
+
 ### 1.10.7 — 2026-10-25
 
 Taking the two things people actually complained about, plus what ShizuMusic

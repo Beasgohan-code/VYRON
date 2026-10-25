@@ -220,6 +220,10 @@ async def drop_message(bot, chat_id: int, message_id: int | None) -> None:
 #: A DM is a conversation, not a feed — every song from the Mini App used to
 #: leave another poster in it.
 _DM_LAST: "OrderedDict[int, tuple[int, int]]" = OrderedDict()
+#: Which song the card in a listener's DM is currently showing. Without this,
+#: every action in the Mini App (a skip that lands on the same song, a second
+#: tap on Play, a pause) deleted the card and posted it again.
+_DM_TRACK: dict[int, str] = {}
 _DM_MAX = 200
 
 
@@ -228,6 +232,8 @@ async def mirror_to_dm(bot, user_id: int, state: ChatState, *, chat_title: str =
     if bot is None or state is None or state.current is None or not user_id:
         return
     track = state.current
+    if _DM_TRACK.get(int(user_id)) == track.id and int(user_id) in _DM_LAST:
+        return  # that song is already the card in this DM
     catalog = await i18n.for_chat(user_id)
     caption = cards.now_playing_dm_caption(
         track, chat_title=chat_title, state=state, catalog=catalog
@@ -249,6 +255,7 @@ async def mirror_to_dm(bot, user_id: int, state: ChatState, *, chat_title: str =
     # The card was delivered to the *listener's* chat, not to the room.
     _DM_LAST[int(user_id)] = (int(user_id), int(message.id))
     _DM_LAST.move_to_end(int(user_id))
+    _DM_TRACK[int(user_id)] = track.id
     while len(_DM_LAST) > _DM_MAX:
         _DM_LAST.popitem(last=False)
     if previous and previous[1] != int(message.id):
@@ -256,4 +263,14 @@ async def mirror_to_dm(bot, user_id: int, state: ChatState, *, chat_title: str =
         await drop_message(bot, previous[0], previous[1])
 
 
-__all__ = ["announce", "drop_message", "enabled", "mirror_to_dm", "poster"]
+async def clear_mirror(bot, user_id: int) -> None:
+    """A session ended: the DM must stop claiming that song is playing."""
+    if not user_id:
+        return
+    _DM_TRACK.pop(int(user_id), None)
+    previous = _DM_LAST.pop(int(user_id), None)
+    if previous:
+        await drop_message(bot, previous[0], previous[1])
+
+
+__all__ = ["announce", "clear_mirror", "drop_message", "enabled", "mirror_to_dm", "poster"]

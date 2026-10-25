@@ -218,3 +218,56 @@ def test_small_caps_has_no_uppercase_leftovers():
     assert not any(char.isupper() and char.isascii() for char in converted)
     assert converted[16] == "ǫ"
     assert converted[25] == "ᴢ"
+
+
+def test_a_filter_is_saved_and_the_playing_song_follows(monkeypatch):
+    """The /effects card and the button board save through one helper, so a
+    filter cannot be stored by one and ignored by the other."""
+    import asyncio
+
+    from vyron.core.queue import QueueManager
+    from vyron.modules import effects_cmd
+    from vyron.runtime import runtime
+
+    saved: dict = {}
+
+    async def fake_set(chat_id, key, value):
+        saved[(chat_id, key)] = value
+
+    class FakePlayer:
+        def __init__(self):
+            self.queues = QueueManager()
+            self.reapplied: list[int] = []
+
+        async def reapply_effects(self, chat_id):
+            self.reapplied.append(chat_id)
+            return True
+
+    monkeypatch.setattr(effects_cmd.chatcfg, "set", fake_set)
+    player = FakePlayer()
+    monkeypatch.setattr(runtime, "player", player, raising=False)
+
+    live = asyncio.run(effects_cmd.save(10, ["bass", "nonsense"]))
+
+    assert saved[(10, "effects")] == ["bass"]
+    assert player.reapplied == [10]
+    assert live is True
+    assert player.queues.get(10).effects == ["bass"]
+
+
+def test_an_unknown_filter_alone_saves_nothing(monkeypatch):
+    import asyncio
+
+    from vyron.modules import effects_cmd
+    from vyron.runtime import runtime
+
+    saved: dict = {}
+
+    async def fake_set(chat_id, key, value):
+        saved[(chat_id, key)] = value
+
+    monkeypatch.setattr(effects_cmd.chatcfg, "set", fake_set)
+    monkeypatch.setattr(runtime, "player", None, raising=False)
+
+    assert asyncio.run(effects_cmd.save(10, ["nonsense"])) is False
+    assert saved[(10, "effects")] == []
