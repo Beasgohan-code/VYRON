@@ -272,6 +272,17 @@ class Downloader:
                 opts.update(YouTube._parse_ytdlp_args(self.settings.ytdlp_args))
             except Exception:  # pragma: no cover - operator args are advisory
                 pass
+        # The same browser fingerprint the resolver uses. Search was doing this
+        # and the download was not, so a video could be *named* perfectly and
+        # then refused when its bytes were asked for.
+        try:
+            from vyron.core.search import impersonate_target
+
+            target = impersonate_target(self.settings)
+        except Exception:  # pragma: no cover - never fatal
+            target = ""
+        if target:
+            opts.setdefault("impersonate", target)
         opts.update(self._external_downloader())
         return opts
 

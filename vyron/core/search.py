@@ -434,6 +434,42 @@ def relax_query(query: str) -> str:
     return relaxed if relaxed and relaxed.lower() != (query or "").strip().lower() else ""
 
 
+_warned_impersonate = False
+
+
+def impersonate_target(settings: Any):
+    """A ready ``ImpersonateTarget``, or ``""`` when unavailable.
+
+    yt-dlp wants the *object*, not the string (the CLI parses it for you).
+    Requires curl_cffi — without it the option is skipped, never fatal.
+
+    Lives at module level because the *downloader* needs it too: metadata was
+    fetched as Chrome while the media was fetched as a bare `aiohttp`, which is
+    precisely the difference YouTube looks at when it decides to refuse a
+    download that had already been named successfully.
+    """
+    global _warned_impersonate
+    requested = (getattr(settings, "impersonate", "") or "").strip()
+    if requested.lower() in {"", "off", "none", "0", "false"}:
+        return ""
+    try:
+        import curl_cffi  # noqa: F401  (yt-dlp needs the module, not the API)
+        from yt_dlp.networking.impersonate import ImpersonateTarget
+    except Exception:
+        if not _warned_impersonate:
+            _warned_impersonate = True
+            logger.info(
+                "browser impersonation is off: `pip install curl_cffi` enables it "
+                "(it is the best no-cookie fix for a datacenter IP)"
+            )
+        return ""
+    try:
+        return ImpersonateTarget.from_str(requested or "chrome")
+    except Exception as exc:  # an unknown target must not break playback
+        logger.info("ignoring IMPERSONATE=%s (%s)", requested, exc)
+        return ""
+
+
 def _materialise_cookies(settings: Any) -> str:
     """Turn `YOUTUBE_COOKIES` (env text) into the cookie file yt-dlp wants.
 
@@ -1448,30 +1484,8 @@ class YouTube:
 
     # ── stream plumbing ────────────────────────────────────────────────────
     def _impersonate_target(self):
-        """A ready ``ImpersonateTarget``, or ``""`` when unavailable.
-
-        yt-dlp wants the *object*, not the string (the CLI parses it for you).
-        Requires curl_cffi — without it the option is skipped, never fatal.
-        """
-        requested = (getattr(self.settings, "impersonate", "") or "").strip()
-        if requested.lower() in {"", "off", "none", "0", "false"}:
-            return ""
-        try:
-            import curl_cffi  # noqa: F401  (yt-dlp needs the module, not the API)
-            from yt_dlp.networking.impersonate import ImpersonateTarget
-        except Exception:
-            if not self._warned_impersonate:
-                self._warned_impersonate = True
-                logger.info(
-                    "browser impersonation is off: `pip install curl_cffi` enables it "
-                    "(it is the best no-cookie fix for a datacenter IP)"
-                )
-            return ""
-        try:
-            return ImpersonateTarget.from_str(requested or "chrome")
-        except Exception as exc:  # an unknown target must not break playback
-            logger.info("ignoring IMPERSONATE=%s (%s)", requested, exc)
-            return ""
+        """A ready ``ImpersonateTarget``, or ``""`` when unavailable."""
+        return impersonate_target(self.settings)
 
     @staticmethod
     def _client_opts(client: str | None) -> dict[str, Any]:

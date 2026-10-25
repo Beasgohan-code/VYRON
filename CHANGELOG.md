@@ -30,6 +30,14 @@ engine answers at all, `find` no longer asks a second identical query — it say
 so and stops, and a *miss* is remembered for two minutes instead of an hour, so
 one throttled minute cannot mark a song unplayable for the rest of the session.
 
+*Downloads never impersonated the browser the search did.* `IMPERSONATE` was
+applied to the resolver's yt-dlp options and not to the downloader's, so a
+datacenter IP was allowed to *name* a video as Chrome and then refused when it
+asked for the bytes. The options builder is shared now
+(`search.impersonate_target`), so both halves of a play carry the same TLS/JA3
+fingerprint and header order — the one no-cookie fix that actually helps a
+walled host.
+
 *The wall made YouTube the most expensive thing in a search.* Its streams are
 refused from a walled IP, but its *names* are still worth having — so a walled
 YouTube now gets a 0.6 s glance (`WALLED_GLANCE`) instead of the six-second

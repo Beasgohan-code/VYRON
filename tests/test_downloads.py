@@ -622,3 +622,20 @@ def test_a_walled_ip_is_named_in_the_failure(tmp_path, monkeypatch):
 
     monkeypatch.setattr(runtime, "youtube", SimpleNamespace(walled=lambda: False), raising=False)
     assert downloader._no_mirror_reason() == "no mirror had a downloadable URL"
+
+
+def test_a_download_impersonates_the_browser_the_resolver_already_does(tmp_path, monkeypatch):
+    """Naming a video as Chrome and downloading it as aiohttp is the wall.
+
+    Search sets `impersonate` (TLS/JA3 fingerprint, header order); the download
+    options did not, so a datacenter IP could find a song perfectly and then be
+    refused when it asked for the bytes.
+    """
+    from vyron.core import search as search_module
+
+    monkeypatch.setattr(search_module, "impersonate_target", lambda settings: "chrome-target")
+    downloader = _downloader(tmp_path)
+    assert downloader._base_opts().get("impersonate") == "chrome-target"
+
+    monkeypatch.setattr(search_module, "impersonate_target", lambda settings: "")
+    assert "impersonate" not in downloader._base_opts()
