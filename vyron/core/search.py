@@ -794,6 +794,13 @@ class YouTube:
         instance_task = asyncio.create_task(
             self._instance_search(query, count + 2, requester), name="search:instances"
         )
+        # YT Music and a flat `ytsearch` are two different endpoints answering
+        # the same question; asked one after the other, the second one's
+        # latency was added to the first's for no reason.
+        flat_task = asyncio.create_task(
+            self._async_extract(f"ytsearch{fetch}:{query}", extract_flat="in_playlist"),
+            name="search:ytsearch",
+        )
         try:
             try:
                 meta = await self._ytmusic_search(query, fetch)
@@ -807,9 +814,7 @@ class YouTube:
 
             if len(tracks) < count:
                 try:
-                    info = await self._async_extract(
-                        f"ytsearch{fetch}:{query}", extract_flat="in_playlist"
-                    )
+                    info = await flat_task
                 except Exception as exc:
                     logger.info("ytsearch failed for %r: %s", query, exc)
                     info = {}
@@ -824,8 +829,9 @@ class YouTube:
                 except Exception as exc:
                     logger.info("instance search gave nothing for %r: %s", query, exc)
         finally:
-            if not instance_task.done():
-                instance_task.cancel()
+            for task in (instance_task, flat_task):
+                if not task.done():
+                    task.cancel()
 
         if not tracks:
             try:

@@ -430,7 +430,8 @@ async def fetch(
     /doctor and the API surface to the user.
     """
     target.parent.mkdir(parents=True, exist_ok=True)
-    chosen = order or PREFERRED
+    # `order=()` is "no accelerator, one connection" — not "use the defaults".
+    chosen = PREFERRED if order is None else tuple(order)
     errors: list[str] = []
 
     for name in chosen:
@@ -486,18 +487,20 @@ async def fetch(
 
     # Last resort: ranges in Python, then one connection. Neither needs a
     # binary, and the first is several times faster when the URL allows ranges.
-    try:
-        await asyncio.wait_for(
-            ranged_fetch(
-                url, target, headers=headers, cap=cap, total=total, on_progress=on_progress
-            ),
-            timeout=timeout,
-        )
-        logger.info("downloaded %s with %d ranges", target.name, RANGE_CONNECTIONS)
-        return "ranged"
-    except Exception as exc:
-        _discard(target)  # unlink(missing_ok=True): no stat round-trip
-        logger.info("ranged fetch could not get %s (%s) — one connection", target.name, exc)
+    # `order=()` means the operator asked for one connection, so respect it.
+    if "ranged" in chosen:
+        try:
+            await asyncio.wait_for(
+                ranged_fetch(
+                    url, target, headers=headers, cap=cap, total=total, on_progress=on_progress
+                ),
+                timeout=timeout,
+            )
+            logger.info("downloaded %s with %d ranges", target.name, RANGE_CONNECTIONS)
+            return "ranged"
+        except Exception as exc:
+            _discard(target)  # unlink(missing_ok=True): no stat round-trip
+            logger.info("ranged fetch could not get %s (%s) — one connection", target.name, exc)
     try:
         await _aiohttp(url, target, headers=headers, cap=cap, on_progress=on_progress)
     except Exception as exc:

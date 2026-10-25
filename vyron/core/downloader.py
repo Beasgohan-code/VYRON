@@ -208,15 +208,22 @@ class Downloader:
 
     # ── accelerators ───────────────────────────────────────────────────────
     def accelerator_order(self) -> tuple[str, ...]:
-        """`DOWNLOAD_ACCELERATOR` → the tools to try, in order."""
+        """`DOWNLOAD_ACCELERATOR` → the tools to try, in order.
+
+        `ranged` is the pure-Python range splitter: six connections and no
+        binary, so it is what runs on a host without aria2 — which is most of
+        them. It sits before plain `curl`, which is one connection.
+        """
         preference = (getattr(self.settings, "download_accelerator", "") or "auto").lower()
         if preference in {"none", "off", "aiohttp", "builtin"}:
             return ()
         if preference in {"aria2", "aria2c"}:
-            return ("aria2", "curl")
+            return ("aria2", "ranged", "curl")
         if preference == "curl":
-            return ("curl", "aria2")
-        return ("aria2", "curl")
+            return ("curl", "ranged")
+        if preference in {"ranged", "parallel", "python"}:
+            return ("ranged", "curl")
+        return ("aria2", "ranged", "curl")
 
     def _external_downloader(self) -> dict:
         """yt-dlp's own hand-off: aria2c gets the media, yt-dlp gets the info.

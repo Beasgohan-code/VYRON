@@ -132,3 +132,22 @@ def test_an_oversized_file_is_refused_before_the_bytes_arrive(tmp_path):
             await server.close()
 
     asyncio.run(go())
+
+
+def test_the_operator_can_still_ask_for_one_connection(tmp_path, monkeypatch):
+    """DOWNLOAD_ACCELERATOR=none must not be silently outvoted by the ranges."""
+
+    async def go():
+        state: dict = {"requests": []}
+        server = await _serve(state)
+        try:
+            target = tmp_path / "song.m4a"
+            tool = await accelerator.fetch(server.make_url("/song.m4a"), target, order=())
+            assert tool == "aiohttp"
+            assert hashlib.sha256(target.read_bytes()).hexdigest() == DIGEST
+            ranged = [r for r in state["requests"] if r and r != "bytes=0-0"]
+            assert ranged == [], state["requests"]
+        finally:
+            await server.close()
+
+    asyncio.run(go())
