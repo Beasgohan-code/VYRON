@@ -407,18 +407,28 @@ class Player:
         if track.source == "telegram" and _is_local_file(track.url):
             # already downloaded locally — stream the file, not a URL
             url = track.url
-        elif (
-            track.source in _DIRECT_SOURCES
-            and track.url
-            and not getattr(self.settings, "play_from_disk", False)
-        ):
-            # A direct stream: yt-dlp has nothing to extract here.
+        elif track.source in _DIRECT_SOURCES and track.url:
+            # A direct stream: the catalogue URL *is* the audio, so ntgcalls can
+            # start on the first megabyte instead of waiting for a whole file to
+            # be fetched, transcoded and written to disk. Downloading first was
+            # the difference between "it plays" and "it plays eight seconds
+            # after the card appears".
             url = track.url
-        elif getattr(self.settings, "play_from_disk", False) and self.downloader is not None:
+        elif (
+            getattr(self.settings, "play_from_disk", False)
+            and self.downloader is not None
+            and not (video is False and self._substitute_first(track))
+        ):
             # ShizuMusic's model: fetch the file once, then hand ntgcalls a
             # local path. A local stream cannot 403, expire or be throttled
             # mid-song, which is what makes playback reliable on a datacenter
             # IP — the cache makes the second play of a track instant.
+            #
+            # Everything *except* a track YouTube is already refusing: there,
+            # fetching to disk means "ask a broken engine, then a mirror, then
+            # a catalogue, then download the whole song" before the first
+            # second of audio. The resolver answers the same question from its
+            # own cache, in one step, and ntgcalls streams it straight away.
             try:
                 path = await self.downloader.fetch(track, video=video)
                 url = str(path)
@@ -432,19 +442,38 @@ class Player:
                 journal.warn("player", "disk playback failed, using the URL", track=track.id, error=str(exc))
         if not url and track.source in _EXTRACT_SOURCES and track.url:
             # SoundCloud / Bandcamp: the page must be extracted before ntgcalls
-            # can be handed anything, and it is not a YouTube id.
+            # can be handed anything, and it is not a YouTube id. One call, then
+            # the song streams — no full download first.
             from vyron.core import extract
 
             try:
                 url = await extract.stream_url(track)
             except Exception as exc:
                 logger.warning("extraction failed for %s (%s)", track.id, exc)
+                if getattr(self.settings, "play_from_disk", False) and self.downloader is not None:
+                    try:
+                        url = str(await self.downloader.fetch(track, video=video))
+                    except Exception as fallback_exc:
+                        logger.warning(
+                            "disk fallback failed for %s (%s)", track.id, fallback_exc
+                        )
         if not url:
             try:
                 info = await self.youtube.stream_info(track, video=video)
             except MediaError as exc:
-                raise StreamError(f"Could not resolve that track: {exc}") from exc
-            url = info.url
+                # Last resort before telling the chat it failed: the download
+                # ladder can still reach a catalogue, and a file on disk plays
+                # even when every resolver is having a bad day.
+                if self.downloader is not None:
+                    try:
+                        url = str(await self.downloader.fetch(track, video=video))
+                        logger.info("resolved %s from disk after a failed lookup", track.id)
+                    except Exception as disk_exc:
+                        logger.warning("disk retry failed for %s (%s)", track.id, disk_exc)
+                if not url:
+                    raise StreamError(f"Could not resolve that track: {exc}") from exc
+            else:
+                url = info.url
             # The answer can be audio even when video was asked for: a walled
             # YouTube falls back to the same song from a catalogue, and those
             # only carry audio. Asking ntgcalls for a video track that is not
@@ -558,6 +587,25 @@ class Player:
                     await self.storage.add_history(track.requested_by, track.to_dict())
             except Exception as exc:
                 logger.debug("history write failed: %s", exc)
+
+    @staticmethod
+    def _substitute_first(track: Track) -> bool:
+        """True when YouTube is refusing this host and *track* is a YouTube one.
+
+        A walled YouTube track cannot play from here at all; the audio comes
+        from a catalogue. Asking the resolver for it is one cached step, while
+        downloading it to disk re-walks the whole ladder first.
+        """
+        source = str(getattr(track, "source", "") or "").lower()
+        if source not in {"youtube", "ytmusic", "youtube_music", ""}:
+            return False
+        try:
+            from vyron.runtime import runtime
+
+            engine = getattr(runtime, "youtube", None)
+            return bool(engine is not None and engine.walled())
+        except Exception:  # pragma: no cover - before runtime exists
+            return False
 
     @staticmethod
     def _may_stream() -> bool:

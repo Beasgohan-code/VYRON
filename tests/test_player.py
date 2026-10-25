@@ -163,6 +163,78 @@ def _async_return(value):
     return inner
 
 
+# ── which engine plays it ───────────────────────────────────────────────────
+def test_a_direct_catalogue_track_streams_without_a_download():
+    """JioSaavn/Audius hand out the audio: no file on disk, no wait."""
+    downloaded: list[str] = []
+
+    class Downloader:
+        async def fetch(self, track, video=False, on_progress=None):
+            downloaded.append(track.id)
+            return __import__("pathlib").Path(f"/tmp/{track.id}.mp3")
+
+    player, calls, _, _ = make_player(downloader=Downloader())
+    catalogue = Track(
+        id="jx1", title="Kesariya", duration=200, source="jiosaavn",
+        url="https://cdn.jiosaavn/k.m4a",
+    )
+
+    run(player.play_track(11, catalogue))
+
+    assert downloaded == []
+    assert calls.played == ["https://cdn.jiosaavn/k.m4a"]
+
+
+def test_a_walled_youtube_track_asks_the_resolver_instead_of_downloading(monkeypatch):
+    """The walled path: one cached resolver answer, not ladder-then-download."""
+    downloaded: list[str] = []
+
+    class Downloader:
+        async def fetch(self, track, video=False, on_progress=None):
+            downloaded.append(track.id)
+            return __import__("pathlib").Path(f"/tmp/{track.id}.mp3")
+
+    player, calls, youtube, _ = make_player(downloader=Downloader())
+    monkeypatch.setattr(Player, "_substitute_first", staticmethod(lambda track: True))
+
+    run(player.play_track(12, track("yyyyyyyyyyy", "Song")))
+
+    assert downloaded == []
+    assert youtube.stream_info_calls == ["yyyyyyyyyyy"]
+    assert calls.played == ["https://cdn/yyyyyyyyyyy.m4a"]
+
+
+def test_an_unresolvable_track_still_tries_the_disk_before_failing(monkeypatch):
+    """When every resolver is having a bad day, a cached file beats an error."""
+    from pathlib import Path
+
+    attempts: list[str] = []
+
+    class Downloader:
+        async def fetch(self, track, video=False, on_progress=None):
+            attempts.append(track.id)
+            if len(attempts) == 1:
+                raise RuntimeError("first attempt: no bytes yet")
+            path = Path("/tmp/cached-on-disk.mp3")
+            await asyncio.to_thread(path.write_bytes, b"ID3")
+            return path
+
+    player, calls, youtube, _ = make_player(downloader=Downloader())
+
+    from vyron.core.search import MediaError
+
+    async def refuse(track, video=False):
+        raise MediaError("no results")
+
+    monkeypatch.setattr(youtube, "stream_info", refuse)
+
+    run(player.play_track(13, Track(id="losttrack01", title="Lost", duration=90, source="youtube")))
+
+    # disk first (failed), the resolver (failed), then the disk again (worked)
+    assert attempts == ["losttrack01", "losttrack01"]
+    assert calls.played == ["/tmp/cached-on-disk.mp3"]
+
+
 # ── starting ────────────────────────────────────────────────────────────────
 def test_play_track_starts_the_stream_and_counts_once():
     player, calls, _, storage = make_player()

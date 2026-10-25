@@ -1,0 +1,114 @@
+"""The card that exists for a second or two.
+
+`/play` used to answer with two lines of orange text and an italic apology —
+"⏱️ Searching YouTube…" over "✨ give it a moment — VYRON is on it" — the one
+reply in the app that did not look like the app, and the one that named the
+wrong engine. These tests keep it a card, keep it honest about what it is
+doing, and keep its live updates from overwriting the answer.
+"""
+from __future__ import annotations
+
+import asyncio
+import types
+
+import pytest
+
+from vyron.ui import cards, rich
+
+
+def _plain(markup: str) -> str:
+    return rich.to_html(markup)
+
+
+def test_the_working_card_is_the_same_shape_as_every_other_card():
+    text = _plain(cards.working_card("searching", "", glyph="search", query="Kesariya", step="asking the catalogues"))
+
+    assert text.startswith("━━━"), "no masthead"
+    assert "ꜱᴇᴀʀᴄʜɪɴɢ" in text, "the banner is small-caps like the rest of the app"
+    assert "<b>Kesariya</b>" in text
+    assert "asking the catalogues" in text
+    # The apology that used to sit under every /play.
+    assert "give it a moment" not in text
+    assert "<i>✨ VYRON" in text, "still carries the footer"
+
+
+def test_the_working_card_says_what_it_is_looking_for():
+    link = _plain(cards.working_card("reading the link", "", glyph="link", query="https://youtu.be/x", step="resolving", label="link"))
+    playlist = _plain(cards.working_card("loading the playlist", "", glyph="queue", query="PL1", step="reading", label="playlist"))
+
+    assert "ʟɪɴᴋ" in link and "https://youtu.be/x" in link
+    assert "ᴘʟᴀʏʟɪꜱᴛ" in playlist and "PL1" in playlist
+    assert "looking for" not in link
+
+
+def test_the_old_call_shape_still_works():
+    """Five other commands post this card with only a title and a sentence."""
+    text = _plain(cards.working_card("doctor", "Running the checks — this takes a few seconds."))
+    assert "ᴅᴏᴄᴛᴏʀ" in text
+    assert "Running the checks" in text
+
+
+def test_a_live_stage_update_never_overwrites_the_answer(monkeypatch):
+    from vyron.modules import play
+
+    sent: list[str] = []
+
+    class FakeRich:
+        async def send(self, client, chat_id, markup, **kwargs):
+            sent.append(markup)
+            return types.SimpleNamespace(id=99)
+
+        async def edit(self, client, chat_id, message_id, markup, **kwargs):
+            sent.append(markup)
+
+    monkeypatch.setattr(play, "rich", FakeRich())
+
+    class Message:
+        id = 5
+        chat = types.SimpleNamespace(id=1)
+        from_user = types.SimpleNamespace(id=9, first_name="Asha")
+
+    async def scenario():
+        await play._thinking(
+            None,
+            Message(),
+            "searching",
+            glyph="search",
+            query="Kesariya",
+            step="asking the catalogues",
+            stages=[(0.01, "matching the results")],
+        )
+        await asyncio.sleep(0.08)
+        await play._edit(None, 1, 99, "the picker")
+        await asyncio.sleep(0.08)
+        assert play._TICKERS == {}, "the ticker outlived the answer"
+
+    asyncio.run(scenario())
+
+    assert "this card updates itself" in sent[0]
+    assert "matching the results" in sent[1]
+    assert sent[-1] == "the picker"
+    # Nothing arrived after the answer was written.
+    assert sent.index("the picker") == len(sent) - 1
+
+
+def test_a_cancelled_ticker_is_forgotten():
+    from vyron.modules import play
+
+    async def scenario():
+        play._TICKERS[123] = asyncio.create_task(asyncio.sleep(30))
+        play._stop_ticker(123)
+        assert 123 not in play._TICKERS
+        await asyncio.sleep(0)          # let the cancellation land
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        play._TICKERS.clear()
+
+
+@pytest.mark.parametrize("title", ["searching", "reading the link", "loading the playlist"])
+def test_no_working_card_mentions_a_single_engine(title):
+    """The card used to promise YouTube; the catalogues answer first now."""
+    text = _plain(cards.working_card(title, "", query="x", step="working")).lower()
+    assert "youtube" not in text

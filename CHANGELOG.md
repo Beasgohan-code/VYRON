@@ -7,6 +7,51 @@ Two version numbers move independently:
 
 ## Bot
 
+### 1.10.3 — 2026-10-25
+
+Three complaints, three causes, all in the parts that decide what plays and
+when.
+
+* **Playback came back.** Two separate bugs kept the voice chat silent after
+  YouTube started refusing this host:
+  * the downloader treated "YouTube is walled" as "yt-dlp is useless" and
+    skipped the ladder for *every* track — including the SoundCloud substitute
+    it had just found, which yt-dlp downloads perfectly. The wall now only
+    skips YouTube tracks.
+  * a substitute's `url` is a *page* for SoundCloud and Bandcamp, not audio.
+    It was being fetched as bytes and written into a `.mp3`, so the failure
+    arrived later, on the listener's side, looking like the bot refusing to
+    play. Direct catalogues stream, pages are extracted.
+* **A standby no longer stays a standby for ever.** Render overlaps a redeploy
+  for a few seconds, so the incoming instance saw a fresh lease belonging to
+  the process that was shutting down, stood down for its own voice chat, and —
+  because `claim` only ran once at boot — never asked again. A deployment could
+  answer every command and play nothing until the *next* deploy. The lease is
+  now renewed on the same 30-second beat: a lapsed lease is taken over, 24/7
+  playback resumes on promotion, and the journal says so.
+* **Searches answer in about a second.** The catalogue lane (JioSaavn, Audius,
+  SoundCloud — the ones that hand out real audio) now starts at the same moment
+  as YouTube instead of after it, and wins whenever it can fill the page:
+  it gets 1.3 s of exclusivity, YouTube gets the rest of a 6 s budget, and a
+  thin catalogue is merged rather than preferred. Results are cached for five
+  minutes per query, so the picker, a retry and "other results" are free.
+* **A track plays as soon as it is asked for.** Direct catalogue tracks stream
+  from their URL instead of being downloaded first; a walled YouTube track asks
+  the resolver (one cached step) instead of re-walking the download ladder; and
+  if every resolver fails, a file on disk is tried before the chat is told it
+  failed.
+* **The working card looks like the app.** `/play` used to answer with
+  "⏱️ Searching YouTube…" over an italic "give it a moment — VYRON is on it" —
+  two lines of orange text in a product where every other reply is a shaped
+  card, and it named the wrong engine. It is now the same masthead, marked
+  fields and footer as everything else, showing what is being looked for and
+  what is happening to it, with live stage updates at 1.5 s and 3.5 s that stop
+  the instant the answer is written.
+* **Failures say what a listener can do.** "Could not stream that" plus the
+  engine chain is developer text. The three real cases — no voice chat, another
+  instance holding it, nothing playable — each get a sentence that ends in an
+  action.
+
 ### 1.10.2 — 2026-10-25
 
 Sized for the phone it actually runs in, and two failures from the log.

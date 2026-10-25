@@ -1780,15 +1780,37 @@ def change_card(
     )
 
 
-def working_card(title: str, text: str, *, glyph: str = "spinner") -> str:
+def working_card(
+    title: str,
+    text: str,
+    *,
+    glyph: str = "spinner",
+    query: str = "",
+    step: str = "",
+    label: str = "looking for",
+) -> str:
     """A placeholder that is edited into the real answer a moment later.
 
-    It still gets the masthead, so the chat does not flicker between "a bold
-    line" and "a card" while a search or a download runs.
+    It gets the same masthead as every other card, so the chat does not flicker
+    between "a bold line" and "a card" while a search or a download runs —
+    which is exactly how `/play` used to look: an orange clock, a bold sentence
+    about YouTube, and an italic apology underneath it.
+
+    With `query` (and optionally `step`) it uses the same marked fields as the
+    result card: what is being looked for, and what is happening to it.
     """
+    if query or step:
+        rows: list[tuple[str, str, str]] = []
+        if query:
+            rows.append((glyph, label, f"<b>{esc(truncate(query, 52))}</b>"))
+        if step:
+            rows.append(("clock", "stage", esc(step)))
+        body = B.fields(rows)
+    else:
+        body = B.context(f"{B.think()} {text}")
     return (
         B.banner(title, glyph=glyph)
-        + B.context(f"{B.think()} {text}")
+        + body
         + B.footer(f"{E('spark')} {BRAND} {BULLET} this card updates itself")
     )
 

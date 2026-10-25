@@ -236,6 +236,77 @@ def test_lease_is_taken_over_once_it_goes_stale(tmp_path):
     assert asyncio.run(lease_module.claim(storage)) is True
 
 
+def test_a_standby_takes_over_when_the_old_instance_stops_answering(tmp_path):
+    """The redeploy trap: a new process used to stay a standby for ever.
+
+    Render overlaps a deploy for a few seconds, so the incoming instance sees a
+    fresh lease belonging to the process that is shutting down. `claim` ran once
+    at boot; nothing ever asked again — a bot that answered every command and
+    never played anything until the *next* deploy.
+    """
+    import asyncio
+    import dataclasses
+    import time
+
+    from vyron.config import settings as base
+    from vyron.core import lease
+    from vyron.database import JsonStorage
+
+    storage = JsonStorage(dataclasses.replace(base, data_dir=tmp_path))
+    asyncio.run(storage.connect())
+
+    promotions: list[int] = []
+
+    async def hook():
+        promotions.append(1)
+
+    lease.on_promote(hook)
+    me = lease.instance_id()
+    try:
+        # Another process holds a fresh lease: this one must stand down…
+        asyncio.run(
+            storage.set_meta("instance", {"id": "ins_old", "beat": time.time(), "since": 0.0})
+        )
+        assert asyncio.run(lease.claim(storage)) is False   # boot: stand down
+        assert lease.is_primary() is False
+        assert asyncio.run(lease.renew(storage)) is False    # still somebody else's
+        assert promotions == []
+
+        # …and take over by itself once that lease stops being refreshed.
+        asyncio.run(
+            storage.set_meta(
+                "instance",
+                {"id": "ins_old", "beat": time.time() - lease.LEASE_SECONDS - 1, "since": 0.0},
+            )
+        )
+        assert asyncio.run(lease.renew(storage)) is True
+        assert lease.is_primary() is True
+        assert promotions == [1], "playback should have been resumed on promotion"
+    finally:
+        lease._promote_hooks.clear()
+        lease._state.update(primary=True, holder=me)
+
+
+def test_a_primary_renew_keeps_its_lease(tmp_path):
+    import asyncio
+    import dataclasses
+    import time
+
+    from vyron.config import settings as base
+    from vyron.core import lease
+    from vyron.database import JsonStorage
+
+    storage = JsonStorage(dataclasses.replace(base, data_dir=tmp_path))
+    asyncio.run(storage.connect())
+    me = lease.instance_id()
+    lease._state.update(primary=True, holder=me, since=0.0)
+
+    assert asyncio.run(lease.renew(storage)) is True
+    stored = asyncio.run(storage.get_meta("instance", {}))
+    assert stored["id"] == me
+    assert time.time() - float(stored["beat"]) < 5
+
+
 def test_standby_refuses_to_stream():
     import asyncio
 

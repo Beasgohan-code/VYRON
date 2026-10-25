@@ -1,0 +1,196 @@
+"""Playback after a YouTube wall: the right engine for the right track.
+
+Two production failures are pinned here.
+
+1. The downloader treated "YouTube is refusing this host" as "yt-dlp is
+   useless" — so a SoundCloud substitute, which yt-dlp downloads perfectly,
+   was skipped and the voice chat stayed silent.
+2. A substitute's `url` for SoundCloud/Bandcamp is a *page*, not audio. Fetching
+   it as bytes wrote HTML into a .mp3 and the stream failed later, on the
+   listener's side, where it looks like the bot refusing to play.
+"""
+from __future__ import annotations
+
+import asyncio
+import dataclasses
+
+import pytest
+
+from vyron.core.downloader import _is_youtube
+from vyron.core.queue import Track
+
+
+def _settings(tmp_path):
+    from vyron.config import settings as real
+
+    return dataclasses.replace(
+        real,
+        data_dir=tmp_path,
+        downloads_dir=tmp_path / "downloads",
+        max_download_mb=50,
+        stream_fallback=False,
+        play_from_disk=True,
+    )
+
+
+@pytest.fixture()
+def downloader(tmp_path):
+    from vyron.core.downloader import Downloader
+
+    instance = Downloader(_settings(tmp_path))
+    instance.settings.ensure_dirs()
+    return instance
+
+
+def test_the_wall_test_knows_which_tracks_are_youtube():
+    assert _is_youtube(Track(id="dQw4w9WgXcQ", title="x")) is True
+    assert _is_youtube(Track(id="abc", title="x", source="ytmusic")) is True
+    assert _is_youtube(Track(id="1800914883", title="x", source="soundcloud")) is False
+    assert _is_youtube(Track(id="jx-9Yg", title="x", source="jiosaavn")) is False
+    assert _is_youtube(Track(id="abc", title="x", source="audius")) is False
+
+
+def test_a_soundcloud_track_is_downloaded_even_when_youtube_is_walled(downloader, monkeypatch, tmp_path):
+    """The wall is about YouTube, not about yt-dlp."""
+    called: list[str] = []
+
+    def fake_ytdlp(track, *, video, on_progress=None):
+        called.append(track.id)
+        target = downloader.audio_path(track)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"ID3" + b"0" * 64)
+        return target
+
+    monkeypatch.setattr(downloader, "_youtube_walled", lambda: True)
+    monkeypatch.setattr(downloader, "_download_ytdlp", fake_ytdlp)
+
+    track = Track(id="1800914883", title="Let the world burn", source="soundcloud",
+                  url="https://soundcloud.com/x/let-the-world-burn")
+
+    path = asyncio.run(downloader.fetch(track))
+
+    assert called == ["1800914883"]
+    assert path.exists()
+
+
+def test_a_youtube_track_still_skips_the_ladder_when_walled(downloader, monkeypatch):
+    from vyron.core.downloader import DownloadError
+
+    monkeypatch.setattr(downloader, "_youtube_walled", lambda: True)
+    monkeypatch.setattr(
+        downloader, "_download_ytdlp", lambda *a, **k: pytest.fail("yt-dlp should not run")
+    )
+    async def no_mirror(*args, **kwargs):
+        raise DownloadError("no mirror had a downloadable URL")
+
+    monkeypatch.setattr(downloader, "_download_direct", no_mirror)
+
+    async def no_substitute(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr("vyron.core.alternate.find", no_substitute)
+
+    track = Track(id="dQw4w9WgXcQ", title="Song", source="youtube")
+    with pytest.raises(DownloadError):
+        asyncio.run(downloader.fetch(track))
+
+
+def test_a_page_url_substitute_is_extracted_not_fetched(downloader, monkeypatch):
+    """SoundCloud gives a page. Writing it to .mp3 is how playback died."""
+    from vyron.core import alternate
+    from vyron.core.downloader import DownloadError
+
+    def boom(*args, **kwargs):
+        raise DownloadError("yt-dlp gave up")
+
+    monkeypatch.setattr(downloader, "_youtube_walled", lambda: False)
+    monkeypatch.setattr(downloader, "_download_ytdlp", boom)
+    monkeypatch.setattr(downloader, "_download_direct", boom)
+    monkeypatch.setattr(
+        downloader, "_download_stream", lambda *a, **k: pytest.fail("a page is not audio")
+    )
+
+    found = Track(id="1800914883", title="Let the world burn", source="soundcloud",
+                  url="https://soundcloud.com/x/let-the-world-burn")
+
+    async def substitute(*args, **kwargs):
+        return found
+
+    seen: list[str] = []
+
+    def fake_ytdlp(track, *, video, on_progress=None):
+        seen.append(f"{track.source}:{track.id}")
+        target = downloader.audio_path(track)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"ID3" + b"0" * 64)
+        return target
+
+    monkeypatch.setattr(alternate, "find", substitute)
+    # The original is refused; the substitute is extracted with yt-dlp.
+    def first_then_ok(track, *, video, on_progress=None):
+        if track.source == "youtube":
+            raise DownloadError("original refused")
+        return fake_ytdlp(track, video=video, on_progress=on_progress)
+
+    monkeypatch.setattr(downloader, "_download_ytdlp", first_then_ok)
+
+    track = Track(id="dQw4w9WgXcQ", title="Let the world burn", source="youtube")
+    path = asyncio.run(downloader.fetch(track))
+
+    assert seen == ["soundcloud:1800914883"]
+    assert path.exists()
+
+
+def test_a_direct_catalogue_substitute_is_streamed_not_extracted(downloader, monkeypatch):
+    """JioSaavn/Audius hand out the audio file itself: no extraction step."""
+    from vyron.core import alternate
+    from vyron.core.downloader import DownloadError
+
+    monkeypatch.setattr(downloader, "_youtube_walled", lambda: True)
+    monkeypatch.setattr(
+        downloader, "_download_direct", lambda *a, **k: (_ for _ in ()).throw(DownloadError("no mirror"))
+    )
+
+    found = Track(id="jx9Yg", title="Kesariya", source="jiosaavn", url="https://cdn.example/k.m4a")
+
+    async def substitute(*args, **kwargs):
+        return found
+
+    streamed: list[str] = []
+
+    async def fake_stream(track, *, on_progress=None):
+        streamed.append(track.id)
+        target = downloader.audio_path(track)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"ID3" + b"0" * 64)
+        return target
+
+    monkeypatch.setattr(alternate, "find", substitute)
+    monkeypatch.setattr(downloader, "_download_stream", fake_stream)
+
+    track = Track(id="dQw4w9WgXcQ", title="Kesariya", source="youtube")
+    path = asyncio.run(downloader.fetch(track))
+
+    assert streamed == ["jx9Yg"]
+    assert path.exists()
+
+
+# ── what the chat is told when it fails ────────────────────────────────────
+def test_a_standby_failure_explains_itself_and_promises_a_takeover():
+    from vyron.modules.play import _stream_failure_text
+
+    text = _stream_failure_text(
+        RuntimeError("This instance is a standby — another copy of the bot owns the voice chat.")
+    )
+    assert "Another copy has the voice chat" in text
+    assert "takes playback over" in text
+    assert "standby" not in text.split("<blockquote>")[1], "raw engine text in the chat"
+
+
+def test_an_engine_chain_is_not_pasted_into_the_chat():
+    from vyron.modules.play import _stream_failure_text
+
+    text = _stream_failure_text(RuntimeError("yt-dlp: refused · mirror: refused · substitute: none"))
+    assert "Could not reach the audio" in text
+    assert "/sources" in text          # where the owner looks
+    assert "/song" in text             # what the listener can do instead

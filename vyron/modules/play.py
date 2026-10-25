@@ -3,7 +3,9 @@
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from pathlib import Path
 
 from pyrogram import Client
@@ -83,21 +85,87 @@ def _too_long_text(track: Track) -> str:
     )
 
 
-async def _thinking(client: Client, message: Message, text: str):
-    # Editable (classic HTML) lane, so no rich-only tags here — an expandable
-    # blockquote keeps the card compact and collapses to one tidy line.
-    return await rich.send(
+#: Live "still working" tickers, keyed by the card they belong to.
+#: A search that takes four seconds should say so *on the card*, not look
+#: identical to one that hung — and the ticker has to die the moment the real
+#: answer is written, or a late tick would overwrite the results.
+_TICKERS: dict[int, "asyncio.Task[None]"] = {}
+
+
+def _stop_ticker(message_id: int | None) -> None:
+    task = _TICKERS.pop(int(message_id or 0), None)
+    if task is not None and not task.done():
+        task.cancel()
+
+
+async def _tick(
+    client: Client,
+    chat_id: int,
+    message_id: int,
+    *,
+    title: str,
+    glyph: str,
+    query: str,
+    label: str,
+    steps: list[tuple[float, str]],
+) -> None:
+    started = time.monotonic()
+    for after, step in steps:
+        delay = after - (time.monotonic() - started)
+        try:
+            await asyncio.sleep(max(0.0, delay))
+        except asyncio.CancelledError:
+            return
+        try:
+            await rich.edit(
+                client,
+                chat_id,
+                message_id,
+                cards.working_card(title, "", glyph=glyph, query=query, step=step, label=label),
+            )
+        except asyncio.CancelledError:
+            return
+        except Exception:      # an edit that races the final answer is not an error
+            return
+
+
+async def _thinking(
+    client: Client,
+    message: Message,
+    title: str = "searching",
+    *,
+    query: str = "",
+    step: str = "",
+    glyph: str = "search",
+    label: str = "looking for",
+    stages: list[tuple[float, str]] | None = None,
+):
+    """Post the working card, then keep it honest while the work happens.
+
+    The card is the editable (classic HTML) lane, so the picker that replaces it
+    can reuse the same message instead of leaving a dead one behind.
+    """
+    msg = await rich.send(
         client,
         message.chat.id,
-        f"{E('clock')} <b>{text}</b>\n"
-        f"<blockquote>{E('spark')} <i>give it a moment — VYRON is on it</i></blockquote>",
+        cards.working_card(title, "", glyph=glyph, query=query, step=step, label=label),
         reply_to=message.id,
         editable=True,
     )
+    if msg is not None and stages:
+        _TICKERS[msg.id] = asyncio.create_task(
+            _tick(
+                client, message.chat.id, msg.id,
+                title=title, glyph=glyph, query=query, label=label, steps=stages,
+            ),
+            name="play:ticker",
+        )
+    return msg
 
 
 async def _edit(client: Client, chat_id: int, message_id: int | None, markup: str, keyboard=None) -> None:
     if message_id:
+        _stop_ticker(message_id)
         await rich.edit(client, chat_id, message_id, markup, markup_keyboard=keyboard)
 
 
@@ -187,7 +255,10 @@ def register(client: Client) -> None:
                         reply_to=message.id,
                     )
                     return
-                status = await _thinking(client, message, "Downloading from Telegram…")
+                status = await _thinking(
+                    client, message, "getting the file", glyph="download",
+                    step="from the message you replied to",
+                )
                 try:
                     media = reply.audio or reply.voice or reply.video or reply.document
                     target = Path(runtime.settings.downloads_dir) / f"tg-{media_track.id}{media_suffix(media)}"
@@ -219,7 +290,10 @@ def register(client: Client) -> None:
 
         # 2a) catalogue album/playlist (Spotify, Deezer, Apple Music) → queue it
         if looks_like_url(query) and metasources.is_catalogue_link(query):
-            status = await _thinking(client, message, "Reading that link…")
+            status = await _thinking(
+                client, message, "reading the link", glyph="link", query=truncate(query, 52),
+                step="checking what it points at", label="link",
+            )
             collection = None
             try:
                 collection = await runtime.youtube.resolve_collection(
@@ -253,7 +327,11 @@ def register(client: Client) -> None:
 
         # 2b) direct link → resolve and start immediately
         if looks_like_url(query):
-            status = await _thinking(client, message, "Resolving link…")
+            status = await _thinking(
+                client, message, "reading the link", glyph="link", query=truncate(query, 52),
+                step="resolving the track", label="link",
+                stages=[(2.0, "resolving — YouTube may be slow here"), (5.0, "still on it")],
+            )
             try:
                 track = await runtime.youtube.resolve(query, requester=requester)
                 if _too_long(track):
@@ -290,7 +368,15 @@ def register(client: Client) -> None:
             return
 
         # 3) text query → search picker
-        status = await _thinking(client, message, "Searching YouTube…")
+        status = await _thinking(
+            client, message, "searching", glyph="search", query=truncate(query, 52),
+            step="asking the catalogues",
+            stages=[
+                (1.5, "matching the results"),
+                (3.5, "still searching — this catalogue is slow"),
+                (7.0, "nearly there"),
+            ],
+        )
         try:
             tracks = await runtime.youtube.search(query, requester=requester)
         except MediaError as exc:
@@ -363,7 +449,11 @@ def register(client: Client) -> None:
             await rich.send(client, chat_id, USAGE(), reply_to=message.id)
             return
 
-        status = await _thinking(client, message, "Searching…")
+        status = await _thinking(
+            client, message, "searching", glyph="search", query=truncate(query, 52),
+            step="asking the catalogues",
+            stages=[(1.5, "matching the results"), (4.0, "still searching")],
+        )
         requester = (
             message.from_user.id if message.from_user else 0,
             display_name(message.from_user),
@@ -413,7 +503,11 @@ def register(client: Client) -> None:
         if not query:
             await rich.send(client, message.chat.id, USAGE(), reply_to=message.id)
             return
-        status = await _thinking(client, message, "Searching…")
+        status = await _thinking(
+            client, message, "searching", glyph="search", query=truncate(query, 52),
+            step="asking the catalogues",
+            stages=[(1.5, "matching the results"), (4.0, "still searching")],
+        )
         requester = (
             message.from_user.id if message.from_user else 0,
             display_name(message.from_user),
@@ -455,7 +549,10 @@ def register(client: Client) -> None:
                 reply_to=message.id,
             )
             return
-        status = await _thinking(client, message, "Loading playlist…")
+        status = await _thinking(
+            client, message, "loading the playlist", glyph="queue", query=truncate(query, 52),
+            step="reading the track list", label="playlist",
+        )
         try:
             title, tracks = await runtime.youtube.playlist(query, limit=50)
         except MediaError as exc:
@@ -484,6 +581,42 @@ def register(client: Client) -> None:
             f"{'— playback started' if started else ''}</blockquote>"
         )
         await _edit(client, message.chat.id, status.id if status else None, markup)
+
+
+def _stream_failure_text(exc: Exception) -> str:
+    """Turn a resolver failure into something a listener can act on.
+
+    The raw reason is a chain of engines ("yt-dlp: … · mirror: … · substitute:
+    …"), which is the right thing to put in the journal and the wrong thing to
+    put in a chat. These are the three situations that actually happen here.
+    """
+    reason = str(exc)
+    low = reason.lower()
+
+    if "standby" in low:
+        return (
+            "<b>Another copy has the voice chat</b>\n"
+            "<blockquote>This deployment is running more than one instance, and the "
+            "other one owns the call. The spare now takes playback over by itself once "
+            "the other goes quiet — a minute at most. Scaling the service to one "
+            "instance makes it immediate.</blockquote>"
+        )
+    if "voice chat" in low or "group call" in low:
+        return (
+            f"<b>Could not start the call</b>\n<blockquote>{truncate(reason, 170)}</blockquote>"
+        )
+    if "no results" in low or "nothing playable" in low:
+        return (
+            "<b>Nothing playable for that</b>\n"
+            "<blockquote>YouTube refuses this server and the catalogues had no copy of "
+            "that song. Try the artist name, or send the file with <code>/song</code>."
+            "</blockquote>"
+        )
+    return (
+        "<b>Could not reach the audio</b>\n"
+        f"<blockquote>{truncate(reason, 150)}</blockquote>"
+        "\n<footer>why: <code>/sources</code> · the file instead: <code>/song</code></footer>"
+    )
 
 
 async def begin(
@@ -529,10 +662,7 @@ async def begin(
             client,
             chat_id,
             status_id,
-            cards.error_card(
-                f"<b>Could not stream that</b>\n<blockquote>{truncate(str(exc), 170)}</blockquote>"
-                "\n<footer>the same track as a file: <code>/song</code></footer>"
-            ),
+            cards.error_card(_stream_failure_text(exc)),
         )
         return "error"
     return "streamed" if position == 1 else "queued"

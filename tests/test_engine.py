@@ -129,4 +129,6 @@ def test_stream_error_is_reported_not_uploaded(monkeypatch):
 
     assert outcome == "error"
     assert "audio" not in client.sent
-    assert any("Could not stream" in str(item) for item in client.sent)
+    # The chat gets an explanation in words, not the engine's own sentence:
+    # this one is the "the assistant could not join" case.
+    assert any("Could not start the call" in str(item) for item in client.sent)

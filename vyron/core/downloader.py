@@ -78,6 +78,18 @@ def _atomic_move(source: Path, target: Path) -> Path:
     return target
 
 
+#: Sources whose bytes come from YouTube, and only those may be skipped when
+#: YouTube is refusing this host.
+_YOUTUBE_SOURCES = frozenset({"youtube", "ytmusic", "youtube_music", ""})
+
+
+def _is_youtube(track: Track) -> bool:
+    source = str(getattr(track, "source", "") or "").lower()
+    if source in _YOUTUBE_SOURCES:
+        return True
+    return bool(re.fullmatch(r"[\w-]{11}", str(getattr(track, "id", "") or "")))
+
+
 class Downloader:
     """Downloads one track at a time per call, reusing previously cached files."""
 
@@ -562,7 +574,11 @@ class Downloader:
                 # accelerator writing bytes into the cache.
                 return await self._download_stream(track, on_progress=on_progress)
             errors: list[str] = []
-            if self._youtube_walled():
+            # The wall is about *YouTube*. yt-dlp also downloads SoundCloud and
+            # Bandcamp, and those are exactly the substitutes we reach for when
+            # YouTube refuses us — so skipping the ladder for them meant a
+            # walled deployment could not play a single substitute track.
+            if self._youtube_walled() and _is_youtube(track):
                 errors.append("yt-dlp: skipped — YouTube is refusing this server")
                 logger.info(
                     "skipping the yt-dlp ladder for %s — YouTube is walled, using a mirror",
@@ -589,13 +605,22 @@ class Downloader:
             if not video:
                 try:
                     from vyron.core import alternate
+                    from vyron.core.sources import DIRECT_SOURCES
 
                     found = await alternate.find(track, settings=self.settings)
                     if found is not None:
                         logger.info(
                             "downloading %r from %s instead (%s)", track.title, found.source, found.id
                         )
-                        return await self._download_stream(found, on_progress=on_progress)
+                        if found.source in DIRECT_SOURCES and found.url:
+                            # A URL that *is* the audio.
+                            return await self._download_stream(found, on_progress=on_progress)
+                        # SoundCloud / Bandcamp: `url` is a page that has to be
+                        # extracted. Fetching it as bytes wrote the HTML into a
+                        # .mp3 and the stream then failed on the listener's side.
+                        return await asyncio.to_thread(
+                            self._download_ytdlp, found, video=False, on_progress=on_progress
+                        )
                 except Exception as exc:
                     errors.append(f"substitute: {exc}")
                     logger.warning("substitution download failed for %s: %s", track.id, exc)

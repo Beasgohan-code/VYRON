@@ -14,6 +14,7 @@ from pathlib import Path
 import re
 import shlex
 import time
+import dataclasses
 from dataclasses import dataclass, field
 from urllib.parse import unquote
 from typing import Any
@@ -27,6 +28,73 @@ from vyron.core.queue import Track
 from vyron.ui.progress import parse_duration, truncate
 
 logger = logging.getLogger(__name__)
+
+#: How long the catalogue lane gets before YouTube is even consulted.
+CATALOGUE_GRACE = 1.3
+#: And how long anything gets after that. A search that has not answered by
+#: now is not going to feel fast, whatever it contains.
+YOUTUBE_DEADLINE = 6.0
+#: The same query asked twice in a few minutes is the same answer. Cached for
+#: five minutes so the picker's "other results" and a retry cost nothing.
+SEARCH_TTL = 300.0
+_SEARCH_CACHE: dict[tuple[str, int], tuple[float, list[Track]]] = {}
+_SEARCH_CACHE_MAX = 120
+
+
+def _cache_get(query: str, count: int) -> list[Track] | None:
+    hit = _SEARCH_CACHE.get((query.strip().lower(), int(count)))
+    if not hit:
+        return None
+    expires, tracks = hit
+    if expires <= time.time():
+        _SEARCH_CACHE.pop((query.strip().lower(), int(count)), None)
+        return None
+    return tracks
+
+
+def _cache_put(query: str, count: int, tracks: list[Track]) -> None:
+    if not tracks:
+        return
+    if len(_SEARCH_CACHE) >= _SEARCH_CACHE_MAX:
+        # Cheap eviction: drop whatever expires first.
+        for key in sorted(_SEARCH_CACHE, key=lambda item: _SEARCH_CACHE[item][0])[:20]:
+            _SEARCH_CACHE.pop(key, None)
+    _SEARCH_CACHE[(query.strip().lower(), int(count))] = (time.time() + SEARCH_TTL, list(tracks))
+
+
+def clear_search_cache() -> None:
+    """Tests, and `/clearcache`-style maintenance."""
+    _SEARCH_CACHE.clear()
+
+
+def _stamp(tracks: list[Track], requester: tuple[int, str]) -> list[Track]:
+    """Give cached results the requester of *this* call.
+
+    A cached list belongs to whoever asked first; handing it out untouched
+    credited the wrong person on the now-playing card.
+    """
+    user_id, name = requester
+    if not user_id and not name:
+        return list(tracks)
+    out: list[Track] = []
+    for track in tracks:
+        copy = dataclasses.replace(track, requested_by=user_id, requested_name=name)
+        out.append(copy)
+    return out
+
+
+def _merge(primary: list[Track], secondary: list[Track]) -> list[Track]:
+    """Both lanes, primary first, each song once."""
+    out: list[Track] = []
+    seen: set[str] = set()
+    for track in [*primary, *secondary]:
+        key = f"{track.source}:{track.id}"
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(track)
+    return out
+
 
 _URL_RE = re.compile(r"^https?://", re.I)
 _YT_ID_RE = re.compile(r"(?:v=|/shorts/|youtu\.be/|/embed/|/live/)([\w-]{11})")
@@ -581,24 +649,55 @@ class YouTube:
         # Over-fetch so dedupe/filtering still leaves a full page of results.
         fetch = count if count <= 2 else min(40, count * 2)
 
-        # Walled: every YouTube path (ytmusic included) will stall for twenty
-        # seconds and return nothing. The catalogues that serve their own audio
-        # answer in one second, so they go first while the wall lasts.
-        if not relaxed and self.walled():
-            fast = await alternate.search_all(query, count, settings=self.settings)
-            if len(fast) >= max(2, count // 2):
-                logger.info(
-                    "YouTube wall active — %d result(s) for %r came from %s",
-                    len(fast),
-                    query,
-                    alternate.describe(self.settings),
-                )
-                return self.rank(query, fast)[:count]
+        cached = _cache_get(query, count)
+        if cached:
+            return _stamp(cached, requester)
 
-        # Tier 0: YouTube Music, when the optional package is installed and the
-        # operator has not turned it off. It returns songs (artist + album)
-        # rather than "Official Video [4K]" uploads, so the top hit is usually
-        # simply correct — and its video id streams through the same ladder.
+        tracks: list[Track] = []
+        # The two halves of a search, started together. The catalogues answer
+        # in well under a second and hand out real audio; YouTube is either
+        # fast and unplayable (walled) or twenty seconds of nothing. Racing
+        # them is the difference between a picker in one second and a picker
+        # after the listener has given up.
+        alt_task = asyncio.create_task(
+            alternate.search_all(query, count, settings=self.settings),
+            name="search:catalogues",
+        )
+        yt_task: asyncio.Task | None = None
+        if not self.walled():
+            yt_task = asyncio.create_task(
+                self._search_youtube(query, fetch, count, requester),
+                name="search:youtube",
+            )
+        try:
+            tracks = await self._race(alt_task, yt_task, count, query)
+        finally:
+            for task in (alt_task, yt_task):
+                if task is not None and not task.done():
+                    task.cancel()
+        if not tracks and not relaxed:
+            second = relax_query(query)
+            if second:
+                logger.info("nothing for %r — retrying as %r", query, second)
+                again = await self.search(second, limit=limit, requester=requester, relaxed=True)
+                if again:
+                    return again
+        if not tracks:
+            raise MediaError("No results found for that query.")
+        ranked = self.rank(query, tracks)[:count]
+        _cache_put(query, count, ranked)
+        return _stamp(ranked, requester)
+
+    # ── the two engines, and the race between them ─────────────────────────
+    async def _search_youtube(
+        self,
+        query: str,
+        fetch: int,
+        count: int,
+        requester: tuple[int, str],
+    ) -> list[Track]:
+        """YouTube Music first (songs, not "Official Video [4K]"), then plain
+        `ytsearch`, then the stream-source registry."""
         tracks: list[Track] = []
         meta = await self._ytmusic_search(query, fetch)
         for entry in meta:
@@ -613,23 +712,60 @@ class YouTube:
                 if track:
                     tracks.append(track)
         if not tracks:
-            # YouTube said no. Ask the other streaming sources in the
-            # registry's order (Audius → JioSaavn → SoundCloud → Bandcamp)
-            # before giving up: those hand out real audio, so the request can
-            # still succeed.
             for track in await sources.fallback_search(query, count, settings=self.settings):
                 track.requested_by, track.requested_name = requester
                 tracks.append(track)
-        if not tracks and not relaxed:
-            second = relax_query(query)
-            if second:
-                logger.info("nothing for %r — retrying as %r", query, second)
-                again = await self.search(second, limit=limit, requester=requester, relaxed=True)
-                if again:
-                    return again
-        if not tracks:
-            raise MediaError("No results found for that query.")
-        return self.rank(query, tracks)[:count]
+        return tracks
+
+    async def _race(
+        self,
+        alt_task: "asyncio.Task[list[Track]]",
+        yt_task: "asyncio.Task[list[Track]] | None",
+        count: int,
+        query: str,
+    ) -> list[Track]:
+        """Whichever engine can fill the page first wins.
+
+        The catalogues get ``CATALOGUE_GRACE`` seconds of exclusivity because
+        their results actually play on a datacenter IP. If they come back thin,
+        YouTube gets the rest of the budget and the two are merged — a slow but
+        real answer still beats an empty one.
+        """
+        need = max(2, count // 2)
+        fast: list[Track] = []
+        try:
+            fast = await asyncio.wait_for(asyncio.shield(alt_task), CATALOGUE_GRACE)
+        except asyncio.TimeoutError:
+            pass
+        except Exception as exc:                       # an engine is never fatal
+            logger.info("catalogue search failed for %r: %s", query, exc)
+
+        if len(fast) >= need or yt_task is None:
+            if fast:
+                logger.info(
+                    "%d result(s) for %r from %s in the catalogue lane",
+                    len(fast),
+                    query,
+                    alternate.describe(self.settings),
+                )
+            return fast
+
+        if not alt_task.done():
+            # Still worth waiting for: it is the lane that can actually play.
+            try:
+                fast = await asyncio.wait_for(alt_task, YOUTUBE_DEADLINE)
+            except (asyncio.TimeoutError, Exception):
+                pass
+
+        try:
+            slow = await asyncio.wait_for(asyncio.shield(yt_task), YOUTUBE_DEADLINE)
+        except asyncio.TimeoutError:
+            slow = []
+            logger.info("YouTube search for %r did not answer in %.1fs", query, YOUTUBE_DEADLINE)
+        except Exception as exc:
+            slow = []
+            logger.info("YouTube search failed for %r: %s", query, exc)
+        return _merge(fast, slow)
 
     def _catalogue_enabled(self) -> bool:
         """`MUSIC_SOURCES=off` keeps everything on YouTube-only behaviour."""

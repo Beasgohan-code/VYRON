@@ -133,12 +133,62 @@ async def release(storage=None) -> None:
 
 
 _task = None
+_promote_hooks: list = []
+
+
+def on_promote(hook) -> None:
+    """Register something to run when a standby becomes the primary.
+
+    24/7 playback and the queue live in this process: a standby that takes over
+    has to pick the music back up, not just serve HTTP.
+    """
+    if hook not in _promote_hooks:
+        _promote_hooks.append(hook)
+
+
+async def _promote() -> None:
+    for hook in list(_promote_hooks):
+        try:
+            result = hook()
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception as exc:  # pragma: no cover - a hook must not stop the beat
+            logger.debug("promote hook failed: %s", exc)
+
+
+async def renew(storage=None) -> bool:
+    """One beat of the lease: keep it if we hold it, take it if it lapsed.
+
+    A standby used to stay a standby for the life of the process: `claim` ran
+    once at boot, and Render overlaps a redeploy for a few seconds — so the new
+    instance saw a fresh lease belonging to the process that was shutting down,
+    gave up its own voice chat, and never asked again. That is a bot that
+    answers every command and never plays anything until the next deploy.
+    """
+    if is_primary():
+        await heartbeat(storage)
+        return True
+    was_standby = not is_primary()
+    claimed = await claim(storage)
+    if claimed and was_standby:
+        logger.warning("took over the instance lease — this process now owns playback")
+        try:
+            from vyron.core.journal import journal
+
+            journal.ok("lease", "playback taken over — the previous instance stopped answering")
+        except Exception:  # pragma: no cover - journal is optional here
+            pass
+        await _promote()
+    return claimed
 
 
 async def _beat_forever() -> None:
     while True:
         await asyncio.sleep(HEARTBEAT_SECONDS)
-        await heartbeat()
+        try:
+            await renew()
+        except Exception as exc:  # pragma: no cover - the loop must survive
+            logger.debug("lease renew failed: %s", exc)
 
 
 def start() -> "asyncio.Task | None":
@@ -170,6 +220,8 @@ __all__ = [
     "heartbeat",
     "instance_id",
     "is_primary",
+    "on_promote",
     "release",
+    "renew",
     "status",
 ]

@@ -403,6 +403,22 @@ async def _async_main() -> int:
 
     ytdlp_update.start()
     maintenance.start()
+
+    # A standby is not a spectator for ever: when the old process stops
+    # answering, this one takes the call back and resumes 24/7 playback.
+    async def _resume_after_promotion() -> None:
+        if runtime.player is None or calls is None:
+            return
+        runtime.player.calls = calls
+        try:
+            resumed = await runtime.player.resume_always_on()
+        except Exception as exc:  # pragma: no cover - never break the beat
+            logger.debug("resume after promotion failed: %s", exc)
+            return
+        if resumed:
+            logger.info("resumed %d 24/7 chat(s) after taking over", resumed)
+
+    lease.on_promote(_resume_after_promotion)
     lease.start()
     watchdog.start()
     keepalive.start()
