@@ -740,15 +740,22 @@ class YouTube:
         except Exception as exc:                       # an engine is never fatal
             logger.info("catalogue search failed for %r: %s", query, exc)
 
-        if len(fast) >= need or yt_task is None:
+        # A catalogue answers *something* for almost any string — including,
+        # famously, the bot's own ".play Wrong", which came back as five songs
+        # with "play" in the title. Only results that share a word with the
+        # query count towards "the page is full"; the rest are still offered,
+        # ranked last, if nothing better arrives.
+        relevant = self._relevant(query, fast)
+        if len(relevant) >= need or yt_task is None:
             if fast:
                 logger.info(
-                    "%d result(s) for %r from %s in the catalogue lane",
+                    "%d result(s) for %r from %s in the catalogue lane (%d on topic)",
                     len(fast),
                     query,
                     alternate.describe(self.settings),
+                    len(relevant),
                 )
-            return fast
+            return _merge(relevant, [track for track in fast if track not in relevant])
 
         if not alt_task.done():
             # Still worth waiting for: it is the lane that can actually play.
@@ -766,6 +773,23 @@ class YouTube:
             slow = []
             logger.info("YouTube search failed for %r: %s", query, exc)
         return _merge(fast, slow)
+
+    def _relevant(self, query: str, tracks: list[Track]) -> list[Track]:
+        """The results that have something to do with what was typed.
+
+        Word overlap against the title *and* the artist, because a cover or a
+        remix still names the song in its title while the uploader is somebody
+        else entirely.
+        """
+        wanted = self._words(query)
+        if not wanted:
+            return list(tracks)
+        picked: list[Track] = []
+        for track in tracks:
+            found = self._words(track.title) | self._words(track.uploader or "")
+            if wanted & found:
+                picked.append(track)
+        return picked
 
     def _catalogue_enabled(self) -> bool:
         """`MUSIC_SOURCES=off` keeps everything on YouTube-only behaviour."""

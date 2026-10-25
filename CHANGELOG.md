@@ -24,6 +24,11 @@ string ".play Wrong"**.
   alone. `".play .play"` still plays the song called ".play".
 * **The `commands` moderation lock covers every prefix.** It tested
   `text.startswith("/")`, so a locked group could still be driven with `.play`.
+* **Off-topic catalogue pages no longer win the search race.** A catalogue
+  answers *something* for any string — the five "play" songs above are the
+  proof — so "the page is full" now means "full of results that share a word
+  with the query". The rest are still offered, ranked last, but they no longer
+  stop YouTube from being asked.
 * Version 1.10.4.
 
 ### 1.10.3 — 2026-10-25

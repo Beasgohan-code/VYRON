@@ -75,8 +75,8 @@ def _run(engine, *args, **kwargs):
 def test_the_playable_lane_wins_and_youtube_is_cancelled(monkeypatch):
     fast = [
         _track("a", "Kesariya"),
-        _track("b", "Tum Hi Ho"),
-        _track("c", "Channa Mereya"),
+        _track("b", "Kesariya (Reprise)"),
+        _track("c", "Kesariya Lofi"),
     ]
     monkeypatch.setattr(search_module.alternate, "search_all", FakeAlternate(fast).search_all)
     engine = FakeYouTube(tracks=[_track("yt1", "Kesariya", "youtube")], delay=5.0)
@@ -128,6 +128,27 @@ def test_the_same_song_from_both_lanes_keeps_the_playable_copy(monkeypatch):
     result = _run(engine, "Kesariya", limit=6)
 
     assert [track.id for track in result] == ["a", "b"]
+
+
+def test_results_that_share_nothing_with_the_query_do_not_count(monkeypatch):
+    """`.play Wrong` came back as five songs with "play" in the title.
+
+    A catalogue answers *something* for any string, so "the page is full" has
+    to mean "full of things that mention what was asked for" — otherwise the
+    off-topic page wins the race and YouTube is never consulted.
+    """
+    off_topic = [
+        _track("a", "Ready to play"),
+        _track("b", "Tokyo Machine - PLAY"),
+        _track("c", "Play"),
+    ]
+    monkeypatch.setattr(search_module.alternate, "search_all", FakeAlternate(off_topic).search_all)
+    engine = FakeYouTube(tracks=[_track("yt1", "Wrong", "youtube")], delay=0.05)
+
+    result = _run(engine, "Wrong", limit=6)
+
+    assert engine.yt_calls == 1, "the off-topic page should not have ended the search"
+    assert [track.id for track in result][0] == "yt1", "the real match ranks first"
 
 
 def test_a_broken_catalogue_does_not_break_the_search(monkeypatch):
