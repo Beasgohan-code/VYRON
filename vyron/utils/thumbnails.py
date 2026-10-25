@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import colorsys
 import io
+import re
 import logging
 import math
 import random
@@ -325,20 +326,24 @@ def _background(
     art,
     accent,
     backdrop=None,
-    dim: float = 0.58,
+    dim: float = 0.42,
     blur: int = 46,
-    glow_strength: float = 0.28,
+    glow_strength: float = 0.34,
 ) -> "Image.Image":
     base = backdrop if backdrop is not None else art.resize((W, H), Image.LANCZOS)
+    # The darkening tint carries the artwork's own hue instead of going
+    # grey-black: a warm sleeve keeps a warm poster, which is the difference
+    # between "a UI wrapped around a song" and "a picture of the song".
+    tint = tuple(int(channel * 0.11) for channel in accent)
     backdrop = base.filter(ImageFilter.GaussianBlur(blur))
-    backdrop = Image.blend(backdrop, Image.new("RGB", (W, H), (5, 6, 10)), dim)
+    backdrop = Image.blend(backdrop, Image.new("RGB", (W, H), tint), dim)
 
     glow = Image.new("RGB", (W, H), (0, 0, 0))
     draw = ImageDraw.Draw(glow)
     draw.ellipse((-260, -220, 780, 820), fill=tuple(int(c * 0.55) for c in accent))
     draw.ellipse((700, 260, 1560, 1120), fill=tuple(int(c * 0.30) for c in accent))
     glow = glow.filter(ImageFilter.GaussianBlur(190))
-    backdrop = Image.blend(backdrop, Image.new("RGB", (W, H), (0, 0, 0)), 0.10)
+    backdrop = Image.blend(backdrop, Image.new("RGB", (W, H), tint), 0.10)
     backdrop = Image.blend(backdrop, glow, glow_strength)
 
     # left-to-right shade keeps the type readable without flattening the art
@@ -411,7 +416,21 @@ def _chip(draw, xy: tuple[int, int], label: str, value: str, width: int, accent)
     dot_x = x + 18
     draw.ellipse((dot_x, y + 16, dot_x + 9, y + 25), fill=accent)
     _letterspaced(draw, (dot_x + 16, y + 13), label, font(12, 600, label), MUTED, 2)
-    draw.text((x + 18, y + 33), value, font=font(27, 600, value), fill=CHIP_TEXT)
+    # Shrink to fit rather than clip: a chip that ends in "…" is a name the
+    # bot could not be bothered to show.
+    room = width - 36
+    size = 27
+    for candidate in (27, 25, 23, 21, 19, 17):
+        size = candidate
+        face = font(candidate, 600, value)
+        if draw.textlength(value, font=face) <= room:
+            break
+    draw.text(
+        (x + 18, y + 33 + max(0, (27 - size) // 2)),
+        value,
+        font=font(size, 600, value),
+        fill=CHIP_TEXT,
+    )
 
 
 def _bars(seed_text: str, count: int) -> list[int]:
@@ -527,12 +546,15 @@ def render(
             4,
         )
 
-        # Fit the title instead of always truncating: two full lines beat two
-        # half-lines, and long "Artist - Title (Official Video)" names are the
-        # norm for what people play.
-        title = str(track.title or "").strip()
-        size, lines = 50, []
-        for candidate in (50, 45, 40, 36, 32):
+        # The name a person would write, not the one the uploader chose: the
+        # poster is a picture of *this song*, so a repost account and an
+        # "(Official Video)" do not belong in the largest type on it.
+        from vyron.utils.naming import display_parts, poster_name
+
+        artist_name, song_name = display_parts(track.title, track.uploader)
+        title = poster_name(song_name or str(track.title or "").strip(), limit=64) or "Unknown"
+        size, lines = 58, []
+        for candidate in (58, 52, 46, 40, 34, 30):
             face = font(candidate, 700, title)
             lines = _wrap(draw, title, face, max_width, limit=2)
             size = candidate
@@ -543,24 +565,26 @@ def render(
             draw.text((text_x, title_y), line, font=font(size, 700, line), fill=TEXT)
             title_y += int(size * 1.15)
 
-        artist = track.uploader or "unknown artist"
+        artist = poster_name(artist_name, limit=40) or "unknown artist"
         # title_y already advanced past the last line; the small extra gap keeps
         # descenders (g, y, p) from touching the artist line
         artist_y = title_y + 2
         draw.text(
             (text_x, artist_y),
-            _clip(draw, artist, font(25, 500, artist), max_width),
-            font=font(25, 500, artist),
-            fill=MUTED,
+            _clip(draw, artist, font(27, 500, artist), max_width),
+            font=font(27, 500, artist),
+            fill=(224, 224, 232),
         )
 
         # ── chips ──────────────────────────────────────────────────────────
         chips_y = artist_y + 62
         total = int(track.duration or 0)
-        requested_name = (getattr(track, "requested_name", "") or "").strip()
-        requester = requested_name.split()[0] if requested_name else ""
+        # The whole display name, clipped to the chip — taking the first word
+        # turned "Beast Gohan" into "Beast" on the poster, which is somebody
+        # else's name.
+        requester = poster_name(getattr(track, "requested_name", ""), limit=22)
         if requester:
-            duration_w, requester_w = 190, 232
+            duration_w, requester_w = 176, 300
             _chip(draw, (text_x, chips_y), "DURATION", fmt_duration(total) if total else "—", duration_w, accent)
             _chip(
                 draw,
@@ -572,8 +596,8 @@ def render(
             )
         else:
             source = str(getattr(track, "source", "stream")) or "stream"
-            _chip(draw, (text_x, chips_y), "DURATION", fmt_duration(total) if total else "—", 190, accent)
-            _chip(draw, (text_x + 206, chips_y), "SOURCE", source[:12], 200, accent)
+            _chip(draw, (text_x, chips_y), "DURATION", fmt_duration(total) if total else "—", 176, accent)
+            _chip(draw, (text_x + 192, chips_y), "SOURCE", source[:12], 220, accent)
 
         # ── waveform ───────────────────────────────────────────────────────
         elapsed = state.elapsed() if state else 0
@@ -623,10 +647,13 @@ def render(
         if upcoming:
             nxt = upcoming[0]
             _letterspaced(draw, (56, 566), "UP NEXT", font(11, 600, "UP NEXT"), (132, 132, 152), 3)
-            face = font(19, 500, nxt.title)
+            from vyron.utils.naming import display_line, poster_name
+
+            next_name = poster_name(display_line(nxt.title, nxt.uploader), limit=46)
+            face = font(19, 500, next_name)
             draw.text(
                 (56, 588),
-                _clip(draw, nxt.title, face, 300),
+                _clip(draw, next_name, face, 300),
                 font=face,
                 fill=(214, 214, 226),
             )
@@ -647,6 +674,34 @@ def render(
         return None
 
 
+#: YouTube's thumbnail names, smallest to largest. `maxresdefault` is 1280×720
+#: and only exists for uploads that were encoded from an HD source.
+_YT_THUMBS = ("default", "mqdefault", "hqdefault", "sddefault", "maxresdefault")
+
+
+def best_cover_url(url: str | None) -> str:
+    """The largest version of a cover URL, when the CDN offers one.
+
+    Pure string work — no request — so a missing maxres costs one failed fetch
+    and no latency of its own.
+    """
+    if not url:
+        return ""
+    text = str(url).strip()
+    # i.ytimg.com / img.youtube.com: swap the size name in the file name.
+    for small in _YT_THUMBS[:-1]:
+        for host in ("ytimg.com", "youtube.com"):
+            if host in text and f"/{small}.jpg" in text:
+                return text.replace(f"/{small}.jpg", "/maxresdefault.jpg")
+    # Audius and friends: a square size hint in the path.
+    match = re.search(r"/(\d{2,4})x(\d{2,4})/", text)
+    if match:
+        largest = max(int(match.group(1)), int(match.group(2)))
+        if largest < 1000:
+            return re.sub(r"/\d{2,4}x\d{2,4}/", "/1000x1000/", text, count=1)
+    return text
+
+
 async def now_playing(
     state: ChatState,
     track: Track,
@@ -660,7 +715,16 @@ async def now_playing(
     """
     if not PIL_AVAILABLE or track is None:
         return None
-    cover = await fetch_bytes(track.thumbnail, limit=1_400_000) if track.thumbnail else None
+    cover = None
+    if track.thumbnail:
+        # Ask for the biggest version of the artwork first: the poster draws it
+        # at 344 px and blurs it to 1080 wide, and a 480 px "hq" thumbnail
+        # turns to mush behind the type. The original URL is the fallback,
+        # because a maxres variant does not exist for every upload.
+        big = best_cover_url(track.thumbnail)
+        if big and big != track.thumbnail:
+            cover = await fetch_bytes(big, limit=3_000_000)
+        cover = cover or await fetch_bytes(track.thumbnail, limit=1_400_000)
     import asyncio
 
     return await asyncio.to_thread(render, state, track, cover, backdrop)

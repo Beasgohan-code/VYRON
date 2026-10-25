@@ -1,4 +1,10 @@
-"""`/thumbnail` — a chat's own artwork behind the now-playing poster."""
+"""Artwork: the poster draws itself, and the helpers that read a photo.
+
+There is no `/thumbnail` command any more — nobody chose a per-group backdrop,
+and the now-playing poster is at its best when it is *this song's* cover. The
+channel-side `/cthumbnail` still needs to read a photo message, so that half
+stays, together with the poster's own naming and cover-quality rules.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -7,12 +13,9 @@ from types import SimpleNamespace
 
 import pytest
 
-pytest.importorskip("pyrogram")
-
 from vyron.core import chatcfg
 from vyron.core.queue import ChatState, Track
 from vyron.modules import thumbnail_cmd
-from vyron.ui import cards
 from vyron.ui import nowplaying
 from vyron.utils import thumbnails
 
@@ -45,15 +48,15 @@ class Bot:
         return SimpleNamespace(id=12)
 
 
-def _message(*, photo: str = "", reply_photo: str = "", group: bool = True, command=("/thumbnail",)):
+def _message(*, photo: str = "", reply_photo: str = ""):
     photo_obj = lambda fid: SimpleNamespace(file_id=fid, file_unique_id=fid)  # noqa: E731
-    chat = SimpleNamespace(id=-100, type="supergroup" if group else "private", title="Room")
+    chat = SimpleNamespace(id=-100, type="supergroup", title="Room")
     return SimpleNamespace(
         id=5,
         chat=chat,
         from_user=SimpleNamespace(id=7, first_name="Rin"),
-        command=list(command),
-        text="/thumbnail",
+        command=["/cthumbnail"],
+        text="/cthumbnail",
         photo=photo_obj(photo) if photo else None,
         document=None,
         reply_to_message=(
@@ -69,7 +72,9 @@ def _isolated_state(monkeypatch):
     store: dict = {}
 
     async def fake_get(chat_id, key, default=None):
-        return store.get((int(chat_id), key), default if default is not None else chatcfg.DEFAULTS.get(key))
+        return store.get(
+            (int(chat_id), key), default if default is not None else chatcfg.DEFAULTS.get(key)
+        )
 
     async def fake_set(chat_id, key, value):
         store[(int(chat_id), key)] = value
@@ -78,16 +83,10 @@ def _isolated_state(monkeypatch):
     monkeypatch.setattr(chatcfg, "set", fake_set)
     nowplaying._CACHE.clear()
     nowplaying._ART.clear()
-    monkeypatch.setattr(thumbnail_cmd, "is_owner", lambda user_id: False)
-    monkeypatch.setattr(thumbnail_cmd, "is_chat_admin", _always_admin)
     yield store
 
 
-async def _always_admin(client, chat_id, user_id):
-    return True
-
-
-# ── file ids ────────────────────────────────────────────────────────────────
+# ── reading a photo message (used by /cthumbnail) ──────────────────────────
 def test_a_replied_photo_wins():
     assert thumbnail_cmd.photo_file_id(_message(reply_photo="reply-id")) == "reply-id"
 
@@ -108,41 +107,16 @@ def test_no_media_returns_nothing():
     assert thumbnail_cmd.photo_file_id(_message()) == ""
 
 
-# ── saving / clearing ───────────────────────────────────────────────────────
-def test_reply_to_photo_saves_the_artwork(_isolated_state):
-    bot = Bot()
-    asyncio.run(_run_command(bot, _message(reply_photo="art-1")))
-    assert _isolated_state[(-100, "thumbnail")] == "art-1"
-
-
-def test_thumbnail_off_clears_it(_isolated_state):
-    _isolated_state[(-100, "thumbnail")] = "art-1"
-    bot = Bot()
-    asyncio.run(_run_command(bot, _message(command=("/thumbnail", "off"))))
-    assert _isolated_state[(-100, "thumbnail")] == ""
-
-
-async def _run_command(bot, message):
-    """`register()` only wires decorators — drive the handlers directly."""
-    handlers = {}
-    client = SimpleNamespace(
-        on_message=lambda flt: (lambda fn: handlers.setdefault("thumbnail", fn)),
+def test_an_oversized_image_file_is_flagged():
+    message = _message()
+    message.reply_to_message = SimpleNamespace(
+        photo=None,
+        document=SimpleNamespace(
+            file_id="big", mime_type="image/png", file_size=thumbnail_cmd.MAX_ART_BYTES + 1
+        ),
     )
-    thumbnail_cmd.register(client)
-    await handlers["thumbnail"](bot, message)
-    return handlers
-
-
-def test_non_admin_cannot_replace_a_groups_artwork(_isolated_state, monkeypatch):
-    monkeypatch.setattr(thumbnail_cmd, "is_chat_admin", _nobody_admin)
-    bot = Bot()
-    asyncio.run(_run_command(bot, _message(reply_photo="art-2")))
-    assert (-100, "thumbnail") not in _isolated_state
-    assert bot.sent and "Admins only" in bot.sent[-1][1]
-
-
-async def _nobody_admin(client, chat_id, user_id):
-    return False
+    assert thumbnail_cmd.art_too_big(message) is True
+    assert thumbnail_cmd.art_too_big(_message(reply_photo="small")) is False
 
 
 # ── the poster itself ──────────────────────────────────────────────────────
@@ -162,7 +136,7 @@ def test_a_custom_backdrop_changes_the_render():
     assert Image.open(io.BytesIO(branded)).size == (1280, 720)
 
 
-def test_chat_art_is_cached_by_file_id(_isolated_state, monkeypatch):
+def test_chat_art_is_cached_by_file_id(_isolated_state):
     bot = Bot(blob=_image((30, 30, 30), (300, 300)))
     _isolated_state[(-100, "thumbnail")] = "art-9"
 
@@ -200,39 +174,6 @@ def test_poster_uses_the_chat_artwork(_isolated_state, monkeypatch):
     assert seen["backdrop"] is not None
 
 
-# ── the card ───────────────────────────────────────────────────────────────
-def test_the_status_card_explains_the_feature():
-    text = cards.thumbnail_card(False, can_edit=True)
-    assert "/thumbnail" in text
-    assert "song cover" in text
-
-
-def test_the_card_hides_the_remove_button_when_there_is_nothing_to_remove():
-    assert "Remove artwork" not in cards.thumbnail_card(False, can_edit=True)
-    assert "Remove artwork" in cards.thumbnail_card(True, can_edit=True)
-
-
-def test_the_card_is_read_only_for_members():
-    text = cards.thumbnail_card(True, can_edit=False)
-    assert "Remove artwork" not in text
-    assert "admin" in text.lower()
-
-
-def test_an_oversized_image_file_is_refused(_isolated_state):
-    message = _message()
-    message.reply_to_message = SimpleNamespace(
-        photo=None,
-        document=SimpleNamespace(
-            file_id="big", mime_type="image/png", file_size=thumbnail_cmd.MAX_ART_BYTES + 1
-        ),
-    )
-    bot = Bot()
-    asyncio.run(_run_command(bot, message))
-
-    assert (-100, "thumbnail") not in _isolated_state
-    assert "too big" in bot.sent[-1][1]
-
-
 def test_a_failed_download_never_breaks_the_poster(_isolated_state, monkeypatch):
     """An expired file id must degrade to the normal cover, not raise."""
     bot = Bot()
@@ -251,8 +192,46 @@ def test_a_failed_download_never_breaks_the_poster(_isolated_state, monkeypatch)
 
     state = ChatState(chat_id=-100)
     state.current = Track(id="t3", title="Song", duration=100)
-    assert asyncio.run(nowplaying.poster(state, state.current, bot=bot, chat_id=-100)) == b"art"
+    assert (
+        asyncio.run(nowplaying.poster(state, state.current, bot=bot, chat_id=-100)) == b"art"
+    )
 
 
 async def _ok(value):
     return value
+
+
+# ── automatic artwork: the biggest cover, the real name ────────────────────
+def test_the_biggest_cover_is_requested():
+    assert (
+        thumbnails.best_cover_url("https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg")
+        == "https://i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg"
+    )
+    assert (
+        thumbnails.best_cover_url("https://creatornode2.audius.co/content/480x480/a.jpg")
+        == "https://creatornode2.audius.co/content/1000x1000/a.jpg"
+    )
+    # a stream URL is not a cover, and nothing should be invented for it
+    stream = "https://api.audius.co/v1/tracks/1dP3kyX/stream"
+    assert thumbnails.best_cover_url(stream) == stream
+
+
+def test_the_poster_names_the_song_not_the_repost_account():
+    """The largest type on the poster is the song, credited to the artist."""
+    from vyron.utils.naming import display_parts
+
+    assert display_parts("Chris Grey – LET THE WORLD BURN", "Alone_BoYtm") == (
+        "Chris Grey",
+        "LET THE WORLD BURN",
+    )
+    assert display_parts("Believer", "Imagine Dragons - Topic") == (
+        "Imagine Dragons",
+        "Believer",
+    )
+
+
+def test_the_thumbnail_command_is_gone():
+    """"For what?" — the poster art is automatic now."""
+    from vyron.__main__ import COMMANDS
+
+    assert "thumbnail" not in {name for name, _description in COMMANDS}

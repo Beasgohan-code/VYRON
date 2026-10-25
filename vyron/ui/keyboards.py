@@ -169,7 +169,7 @@ def settings_panel(cfg: dict) -> KM:
                 _btn(f"{G('clock')} 24/7: {always}", "v:set:always"),
                 _btn(f"{G('image')} Poster: {poster}", "v:set:poster"),
             ],
-            [_btn(f"{G('image')} Artwork", "v:thumb:show"), _btn(f"{G('globe')} Language", "v:lang:menu")],
+            [_btn(f"{G('globe')} Language", "v:lang:menu")],
             [_btn(f"{G('back')} Close", "v:close")],
         ]
     )

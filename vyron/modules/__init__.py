@@ -35,7 +35,6 @@ from vyron.modules import (
     smartqueue,
     sources,
     start,
-    thumbnail_cmd,
     tools,
 )
 
@@ -62,7 +61,6 @@ MODULES = (
     inline,
     callbacks,
     smartqueue,
-    thumbnail_cmd,
     savedplaylists,
     diagnostics,
     logs_cmd,

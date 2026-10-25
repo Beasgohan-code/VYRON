@@ -141,7 +141,21 @@ async def announce(
         if await rich.edit(bot, chat_id, state.np_message_id, markup, markup_keyboard=keyboard):
             return
 
-    image = await poster(state, track, bot=bot, chat_id=chat_id) if await allowed(chat_id) else None
+    want_poster = await allowed(chat_id)
+    image = await poster(state, track, bot=bot, chat_id=chat_id) if want_poster else None
+    if want_poster and image is None:
+        # Silent was the problem: the chat got a text card instead of the
+        # artwork with nothing anywhere saying why. One line in the owner's
+        # journal is enough to diagnose it (no Pillow, no fonts, a render bug).
+        from vyron.core.journal import journal
+
+        journal.warn(
+            "art",
+            "the now-playing poster could not be drawn",
+            chat=chat_id,
+            track=track.id,
+            pillow=bool(thumbnails.PIL_AVAILABLE),
+        )
     message = None
     if image:
         message = await rich.send_photo(

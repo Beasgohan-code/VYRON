@@ -105,11 +105,11 @@ def test_the_live_block_says_paused_and_live():
 
 
 def test_the_now_playing_card_is_the_shape_the_user_asked_for():
-    """The card they pasted, line for line:
+    """The card they pasted, line for line — with the credits tidied off:
 
         ✨ Now playing
 
-        Chris Grey - LET THE WORLD BURN (Official Lyric Video)
+        Chris Grey - LET THE WORLD BURN
 
         ⏱ Duration: 2:44
 
@@ -129,7 +129,7 @@ def test_the_now_playing_card_is_the_shape_the_user_asked_for():
     paragraphs = to_plain_text(cards.now_playing_card(state)).split("\n\n")
 
     assert paragraphs[0] == f"{E('spark')} Now playing"
-    assert paragraphs[1] == "Chris Grey - LET THE WORLD BURN (Official Lyric Video)"
+    assert paragraphs[1] == "Chris Grey - LET THE WORLD BURN", "credits are not a name"
     assert paragraphs[2] == f"{E('clock')} Duration: 2:44"
     assert paragraphs[3] == f"{E('users')} Requested by: Rinu"
     # the live block follows the header, it does not replace it
@@ -335,3 +335,38 @@ def test_the_started_card_can_carry_a_way_back_to_the_results():
     )
     assert "the closest match" in card
     assert 'data="v:pick:list"' in card
+
+
+def test_a_stream_url_is_never_a_link_in_the_card():
+    """A tap on the song name must open a page, not a CDN file.
+
+    Catalogue tracks used to be linked to `track.url`, which for Audius is
+    `api.audius.co/v1/tracks/…/stream` — the card printed a URL and the tap
+    opened a blob.
+    """
+    from vyron.ui.rich import to_plain_text
+
+    stream = Track(
+        id="1dP3kyX",
+        title="Chris Grey – LET THE WORLD BURN",
+        uploader="Alone_BoYtm",
+        source="audius",
+        url="https://api.audius.co/v1/tracks/1dP3kyX/stream?app_name=VYRON",
+        duration=163,
+        requested_name="Beast Gohan",
+    )
+    state = ChatState(chat_id=1, current=stream, playing=True, offset=0, volume=100)
+    markup = cards.now_playing_card(state)
+    assert "<a href" not in markup
+    assert "api.audius.co" not in markup
+    assert "Chris Grey - LET THE WORLD BURN" in to_plain_text(markup)
+
+
+def test_a_youtube_track_still_links_to_its_page():
+    from vyron.ui.rich import to_plain_text
+
+    track = Track(id="dQw4w9WgXcQ", title="Wrong", uploader="Chris Grey", duration=187)
+    state = ChatState(chat_id=1, current=track, playing=True, offset=0, volume=100)
+    markup = cards.now_playing_card(state)
+    assert 'href="https://youtu.be/dQw4w9WgXcQ"' in markup
+    assert "Chris Grey - Wrong" in to_plain_text(markup)

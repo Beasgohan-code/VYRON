@@ -226,32 +226,6 @@ def test_the_broad_router_steps_aside_for_dedicated_ones(wired):
     assert unblock.answers == []
 
 
-# ── per-chat artwork from the settings panel ───────────────────────────────
-def test_the_settings_panel_can_show_artwork(wired):
-    client, _tokens, edited = wired
-
-    query = _dispatch(client, "v:thumb:show")
-
-    from vyron.ui.rich import to_plain_text
-
-    assert "backdrop" in to_plain_text(edited[-1])
-    assert "/thumbnail" in edited[-1]
-    assert query.answers[-1][0]
-
-
-def test_artwork_can_be_removed_from_the_panel(wired):
-    from vyron.core import chatcfg
-    from vyron.runtime import runtime
-
-    client, _tokens, _edited = wired
-    asyncio.run(chatcfg.set(424242, "thumbnail", "file-id"))
-
-    _dispatch(client, "v:thumb:off")
-
-    assert asyncio.run(chatcfg.get(424242, "thumbnail", "")) == ""
-    assert runtime.storage is not None
-
-
 def test_the_video_button_replays_the_track_with_its_picture(wired, monkeypatch):
     """/play starts audio on purpose; one tap should bring the picture back."""
     from vyron.core.player import ChatState

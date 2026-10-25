@@ -28,6 +28,29 @@ Two version numbers move independently:
   song now fetches the *next track's file* inside its existing budget, so the
   hand-off after a song or a skip is instant and cannot 403 halfway through.
 
+**The poster is automatic, and it is the picture people wanted.** The card
+showed a repost account as the artist ("Alone_BoYtm - Chris Grey – LET THE
+WORLD BURN"), linked the name to an Audius stream URL, wrapped `2:43` in a code
+box, and the artwork — when it appeared at all — had four empty boxes where the
+listener's name goes.
+
+* one naming rule (`vyron/utils/naming.py`): the artist already in the title
+  wins, a repost handle is never the artist, "(Official Video)" is not part of
+  a name, and "Artist - Topic" becomes the artist;
+* the card links the name only when there is a *page* behind it — a YouTube
+  video — never a CDN stream URL, and it no longer invents `tg://user?id=0`;
+* the poster asks the CDN for the biggest cover (`maxresdefault`, `1000x1000`)
+  instead of the 480 px one it used to blur to 1280 wide;
+* display names are flattened before they are drawn: mathematical bold, small
+  caps and Greek homoglyphs become Latin, scripts we ship no font for are
+  dropped rather than printed as tofu, and the "requested by" chip shrinks its
+  type instead of clipping to "BEAST GOH…";
+* the backdrop keeps the artwork's own colour, so a warm sleeve gives a warm
+  poster instead of a purple wash;
+* **`/thumbnail` is gone** — with its settings-panel button and its command
+  menu entry. Nobody chose a per-group backdrop; the poster is the song's own
+  art now. `/cthumbnail` for a channel is unchanged.
+
 Also in this build: mastheads are real headings in the rich lane and a quoted
 line (not a wall of `━`) in the classic one, a refused rich card is retried
 without its optional tags instead of falling back to plain HTML, `/doctor` says

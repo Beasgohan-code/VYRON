@@ -79,31 +79,6 @@ def register(client: Client) -> None:
         if action in {"logs", "unblock"}:
             return
 
-        # ── per-chat artwork (independent of playback) ─────────────────────
-        if action == "thumb":
-            from vyron.core import chatcfg
-
-            actor = cq.from_user.id if cq.from_user else 0
-            allowed = (
-                chat.type == ChatType.PRIVATE
-                or is_owner(actor)
-                or await is_chat_admin(client, chat.id, actor)
-            )
-            if not allowed:
-                await cq.answer("Only group admins can change the artwork.", show_alert=True)
-                return
-            if arg == "off":
-                await chatcfg.set(chat.id, "thumbnail", "")
-                await _show(client, cq, cards.thumbnail_cleared_card())
-                await cq.answer("Artwork removed")
-                return
-            file_id = str(await chatcfg.get(chat.id, "thumbnail", "") or "")
-            await _show(client, cq, cards.thumbnail_card(bool(file_id), can_edit=True))
-            await cq.answer(
-                "Reply to a photo with /thumbnail" if not file_id else "Custom artwork"
-            )
-            return
-
         # captcha buttons belong to a person, not to the player: handle them
         # before the player check so a booting bot can still verify people.
         if action == "captcha":

@@ -9,6 +9,7 @@
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 
+import re
 import time
 
 from typing import Iterable
@@ -35,9 +36,17 @@ DOT = "·"
 
 # ── shared bits ─────────────────────────────────────────────────────────────
 def _requester(track: Track) -> str:
-    if not track.requested_name:
+    """The name, linked to the profile only when there is a profile.
+
+    An id of 0 (a track restored from disk, a poster from the web app) used to
+    produce `tg://user?id=0` — a tappable name that goes nowhere.
+    """
+    name = esc(truncate(track.requested_name, 28))
+    if not name:
         return ""
-    return f'<a href="tg://user?id={int(track.requested_by)}">{esc(truncate(track.requested_name, 28))}</a>'
+    if not track.requested_by:
+        return name
+    return f'<a href="tg://user?id={int(track.requested_by)}">{name}</a>'
 
 
 def progress_block(
@@ -73,14 +82,11 @@ def progress_block(
     bar = progress_bar(elapsed, total, length=15)
     if total:
         clock = (
-            f"{glyph} <b>{status}</b> · <code>{fmt_duration(elapsed)}</code>"
-            f" · {percentage(elapsed, total)}% · <code>{fmt_duration(total)}</code>"
+            f"{glyph} <b>{status}</b> · {fmt_duration(elapsed)}"
+            f" · {percentage(elapsed, total)}% · {fmt_duration(total)}"
         )
     else:
-        clock = (
-            f"{glyph} <b>{status}</b> · <code>{fmt_duration(elapsed)}</code>"
-            f" · <i>{live}</i>"
-        )
+        clock = f"{glyph} <b>{status}</b> · {fmt_duration(elapsed)} · <i>{live}</i>"
 
     lines = [f"<code>{bar}</code>", clock]
     volume = int(getattr(state, "volume", 0) or 0)
@@ -325,7 +331,6 @@ _HELP: dict[str, tuple[str, list[tuple[str, str]]]] = {
             ("/settings", "per-chat defaults"),
             ("/language", "English · हिन्दी · മലയാളം · ਪੰਜਾਬੀ"),
             ("/voice", "voice engine: on/off, calls, quality"),
-            ("/thumbnail", "your own artwork behind the poster"),
             ("/logger", "mirror warnings to a channel (owner)"),
             ("/247", "toggle 24/7 mode"),
             ("/app", "open the player web app"),
@@ -445,16 +450,39 @@ def help_card(section: str = "main") -> str:
 
 # ── now playing (live, editable) ────────────────────────────────────────────
 def _np_heading(track: Track) -> str:
-    """``Artist - Title``, linked so a tap opens the video.
+    """``Artist - Title``, the way the song is actually named.
 
-    The link is invisible: what a person reads is the line they expect, and
-    the words are the whole message — never a bare URL.
+    Two things were wrong with simply printing ``uploader - title``:
+
+    * a repost account became the artist — "Alone_BoYtm - Chris Grey – LET THE
+      WORLD BURN" for a song the title already credited correctly;
+    * the line was linked to ``track.watch_url``, which for a catalogue track
+      is the *stream URL* — a tap opened a CDN file, and the card printed the
+      words "api.audius.co/v1/tracks/…/stream".
+
+    So the name comes from `naming.display_parts`, and the link exists only
+    when there is a page behind it (a YouTube video), never a media URL.
     """
-    artist = esc(truncate(track.uploader, 40))
-    title = esc(truncate(track.title, 64))
-    text = f"{artist} - {title}" if artist else title
-    url = track.watch_url
+    from vyron.utils.naming import display_line
+
+    text = esc(truncate(display_line(track.title, track.uploader), 72))
+    url = ""
+    if track.source == "youtube" and track.id:
+        url = f"https://youtu.be/{track.id}"
+    elif str(track.url or "").startswith("http") and _is_page_url(track.url):
+        url = str(track.url)
     return f'<a href="{esc(url)}">{text}</a>' if url else text
+
+
+#: A media endpoint is not a web page: linking to one from a card is a bug that
+#: looks like a feature (it opens a blob in the browser, or nothing at all).
+_MEDIA_PATH = re.compile(
+    r"(?i)(/stream|/download|\.mp3|\?.*(?:mime|range)=|\.m4a|\.mp4|\.webm)(?:\?|$)"
+)
+
+
+def _is_page_url(url: str) -> bool:
+    return not _MEDIA_PATH.search(str(url or ""))
 
 
 def _np_header(track: Track) -> list[str]:
@@ -480,7 +508,7 @@ def _np_header(track: Track) -> list[str]:
     return [
         f"{E('spark')} <b>Now playing</b>",
         f"<b>{_np_heading(track)}</b>",
-        f"{E('clock')} <b>Duration:</b> <code>{length}</code>",
+        f"{E('clock')} <b>Duration:</b> {length}",
         f"{E('users')} <b>Requested by:</b> {_requester(track) or 'user'}",
     ]
 
@@ -2035,55 +2063,6 @@ _TONES = {
     "error": ("cross", "danger"),
     "info": ("info", "primary"),
 }
-
-
-def thumbnail_card(has_custom: bool, *, can_edit: bool = True) -> str:
-    """``/thumbnail`` — what the now-playing poster uses as its backdrop."""
-    mode = "your artwork" if has_custom else "the song cover"
-    hint = (
-        f"{E('image')} Reply to a photo with <code>/thumbnail</code> to use it here — "
-        "the cover and colours still come from the track."
-        if can_edit
-        else f"{E('shield')} A group admin can set this — reply to a photo with "
-        "<code>/thumbnail</code>."
-    )
-    body = (
-        B.banner("chat artwork", glyph="image")
-        + B.fields(
-            [
-                ("image", "backdrop", f"<b>{mode}</b>"),
-                ("spark", "accent", "<i>from the song</i>"),
-                ("chat", "scope", "<i>this chat only</i>"),
-            ]
-        )
-        + B.note(hint)
-    )
-    if has_custom and can_edit:
-        body += B.row(
-            B.btn(f"{E('close')} Remove artwork", data="v:thumb:off", style="danger"),
-            B.btn(f"{E('back')} Close", data="v:close"),
-        )
-    else:
-        body += B.row(B.btn(f"{E('close')} Close", data="v:close"))
-    return body + B.footer(f"{E('info')} every new track re-renders the poster")
-
-
-def thumbnail_set_card() -> str:
-    return (
-        B.banner("artwork saved", glyph="check")
-        + B.note(
-            "New posters in this chat will use it as the backdrop. The cover, the "
-            "vinyl and the colours stay tied to the track."
-        )
-        + B.footer(f"{E('info')} /thumbnail off reverts to the song cover")
-    )
-
-
-def thumbnail_cleared_card() -> str:
-    return (
-        B.banner("back to the cover", glyph="image")
-        + B.note("The next poster in this chat uses the track's own artwork again.")
-    )
 
 
 def notice_card(
