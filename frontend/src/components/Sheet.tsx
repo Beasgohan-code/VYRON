@@ -1,6 +1,8 @@
-import { Check, Disc3, Download, Link as LinkIcon, Plus, Share2, X } from "lucide-react";
+import { Check, Disc3, Download, HardDrive, Link as LinkIcon, Plus, Share2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useFocusTrap } from "../lib/a11y";
+import { streamUrl } from "../lib/audio";
+import { forgetOffline, isKeptOffline, keepOffline } from "../lib/offline";
 import { copyText, shareLink } from "../lib/telegram";
 import { useApp } from "../lib/store";
 import type { Track } from "../lib/types";
@@ -17,6 +19,8 @@ export function Sheet() {
   const [kind, setKind] = useState<"audio" | "video">("audio");
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
+  const [kept, setKept] = useState(false);
+  const [keeping, setKeeping] = useState(false);
   const sheet = useRef<HTMLDivElement>(null);
   useFocusTrap(sheet, Boolean(modal));
 
@@ -28,6 +32,16 @@ export function Sheet() {
       setKind(modal.kind ?? "audio");
     }
     if (modal.type === "new-playlist") setName("");
+    if (modal.type === "track") {
+      setKept(false);
+      let alive = true;
+      void isKeptOffline(modal.track).then((value) => {
+        if (alive) setKept(value);
+      });
+      return () => {
+        alive = false;
+      };
+    }
   }, [modal]);
 
   useEffect(() => {
@@ -269,6 +283,44 @@ export function Sheet() {
                     </span>
                   </button>
                 </li>
+                {modal.track.id !== undefined && modal.track.id !== null && (
+                  <li>
+                    <button
+                      type="button"
+                      disabled={keeping}
+                      onClick={async () => {
+                        setKeeping(true);
+                        if (kept) {
+                          await forgetOffline(modal.track);
+                          setKept(false);
+                          toast("Removed from this device", "success");
+                        } else {
+                          const result = await keepOffline(modal.track, streamUrl(modal.track));
+                          setKept(result.ok);
+                          toast(
+                            result.ok ? "Kept on this device — it plays offline" : `Could not keep it: ${result.reason}`,
+                            result.ok ? "success" : "error"
+                          );
+                        }
+                        setKeeping(false);
+                      }}
+                    >
+                      <span className="sheet-icon">
+                        {kept ? <Check size={16} /> : <HardDrive size={16} />}
+                      </span>
+                      <span className="sheet-li-text">
+                        <b>{kept ? "Kept on this device" : "Keep on this device"}</b>
+                        <span>
+                          {kept
+                            ? "tap to free the space"
+                            : keeping
+                              ? "saving…"
+                              : "plays without a connection"}
+                        </span>
+                      </span>
+                    </button>
+                  </li>
+                )}
                 {/* A song is something you send to a friend, so the sheet knows
                     how to hand it over — through Telegram's own share sheet, or
                     the link itself when it is going somewhere else. */}

@@ -43,6 +43,8 @@ interface LyricLine {
 
 const SLEEP_STEPS = [0, 15, 30, 60];
 const SPEEDS = [0.75, 1, 1.25, 1.5];
+/* 0 is not "off" here — it is gapless, which is the good default. */
+const CROSSFADES = [0, 3, 6, 12];
 
 /** "jiosaavn" → "JioSaavn": the engine that is actually serving the audio. */
 function sourceLabel(source?: string): string {
@@ -379,6 +381,22 @@ export function Player() {
                 onChange={(event) => audio.setVolume(Number(event.target.value))}
               />
             </div>
+          </div>
+
+          <div className="sleep">
+            <Wand2 size={14} />
+            <span title="Gapless, or how long one track overlaps the next">blend</span>
+            {CROSSFADES.map((seconds) => (
+              <button
+                key={seconds}
+                type="button"
+                className={`chip tiny ${audio.crossfade === seconds ? "active" : ""}`}
+                onClick={() => audio.setCrossfade(seconds)}
+                aria-pressed={audio.crossfade === seconds}
+              >
+                {seconds === 0 ? "gapless" : `${seconds}s`}
+              </button>
+            ))}
           </div>
 
           <div className="sleep">

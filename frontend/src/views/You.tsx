@@ -1,4 +1,20 @@
-import { Crown, Download, Gauge, History, Link2, Moon, Palette, ShieldCheck, Sparkles, Sun, X, Zap } from "lucide-react";
+import {
+  Crown,
+  Download,
+  Gauge,
+  HardDrive,
+  History,
+  Link2,
+  Moon,
+  Palette,
+  ShieldCheck,
+  Sparkles,
+  Sun,
+  X,
+  Zap,
+} from "lucide-react";
+import { useEffect, useState } from "react";
+import { clearOffline, keptCount } from "../lib/offline";
 import { useApp } from "../lib/store";
 import { fmtDuration } from "../lib/format";
 import type { AccentName, ThemeName } from "../lib/store";
@@ -15,6 +31,17 @@ const THEMES: { key: ThemeName; label: string; icon: typeof Sun }[] = [
 const ACCENTS: AccentName[] = ["violet", "blue", "cyan", "green", "pink", "amber"];
 
 export function You() {
+  const [kept, setKept] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    void keptCount().then((value) => {
+      if (alive) setKept(value);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   const {
     state,
     setView,
@@ -27,6 +54,7 @@ export function You() {
     openModal,
     playlists,
     audio,
+    toast,
   } = useApp();
   const stage = useViewReveal<HTMLDivElement>("you", ".stage-block");
   const user = state?.user;
@@ -171,6 +199,50 @@ export function You() {
                 </button>
               ))}
             </div>
+          </div>
+          <div className="pref">
+            <span>
+              Blend
+              <i className="fine">
+                {audio.crossfade ? `${audio.crossfade}s overlap between tracks` : "gapless — one track into the next"}
+              </i>
+            </span>
+            <div className="chips tight">
+              {[0, 3, 6, 12].map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={`chip tiny ${audio.crossfade === value ? "active" : ""}`}
+                  onClick={() => audio.setCrossfade(value)}
+                  aria-pressed={audio.crossfade === value}
+                >
+                  {value === 0 ? "off" : `${value}s`}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="pref">
+            <span>
+              <HardDrive size={14} /> Kept offline
+              <i className="fine">
+                {kept ? `${kept} ${kept === 1 ? "track" : "tracks"} on this device` : "keep songs from the track menu"}
+              </i>
+            </span>
+            {kept ? (
+              <button
+                type="button"
+                className="btn btn-ghost sm"
+                onClick={async () => {
+                  await clearOffline();
+                  setKept(0);
+                  toast("Offline songs cleared", "success");
+                }}
+              >
+                Clear
+              </button>
+            ) : (
+              <span className="fine">—</span>
+            )}
           </div>
           <div className="pref">
             <span>

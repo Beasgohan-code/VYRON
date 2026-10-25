@@ -7,6 +7,44 @@ Two version numbers move independently:
 
 ## Bot
 
+### 1.10.23 — 2026-10-25
+
+**A queue stops having gaps.** Between two tracks there used to be a silence the
+length of a network round-trip: the first element finished, the app resolved the
+next track, and only then did sound come back. The Mini App now prepares the
+next track on a *second* element thirty seconds before the current one ends —
+real bytes in a real buffer, not the one-byte warm-up it used to do — and swaps
+the two at the boundary. With blending off that hand-off is one `play()` on an
+element that is already loaded, so the gap is gone entirely. Set a blend of 3,
+6 or 12 seconds instead and the next track begins that many seconds *before*
+the current one ends — the outgoing one ramps to zero under it — so the two
+overlap rather than meet. The incoming side is not faded in: a fade-in that is
+waiting on an animation frame is a fade-in that never happens with the screen
+locked, and silence is not a crossfade.
+
+Everything that reports state is now element-aware, because there are two
+elements: `timeupdate`, `play`, `pause` and `ended` only count when they come
+from the one that is audible, otherwise the track fading out would drag the
+progress bar backwards. Both elements share the one audio graph (the analyser
+and the loudness compressor are attached once, at creation — a media element
+source can only ever be built once), so normalising and the visualiser keep
+working across a hand-off. A deliberate skip, a jump or a retry cancels any fade
+in progress and clears the buffer, because it is a decision that replaces the
+one being prepared.
+
+**The songs you keep are actually there when the network is not.** Keeping a
+track offline was impossible before: the service worker deliberately never
+caches `/api/*`, and the stream URL carries a short-lived token in its query, so
+a cached copy would rot within the hour. "Keep on this device" in a track's
+sheet now downloads the whole file once, stores it under the *path* (no token),
+and the worker serves it — network first, stored copy only when the request
+fails — with the `Range` header sliced out of the stored body, because a lone
+200 would let the audio element play but never seek. The profile page reports
+how many tracks are on the device and can clear them. Anything that carries
+state still never touches a cache.
+
+126 frontend tests (`tsc` clean) and 944 backend tests.
+
 ### 1.10.22 — 2026-10-25
 
 **The Mini App stops looking like a web page.** The design was already
