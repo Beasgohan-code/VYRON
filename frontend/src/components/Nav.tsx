@@ -34,7 +34,7 @@ export function Rail() {
     <nav className="rail" aria-label="Sections">
       <div className="rail-brand">
         <span className="rail-mark">
-          <img src="/brand/avatar.jpg" alt="" />
+          <img src={`${import.meta.env.BASE_URL}brand/avatar.jpg`} alt="" />
         </span>
         <span className="rail-word">
           VYRON

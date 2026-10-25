@@ -8,6 +8,7 @@ import { Shortcuts } from "./components/Shortcuts";
 import { Rail, Tabs } from "./components/Nav";
 import { Sheet } from "./components/Sheet";
 import { setOwnerToken } from "./lib/api";
+import { useArtworkTint } from "./lib/tint";
 import { guardClose, lockSwipes, useBackButton } from "./lib/telegram";
 import { SEEK_STEP, VOLUME_STEP, shortcutFor } from "./lib/keys";
 import { useConnection, useUpdateReady } from "./lib/pwa";
@@ -50,6 +51,11 @@ export default function App() {
 
   const [shortcuts, setShortcuts] = useState(false);
   const { toggleLike } = useApp();
+
+  /* The whole interface takes the colour of the artwork that is playing —
+     the dock's glow, the player's ambience, the page's own light. One hash
+     per track, written as CSS variables; nothing re-renders. */
+  useArtworkTint(audio.track);
 
   /*
    * One "back" for the whole app, in the order a person expects it: close what

@@ -122,7 +122,7 @@ export function BootScreen() {
 
       <div className="boot-body">
         <div className="boot-logo">
-          <img src="/brand/avatar.jpg" alt="" />
+          <img src={`${import.meta.env.BASE_URL}brand/avatar.jpg`} alt="" />
           <span>{shown}%</span>
         </div>
 

@@ -38,14 +38,34 @@
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
   --safe: env(safe-area-inset-bottom, 0px);
   --motion: 1;
+
+  /* Channel twins of every colour the design tints.
+   *
+   * `color-mix()` only landed in Safari 16.2 and Chrome 111 (Dec 2022 /
+   * Mar 2023). On an older Telegram webview every rule that used it was
+   * dropped *whole* — which is how a designed app ends up looking like bare
+   * HTML: no panel fills, no chips, no glow, just text. These triples let the
+   * same tints be written as `rgba(var(--accent-rgb), 0.22)`, which is an
+   * exact match for `color-mix(… var(--accent) 22%, transparent)` and works
+   * everywhere. Keep them in sync with the hex values above. */
+  --accent-rgb: 139, 92, 246;
+  --accent-2-rgb: 251, 113, 133;
+  --bg-rgb: 7, 7, 11;
+  --bg-elev-rgb: 12, 12, 20;
+  --text-rgb: 244, 243, 248;
+  --muted-rgb: 165, 162, 182;
+  --dim-rgb: 139, 135, 160;
+  --ok-rgb: 52, 211, 153;
+  --warn-rgb: 251, 191, 36;
+  --error-rgb: 251, 113, 133;
 }
 
-[data-accent="violet"] { --accent: #8b5cf6; --accent-2: #fb7185; }
-[data-accent="blue"] { --accent: #4f7cff; --accent-2: #22d3ee; }
-[data-accent="cyan"] { --accent: #22d3ee; --accent-2: #34d399; }
-[data-accent="green"] { --accent: #34d399; --accent-2: #a3e635; }
-[data-accent="pink"] { --accent: #f472b6; --accent-2: #fb923c; }
-[data-accent="amber"] { --accent: #fbbf24; --accent-2: #fb7185; }
+[data-accent="violet"] { --accent: #8b5cf6; --accent-2: #fb7185; --accent-rgb: 139, 92, 246; --accent-2-rgb: 251, 113, 133 }
+[data-accent="blue"] { --accent: #4f7cff; --accent-2: #22d3ee; --accent-rgb: 79, 124, 255; --accent-2-rgb: 34, 211, 238 }
+[data-accent="cyan"] { --accent: #22d3ee; --accent-2: #34d399; --accent-rgb: 34, 211, 238; --accent-2-rgb: 52, 211, 153 }
+[data-accent="green"] { --accent: #34d399; --accent-2: #a3e635; --accent-rgb: 52, 211, 153; --accent-2-rgb: 163, 230, 53 }
+[data-accent="pink"] { --accent: #f472b6; --accent-2: #fb923c; --accent-rgb: 244, 114, 182; --accent-2-rgb: 251, 146, 60 }
+[data-accent="amber"] { --accent: #fbbf24; --accent-2: #fb7185; --accent-rgb: 251, 191, 36; --accent-2-rgb: 251, 113, 133 }
 
 /* ── the client's own theme ────────────────────────────────────────────────
    Telegram injects `--tg-theme-*` on :root for the signed-in user; "Telegram"
@@ -56,7 +76,7 @@
    ---------------------------------------------------------------------- */
 [data-theme="telegram"] {
   --bg: var(--tg-theme-bg-color, #0f1117);
-  --bg-elev: var(--tg-theme-secondary-bg-color, color-mix(in srgb, var(--tg-theme-bg-color, #0f1117) 84%, white));
+  --bg-elev: var(--tg-theme-secondary-bg-color, #1b1f2a);
   --text: var(--tg-theme-text-color, #f4f3f8);
   --muted: var(--tg-theme-subtitle-text-color, var(--tg-theme-hint-color, #a5a2b6));
   --dim: var(--tg-theme-hint-color, #8b87a0);
@@ -64,24 +84,48 @@
   --accent-2: var(--tg-theme-accent-text-color, var(--tg-theme-link-color, #fb7185));
   --accent-ink: var(--tg-theme-button-text-color, #0a0713);
   --error: var(--tg-theme-destructive-text-color, #fb7185);
-  --line: color-mix(in srgb, var(--tg-theme-text-color, #fff) 10%, transparent);
-  --line-strong: color-mix(in srgb, var(--tg-theme-text-color, #fff) 20%, transparent);
-  --panel: color-mix(in srgb, var(--tg-theme-text-color, #fff) 5%, transparent);
-  --panel-2: color-mix(in srgb, var(--tg-theme-text-color, #fff) 9%, transparent);
+  --line: rgba(255, 255, 255, 0.1);
+  --line-strong: rgba(255, 255, 255, 0.2);
+  --panel: rgba(255, 255, 255, 0.05);
+  --panel-2: rgba(255, 255, 255, 0.09);
+}
+@supports (color: color-mix(in srgb, red, blue)) {
+  [data-theme="telegram"] {
+    --line: color-mix(in srgb, var(--tg-theme-text-color, #fff) 10%, transparent);
+    --line-strong: color-mix(in srgb, var(--tg-theme-text-color, #fff) 20%, transparent);
+    --panel: color-mix(in srgb, var(--tg-theme-text-color, #fff) 5%, transparent);
+    --panel-2: color-mix(in srgb, var(--tg-theme-text-color, #fff) 9%, transparent);
+  }
 }
 [data-theme="telegram"] .topbar,
 [data-theme="telegram"] .rail,
 [data-theme="telegram"] .tabs,
 [data-theme="telegram"] .dock {
-  background: color-mix(in srgb, var(--tg-theme-bg-color, #0f1117) 92%, transparent);
+  background: rgba(15, 17, 23, 0.92);
+}
+@supports (color: color-mix(in srgb, red, blue)) {
+  [data-theme="telegram"] .topbar,
+  [data-theme="telegram"] .rail,
+  [data-theme="telegram"] .tabs,
+  [data-theme="telegram"] .dock {
+    background: color-mix(in srgb, var(--tg-theme-bg-color, #0f1117) 92%, transparent);
+  }
 }
 [data-scheme="light"][data-theme="telegram"] {
-  --panel: color-mix(in srgb, var(--tg-theme-text-color, #000) 4%, transparent);
-  --panel-2: color-mix(in srgb, var(--tg-theme-text-color, #000) 7%, transparent);
-  --line: color-mix(in srgb, var(--tg-theme-text-color, #000) 10%, transparent);
-  --line-strong: color-mix(in srgb, var(--tg-theme-text-color, #000) 18%, transparent);
+  --panel: rgba(0, 0, 0, 0.04);
+  --panel-2: rgba(0, 0, 0, 0.07);
+  --line: rgba(0, 0, 0, 0.1);
+  --line-strong: rgba(0, 0, 0, 0.18);
   --shadow: 0 30px 70px -40px rgba(0, 0, 0, 0.35);
   --shadow-sm: 0 12px 30px -20px rgba(0, 0, 0, 0.3);
+}
+@supports (color: color-mix(in srgb, red, blue)) {
+  [data-scheme="light"][data-theme="telegram"] {
+    --panel: color-mix(in srgb, var(--tg-theme-text-color, #000) 4%, transparent);
+    --panel-2: color-mix(in srgb, var(--tg-theme-text-color, #000) 7%, transparent);
+    --line: color-mix(in srgb, var(--tg-theme-text-color, #000) 10%, transparent);
+    --line-strong: color-mix(in srgb, var(--tg-theme-text-color, #000) 18%, transparent);
+  }
 }
 
 [data-theme="system"] { color-scheme: dark light; }
@@ -111,8 +155,8 @@ html, body { margin: 0; padding: 0; }
 body {
   min-height: 100vh;
   background:
-    radial-gradient(120% 80% at 8% -10%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 60%),
-    radial-gradient(90% 70% at 96% 0%, color-mix(in srgb, var(--accent-2) 16%, transparent), transparent 62%),
+    radial-gradient(120% 80% at 8% -10%, rgba(var(--accent-rgb), 0.22), transparent 60%),
+    radial-gradient(90% 70% at 96% 0%, rgba(var(--accent-2-rgb), 0.16), transparent 62%),
     var(--bg);
   color: var(--text);
   font-family: var(--font-ui);
@@ -128,13 +172,14 @@ input { font: inherit; color: inherit; }
 ul, ol { list-style: none; margin: 0; padding: 0; }
 h1, h2, h3, p { margin: 0; }
 code { font-family: var(--font-mono); font-size: 0.86em; }
-::selection { background: color-mix(in srgb, var(--accent) 45%, transparent); }
+::selection { background: rgba(var(--accent-rgb), 0.45); }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 999px; border: 3px solid transparent; background-clip: content-box; }
 ::-webkit-scrollbar-track { background: transparent; }
 
 :focus-visible {
+  outline: 2px solid var(--accent);
   outline: 2px solid color-mix(in srgb, var(--accent) 75%, white);
   outline-offset: 2px;
 }
@@ -182,7 +227,7 @@ body::after {
   padding: 10px 2px 14px;
   margin-bottom: 6px;
   backdrop-filter: blur(18px);
-  background: linear-gradient(to bottom, color-mix(in srgb, var(--bg) 92%, transparent) 55%, transparent);
+  background: linear-gradient(to bottom, rgba(var(--bg-rgb), 0.92) 55%, transparent);
 }
 
 .topbar-title { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
@@ -207,9 +252,9 @@ body::after {
 .status-dot {
   width: 8px; height: 8px; border-radius: 50%;
   background: var(--dim);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--dim) 18%, transparent);
+  box-shadow: 0 0 0 4px rgba(var(--dim-rgb), 0.18);
 }
-.status-dot.on { background: var(--ok); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 18%, transparent); }
+.status-dot.on { background: var(--ok); box-shadow: 0 0 0 4px rgba(var(--ok-rgb), 0.18); }
 
 .view { min-height: 0; animation: view-in 0.42s var(--ease) both; }
 @keyframes view-in { from { opacity: 0; transform: translateY(10px); } }
@@ -247,7 +292,7 @@ body::after {
   font-family: var(--font-display);
   font-weight: 800;
   font-size: 19px;
-  box-shadow: 0 14px 30px -14px color-mix(in srgb, var(--accent) 80%, transparent);
+  box-shadow: 0 14px 30px -14px rgba(var(--accent-rgb), 0.8);
 }
 .rail-word {
   display: flex; flex-direction: column;
@@ -334,10 +379,10 @@ button, .btn, a, [role="button"] { touch-action: manipulation; }
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
   border-color: transparent;
   color: var(--accent-ink);
-  box-shadow: 0 16px 34px -18px color-mix(in srgb, var(--accent) 90%, transparent);
+  box-shadow: 0 16px 34px -18px rgba(var(--accent-rgb), 0.9);
 }
-.btn-primary:hover { box-shadow: 0 20px 40px -18px color-mix(in srgb, var(--accent) 100%, transparent); }
-.btn-ghost.on { border-color: color-mix(in srgb, var(--accent) 55%, transparent); color: var(--text); }
+.btn-primary:hover { box-shadow: 0 20px 40px -18px rgba(var(--accent-rgb), 1.0); }
+.btn-ghost.on { border-color: rgba(var(--accent-rgb), 0.55); color: var(--text); }
 .btn.danger, .btn-icon.danger { color: var(--error); }
 
 .btn-icon {
@@ -348,9 +393,9 @@ button, .btn, a, [role="button"] { touch-action: manipulation; }
   transition: background 0.18s var(--ease), color 0.18s var(--ease), transform 0.18s var(--ease);
 }
 .btn-icon:hover { background: var(--panel-2); color: var(--text); transform: scale(1.05); }
-.btn-icon.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.btn-icon.on { color: var(--accent); background: rgba(var(--accent-rgb), 0.16); }
 .btn-icon.liked, .btn-icon.like.on { color: var(--accent-2); }
-.btn-icon.like.on svg { filter: drop-shadow(0 0 6px color-mix(in srgb, var(--accent-2) 60%, transparent)); }
+.btn-icon.like.on svg { filter: drop-shadow(0 0 6px rgba(var(--accent-2-rgb), 0.6)); }
 
 button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important; box-shadow: none; }
 
@@ -383,8 +428,8 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
 }
 .chip:hover { color: var(--text); border-color: var(--line-strong); }
 .chip.active {
-  background: color-mix(in srgb, var(--accent) 20%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: rgba(var(--accent-rgb), 0.2);
+  border-color: rgba(var(--accent-rgb), 0.55);
   color: var(--text);
 }
 .chip.ghost { background: transparent; }
@@ -427,12 +472,12 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
   color: var(--muted);
   white-space: nowrap;
 }
-.tag.on { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+.tag.on { color: var(--ok); border-color: rgba(var(--ok-rgb), 0.4); }
 
 .live-dot {
   width: 7px; height: 7px; border-radius: 50%;
   background: var(--ok);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 20%, transparent);
+  box-shadow: 0 0 0 3px rgba(var(--ok-rgb), 0.2);
   animation: pulse 2.4s var(--ease) infinite;
 }
 .live-dot.idle { background: var(--dim); box-shadow: none; animation: none; }
@@ -454,9 +499,9 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
   flex-wrap: wrap;
 }
 .notice span { flex: 1; min-width: 160px; }
-.notice.error { border-color: color-mix(in srgb, var(--error) 40%, transparent); color: color-mix(in srgb, var(--error) 85%, white); }
-.notice.warn { border-color: color-mix(in srgb, var(--warn) 40%, transparent); color: color-mix(in srgb, var(--warn) 85%, white); }
-.notice.ok { border-color: color-mix(in srgb, var(--ok) 40%, transparent); color: color-mix(in srgb, var(--ok) 85%, white); }
+.notice.error { border-color: rgba(var(--error-rgb), 0.4); color: var(--error); }
+.notice.warn { border-color: rgba(var(--warn-rgb), 0.4); color: var(--warn); }
+.notice.ok { border-color: rgba(var(--ok-rgb), 0.4); color: var(--ok); }
 .notice code { overflow-wrap: anywhere; }
 
 .skeleton {
@@ -488,7 +533,7 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
   display: grid; place-items: center;
   width: 46px; height: 46px;
   border-radius: 50%;
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  background: rgba(var(--accent-rgb), 0.16);
   color: var(--accent);
 }
 
@@ -503,7 +548,7 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
   outline: none;
   transition: border-color 0.2s var(--ease), background 0.2s var(--ease);
 }
-.text-input:focus { border-color: color-mix(in srgb, var(--accent) 60%, transparent); background: var(--panel-2); }
+.text-input:focus { border-color: rgba(var(--accent-rgb), 0.6); background: var(--panel-2); }
 .text-input::placeholder { color: var(--dim); }
 .field-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--dim); }
 .field {
@@ -515,8 +560,8 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
   transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
 }
 .field:focus-within {
-  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: rgba(var(--accent-rgb), 0.6);
+  box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.12);
 }
 .field-icon { color: var(--dim); flex: none; }
 .field input {
@@ -557,7 +602,7 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
   background: var(--muted);
   transition: transform 0.22s var(--ease), background 0.22s var(--ease);
 }
-.switch.on { background: color-mix(in srgb, var(--accent) 40%, transparent); border-color: color-mix(in srgb, var(--accent) 60%, transparent); }
+.switch.on { background: rgba(var(--accent-rgb), 0.4); border-color: rgba(var(--accent-rgb), 0.6); }
 .switch.on span { transform: translateX(20px); background: var(--text); }
 
 .accent-dot {
@@ -631,8 +676,8 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
 .aurora canvas { width: 100%; height: 100%; display: block; }
 .aurora[data-webgl="off"] {
   background:
-    radial-gradient(60% 80% at 20% 20%, color-mix(in srgb, var(--accent) 60%, transparent), transparent 65%),
-    radial-gradient(50% 70% at 80% 30%, color-mix(in srgb, var(--accent-2) 55%, transparent), transparent 68%);
+    radial-gradient(60% 80% at 20% 20%, rgba(var(--accent-rgb), 0.6), transparent 65%),
+    radial-gradient(50% 70% at 80% 30%, rgba(var(--accent-2-rgb), 0.55), transparent 68%);
   filter: blur(24px);
 }
 .reactor { position: relative; display: block; }
@@ -640,7 +685,7 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
 .reactor-fallback {
   position: absolute; inset: 0;
   border-radius: 50%;
-  background: radial-gradient(circle at 50% 45%, color-mix(in srgb, var(--accent) 60%, transparent), transparent 68%);
+  background: radial-gradient(circle at 50% 45%, rgba(var(--accent-rgb), 0.6), transparent 68%);
   filter: blur(8px);
   animation: breathe 6s ease-in-out infinite;
 }
@@ -650,6 +695,7 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
   position: absolute;
   width: 3px; height: 3px;
   border-radius: 50%;
+  background: var(--accent);
   background: color-mix(in srgb, var(--accent) 80%, white);
   opacity: 0;
 }
@@ -713,8 +759,8 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
   border-radius: 26px;
   border: 1px solid var(--line);
   background:
-    linear-gradient(140deg, color-mix(in srgb, var(--accent) 14%, transparent), transparent 46%),
-    linear-gradient(320deg, color-mix(in srgb, var(--accent-2) 12%, transparent), transparent 50%),
+    linear-gradient(140deg, rgba(var(--accent-rgb), 0.14), transparent 46%),
+    linear-gradient(320deg, rgba(var(--accent-2-rgb), 0.12), transparent 50%),
     var(--panel);
   overflow: hidden;
   box-shadow: var(--shadow);
@@ -746,8 +792,8 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
 .hero-stack-fallback {
   position: absolute; inset: 8% 4%;
   border-radius: 26px;
-  background: radial-gradient(circle at 30% 25%, color-mix(in srgb, var(--accent) 55%, transparent), transparent 62%),
-    radial-gradient(circle at 75% 70%, color-mix(in srgb, var(--accent-2) 45%, transparent), transparent 60%),
+  background: radial-gradient(circle at 30% 25%, rgba(var(--accent-rgb), 0.55), transparent 62%),
+    radial-gradient(circle at 75% 70%, rgba(var(--accent-2-rgb), 0.45), transparent 60%),
     var(--panel-2);
 }
 .hero-card {
@@ -771,7 +817,7 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
   display: inline-flex; align-items: center; gap: 7px;
   padding: 7px 12px;
   border-radius: var(--pill);
-  background: color-mix(in srgb, var(--bg) 70%, transparent);
+  background: rgba(var(--bg-rgb), 0.7);
   border: 1px solid var(--line);
   backdrop-filter: blur(10px);
   font-size: 11.5px;
@@ -808,7 +854,7 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
   min-width: 24px; height: 24px;
   padding: 0 5px;
   border-radius: 8px;
-  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  background: rgba(var(--bg-rgb), 0.72);
   border: 1px solid var(--line);
   font-family: var(--font-display);
   font-size: 12px;
@@ -819,7 +865,7 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
   position: absolute; right: 8px; top: 8px; z-index: 3;
   padding: 4px 9px;
   border-radius: var(--pill);
-  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  background: rgba(var(--bg-rgb), 0.72);
   border: 1px solid var(--line);
   font-size: 10.5px;
   letter-spacing: 0.04em;
@@ -871,7 +917,7 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
   transition: background 0.16s var(--ease);
 }
 .track-row:hover { background: var(--panel); }
-.track-row.current { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.track-row.current { background: rgba(var(--accent-rgb), 0.1); }
 .tr-index { font-size: 12px; color: var(--dim); text-align: center; font-variant-numeric: tabular-nums; }
 .track-row.current .tr-index { color: var(--accent); }
 .tr-art { position: relative; display: block; width: 46px; border-radius: 10px; overflow: hidden; }
@@ -934,7 +980,7 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
 .playlist-open .cover { border-radius: var(--radius-sm); }
 .playlist-open b { font-size: 13.5px; }
 .playlist-open span { font-size: 12px; color: var(--dim); }
-.playlist-delete { position: absolute; top: 14px; right: 14px; background: color-mix(in srgb, var(--bg) 60%, transparent); }
+.playlist-delete { position: absolute; top: 14px; right: 14px; background: rgba(var(--bg-rgb), 0.6); }
 
 .playlist-detail { display: grid; gap: 16px; }
 .playlist-head { display: flex; gap: 16px; align-items: center; }
@@ -970,7 +1016,7 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
   border: 1px solid var(--line);
   background: var(--panel);
 }
-.room-card.live { border-color: color-mix(in srgb, var(--ok) 35%, transparent); }
+.room-card.live { border-color: rgba(var(--ok-rgb), 0.35); }
 .room-art { position: relative; width: 62px; border-radius: var(--radius-sm); overflow: hidden; }
 .room-art .cover { border-radius: var(--radius-sm); }
 .room-art .live-dot { position: absolute; right: 6px; bottom: 6px; z-index: 4; }
@@ -986,7 +1032,7 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
   border-radius: var(--pill);
   border: 1px solid var(--line);
 }
-.room-state.on { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+.room-state.on { color: var(--ok); border-color: rgba(var(--ok-rgb), 0.4); }
 .room-side { display: grid; gap: 7px; justify-items: end; }
 .room-attach {
   display: inline-flex; align-items: center; gap: 5px;
@@ -996,8 +1042,8 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
   cursor: pointer;
   transition: border-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
 }
-.room-attach:hover:not(:disabled) { border-color: color-mix(in srgb, var(--accent) 50%, transparent); transform: translateY(-1px); }
-.room-attach.on { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+.room-attach:hover:not(:disabled) { border-color: rgba(var(--accent-rgb), 0.5); transform: translateY(-1px); }
+.room-attach.on { color: var(--ok); border-color: rgba(var(--ok-rgb), 0.45); }
 .room-attach:disabled { opacity: 0.55; cursor: progress; }
 
 /* ── quick actions ──────────────────────────────────────────────────────── */
@@ -1010,7 +1056,7 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
   border-radius: var(--radius);
   border: 1px solid var(--line);
   background:
-    linear-gradient(150deg, color-mix(in srgb, var(--accent) 12%, transparent), transparent 60%),
+    linear-gradient(150deg, rgba(var(--accent-rgb), 0.12), transparent 60%),
     var(--panel);
   text-align: left;
   transition: transform 0.2s var(--ease), border-color 0.2s var(--ease);
@@ -1027,7 +1073,7 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
   border-radius: 28px;
   border: 1px solid var(--line);
   background:
-    linear-gradient(140deg, color-mix(in srgb, var(--accent) 16%, transparent), transparent 55%),
+    linear-gradient(140deg, rgba(var(--accent-rgb), 0.16), transparent 55%),
     var(--panel);
 }
 .profile-art { width: 116px; flex: none; }
@@ -1090,6 +1136,7 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
 .log-panel {
   border-radius: var(--radius);
   border: 1px solid var(--line);
+  background: var(--bg-elev);
   background: color-mix(in srgb, var(--bg) 82%, black);
   overflow: hidden;
   box-shadow: var(--shadow-sm);
@@ -1127,7 +1174,7 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
 .log-msg { color: var(--text); overflow-wrap: anywhere; }
 .log-line.level-warn .log-glyph, .log-line.level-warn .log-msg { color: var(--warn); }
 .log-line.level-error .log-glyph, .log-line.level-error .log-msg { color: var(--error); }
-.log-line.level-error { background: color-mix(in srgb, var(--error) 8%, transparent); }
+.log-line.level-error { background: rgba(var(--error-rgb), 0.08); }
 .log-line.level-ok .log-glyph { color: var(--ok); }
 .log-trace { grid-column: 4 / -1; }
 .log-trace summary { cursor: pointer; color: var(--dim); font-size: 11px; }
@@ -1168,7 +1215,7 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
   padding: 10px 12px; margin-bottom: 12px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--line);
-  background: color-mix(in srgb, var(--panel-2) 70%, transparent);
+  background: rgba(var(--panel-2-rgb), 0.7);
 }
 .source-pill {
   display: inline-flex; align-items: center; gap: 6px;
@@ -1180,15 +1227,15 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
   width: 6px; height: 6px; border-radius: 50%;
   background: var(--muted); opacity: 0.5;
 }
-.source-pill.on { color: var(--text); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
-.source-pill.on i { background: var(--ok); opacity: 1; box-shadow: 0 0 8px color-mix(in srgb, var(--ok) 60%, transparent); }
+.source-pill.on { color: var(--text); border-color: rgba(var(--ok-rgb), 0.4); }
+.source-pill.on i { background: var(--ok); opacity: 1; box-shadow: 0 0 8px rgba(var(--ok-rgb), 0.6); }
 .source-pill.off { text-decoration: line-through; opacity: 0.55; }
 
 .quota-line { display: block; margin-top: 2px; font-size: 11px; color: var(--muted); }
 .quota-line .tag { margin-right: 6px; }
 .tag.danger {
   color: var(--danger, #ff6b6b);
-  border-color: color-mix(in srgb, var(--danger, #ff6b6b) 45%, transparent);
+  border-color: rgba(var(--error-rgb), 0.45);
 }
 
 .key-editor {
@@ -1215,7 +1262,7 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
   padding: 10px 12px;
   border-radius: 20px;
   border: 1px solid var(--line-strong);
-  background: color-mix(in srgb, var(--bg-elev) 82%, transparent);
+  background: rgba(var(--bg-elev-rgb), 0.82);
   backdrop-filter: blur(22px) saturate(140%);
   box-shadow: 0 30px 60px -30px rgba(0, 0, 0, 0.95);
   animation: dock-in 0.42s var(--ease) both;
@@ -1231,7 +1278,7 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
 /* Two layers: what the browser has ready, then what has been played. */
 .dock-buffer {
   position: absolute; inset: 0 auto 0 0;
-  background: color-mix(in srgb, var(--accent) 26%, transparent);
+  background: rgba(var(--accent-rgb), 0.26);
 }
 .dock-played {
   position: absolute; inset: 0 auto 0 0;
@@ -1270,13 +1317,13 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
   color: var(--accent-ink);
   margin: 0 2px;
-  box-shadow: 0 10px 22px -12px color-mix(in srgb, var(--accent) 90%, transparent);
+  box-shadow: 0 10px 22px -12px rgba(var(--accent-rgb), 0.9);
 }
 .dock-play:hover { transform: scale(1.05); }
 .dock.playing .dock-art::after {
   content: "";
   position: absolute; inset: 0;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 60%, transparent);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.6);
   border-radius: inherit;
   pointer-events: none;
 }
@@ -1355,7 +1402,7 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
   padding: 10px 18px;
   border-radius: var(--pill);
   border: 1px solid var(--line-strong);
-  background: color-mix(in srgb, var(--bg-elev) 92%, transparent);
+  background: rgba(var(--bg-elev-rgb), 0.92);
   backdrop-filter: blur(16px);
   box-shadow: var(--shadow-sm);
   font-size: 13px;
@@ -1363,14 +1410,15 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
   animation: toast-in 0.3s var(--ease) both;
 }
 @keyframes toast-in { from { opacity: 0; transform: translate(-50%, -10px); } }
-.toast-success { border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
-.toast-error { border-color: color-mix(in srgb, var(--error) 45%, transparent); }
+.toast-success { border-color: rgba(var(--ok-rgb), 0.45); }
+.toast-error { border-color: rgba(var(--error-rgb), 0.45); }
 
 /* ── player ─────────────────────────────────────────────────────────────── */
 .player {
   position: fixed; inset: 0; z-index: 90;
   display: flex;
   flex-direction: column;
+  background: var(--bg-elev);
   background: color-mix(in srgb, var(--bg) 88%, black);
   animation: player-in 0.42s var(--ease) both;
   overflow: hidden;
@@ -1466,8 +1514,9 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
   display: flex; align-items: center; gap: 10px;
   padding: 10px 14px;
   border-radius: var(--radius-sm);
-  border: 1px solid color-mix(in srgb, var(--error) 40%, transparent);
-  background: color-mix(in srgb, var(--error) 10%, transparent);
+  border: 1px solid rgba(var(--error-rgb), 0.4);
+  background: rgba(var(--error-rgb), 0.1);
+  color: var(--error);
   color: color-mix(in srgb, var(--error) 85%, white);
   font-size: 12.5px;
   flex-wrap: wrap;
@@ -1485,7 +1534,7 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
   border-radius: 50%;
   background: linear-gradient(140deg, var(--accent), var(--accent-2));
   color: var(--accent-ink);
-  box-shadow: 0 22px 44px -18px color-mix(in srgb, var(--accent) 90%, transparent);
+  box-shadow: 0 22px 44px -18px rgba(var(--accent-rgb), 0.9);
   transition: transform 0.2s var(--ease);
 }
 .play-fab:hover { transform: scale(1.06); }
@@ -1517,7 +1566,7 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
   padding: 16px;
   border-radius: var(--radius);
   border: 1px solid var(--line);
-  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  background: rgba(var(--bg-rgb), 0.72);
   backdrop-filter: blur(14px);
   overflow-y: auto;
   max-height: 68vh;
@@ -1596,7 +1645,7 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
   left: 0; bottom: -1px;
   height: 2px;
   border-radius: 2px;
-  background: color-mix(in srgb, var(--text) 22%, transparent);
+  background: rgba(var(--text-rgb), 0.22);
   transition: width 0.4s linear;
   pointer-events: none;
 }
@@ -1667,7 +1716,7 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
     padding: 8px 6px;
     border-radius: 22px;
     border: 1px solid var(--line-strong);
-    background: color-mix(in srgb, var(--bg-elev) 86%, transparent);
+    background: rgba(var(--bg-elev-rgb), 0.86);
     backdrop-filter: blur(20px) saturate(140%);
     box-shadow: 0 24px 50px -26px rgba(0, 0, 0, 0.95);
   }
@@ -1744,8 +1793,8 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
   --ok: #2de8c8;
   --warn: #f7c65b;
   --error: #ff7a8a;
-  --glow: 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent),
-    0 24px 60px -34px color-mix(in srgb, var(--accent) 70%, transparent);
+  --glow: 0 0 0 1px rgba(var(--accent-rgb), 0.22),
+    0 24px 60px -34px rgba(var(--accent-rgb), 0.7);
   --radius: 24px;
   --radius-sm: 15px;
 }
@@ -1759,8 +1808,8 @@ button:disabled { opacity: 0.42; cursor: not-allowed; transform: none !important
 
 body {
   background:
-    radial-gradient(80% 60% at 82% -12%, color-mix(in srgb, var(--accent) 13%, transparent), transparent 62%),
-    radial-gradient(70% 55% at 4% 4%, color-mix(in srgb, var(--accent-2) 12%, transparent), transparent 58%),
+    radial-gradient(80% 60% at 82% -12%, rgba(var(--accent-rgb), 0.13), transparent 62%),
+    radial-gradient(70% 55% at 4% 4%, rgba(var(--accent-2-rgb), 0.12), transparent 58%),
     radial-gradient(120% 90% at 50% 120%, rgba(0, 0, 0, 0.9), transparent 60%),
     var(--bg);
   background-attachment: fixed;
@@ -1824,7 +1873,7 @@ body::after {
   inset: 0;
   /* Clear over the glow, opaque under the copy. */
   background:
-    radial-gradient(60% 30% at 50% 16%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 72%),
+    radial-gradient(60% 30% at 50% 16%, rgba(var(--accent-rgb), 0.1), transparent 72%),
     linear-gradient(
       180deg,
       rgba(5, 7, 10, 0.22) 0%,
@@ -1856,8 +1905,8 @@ body::after {
   aspect-ratio: 1;
   border-radius: clamp(17px, 4.6vw, 25px);
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
-  box-shadow: 0 24px 60px -30px color-mix(in srgb, var(--accent) 85%, transparent);
+  border: 1px solid rgba(var(--accent-rgb), 0.3);
+  box-shadow: 0 24px 60px -30px rgba(var(--accent-rgb), 0.85);
   animation: boot-logo-in 0.9s var(--ease) both;
 }
 .boot-logo img { width: 100%; height: 100%; object-fit: cover; }
@@ -1903,7 +1952,7 @@ body::after {
   height: 100%;
   border-radius: inherit;
   background: linear-gradient(90deg, var(--accent-2), var(--accent));
-  box-shadow: 0 0 16px color-mix(in srgb, var(--accent) 70%, transparent);
+  box-shadow: 0 0 16px rgba(var(--accent-rgb), 0.7);
   transition: width 0.55s var(--ease);
 }
 .boot-stages {
@@ -1925,7 +1974,7 @@ body::after {
 }
 .boot-stages li.done i {
   background: var(--accent);
-  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 75%, transparent);
+  box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.75);
 }
 .boot-stages b { font-weight: 500; color: var(--muted); }
 .boot-stages li.done b { color: var(--text); }
@@ -2001,8 +2050,8 @@ body::after {
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--accent);
-  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid rgba(var(--accent-rgb), 0.32);
+  background: rgba(var(--accent-rgb), 0.1);
 }
 .gate-body h1 {
   font-family: var(--font-display);
@@ -2040,8 +2089,8 @@ body::after {
   border-radius: 7px;
   font-size: 11px;
   color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent);
+  background: rgba(var(--accent-rgb), 0.14);
+  border: 1px solid rgba(var(--accent-rgb), 0.26);
 }
 .gate-steps code {
   padding: 1px 6px;
@@ -2056,7 +2105,7 @@ body::after {
 .hero {
   padding: clamp(20px, 2.4vw, 30px);
   border-radius: 26px;
-  border-color: color-mix(in srgb, var(--accent) 16%, var(--line));
+  border-color: var(--line);
   background: var(--bg-elev);
   isolation: isolate;
 }
@@ -2088,22 +2137,23 @@ body::after {
   height: 6px;
   border-radius: 50%;
   background: var(--accent);
-  box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 60%, transparent);
+  box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.6);
   animation: pulse-ring 2.4s ease-out infinite;
 }
 @keyframes pulse-ring {
-  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent); }
+  0% { box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.55); }
   70% { box-shadow: 0 0 0 9px transparent; }
   100% { box-shadow: 0 0 0 0 transparent; }
 }
 .hero-title { text-wrap: balance; }
 .hero-title em {
+  background: linear-gradient(98deg, var(--accent), var(--accent-2));
   background: linear-gradient(98deg, var(--accent), color-mix(in srgb, var(--accent) 55%, white) 45%, var(--accent-2));
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
 }
-.hero-sub { color: color-mix(in srgb, var(--text) 72%, transparent); }
+.hero-sub { color: rgba(var(--text-rgb), 0.72); }
 .hero-card {
   border-radius: 22px;
   border-color: rgba(255, 255, 255, 0.16);
@@ -2112,7 +2162,7 @@ body::after {
 }
 .hero-stack-note {
   background: rgba(5, 7, 10, 0.6);
-  border-color: color-mix(in srgb, var(--accent) 22%, var(--line));
+  border-color: var(--line);
   color: var(--text);
 }
 .hero-stack-note svg { color: var(--accent); }
@@ -2127,8 +2177,8 @@ body::after {
   overflow: hidden;
   padding: 0;
   border-radius: 13px;
-  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
-  box-shadow: 0 14px 34px -18px color-mix(in srgb, var(--accent) 90%, transparent);
+  border: 1px solid rgba(var(--accent-rgb), 0.32);
+  box-shadow: 0 14px 34px -18px rgba(var(--accent-rgb), 0.9);
 }
 .rail-mark img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .rail-word i { color: var(--dim); letter-spacing: 0.14em; }
@@ -2136,41 +2186,42 @@ body::after {
 .rail-link.active {
   background: linear-gradient(
     90deg,
-    color-mix(in srgb, var(--accent) 18%, transparent),
-    color-mix(in srgb, var(--accent-2) 8%, transparent)
+    rgba(var(--accent-rgb), 0.18),
+    rgba(var(--accent-2-rgb), 0.08)
   );
   color: var(--text);
 }
 .rail-link.active::before {
   background: linear-gradient(180deg, var(--accent), var(--accent-2));
-  box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 80%, transparent);
+  box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.8);
 }
 .rail-link.active svg { color: var(--accent); }
 .rail-foot { color: var(--dim); }
 
-.topbar { border-bottom-color: color-mix(in srgb, var(--line) 70%, transparent); }
+.topbar { border-bottom-color: rgba(var(--line-rgb), 0.7); }
 .topbar-title h2 { letter-spacing: -0.02em; }
 .status-dot { background: var(--dim); }
 .status-dot.on {
   background: var(--accent);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent),
-    0 0 16px color-mix(in srgb, var(--accent) 60%, transparent);
+  box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.16),
+    0 0 16px rgba(var(--accent-rgb), 0.6);
 }
 
 .dock {
   background: linear-gradient(180deg, rgba(12, 17, 22, 0.92), rgba(6, 9, 12, 0.96));
-  border-color: color-mix(in srgb, var(--accent) 16%, var(--line));
+  border-color: var(--line);
   box-shadow: 0 30px 70px -34px rgba(0, 0, 0, 1), inset 0 1px 0 rgba(255, 255, 255, 0.04);
   backdrop-filter: blur(22px) saturate(1.3);
 }
 .dock-progress span, .dock-progress i {
   background: linear-gradient(90deg, var(--accent), var(--accent-2));
-  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 70%, transparent);
+  box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.7);
 }
 .dock-play {
+  background: linear-gradient(140deg, var(--accent), var(--accent-2));
   background: linear-gradient(140deg, var(--accent), color-mix(in srgb, var(--accent) 60%, white));
   color: var(--accent-ink);
-  box-shadow: 0 14px 32px -16px color-mix(in srgb, var(--accent) 95%, transparent);
+  box-shadow: 0 14px 32px -16px rgba(var(--accent-rgb), 0.95);
 }
 
 /* ── surfaces: cards, tiles, covers, chips ──────────────────────────────── */
@@ -2184,37 +2235,38 @@ body::after {
   background: linear-gradient(150deg, rgba(255, 255, 255, 0.22), transparent 42%, rgba(0, 0, 0, 0.28));
 }
 .chip.active {
-  background: color-mix(in srgb, var(--accent) 15%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 42%, transparent);
+  background: rgba(var(--accent-rgb), 0.15);
+  border-color: rgba(var(--accent-rgb), 0.42);
   color: var(--text);
 }
 .chip.active i { color: var(--accent); }
 .seg-btn.active { color: var(--text); }
 .btn-primary {
+  background: linear-gradient(140deg, var(--accent), var(--accent-2));
   background: linear-gradient(140deg, var(--accent), color-mix(in srgb, var(--accent) 62%, white));
   color: var(--accent-ink);
-  box-shadow: 0 18px 40px -22px color-mix(in srgb, var(--accent) 95%, transparent);
+  box-shadow: 0 18px 40px -22px rgba(var(--accent-rgb), 0.95);
 }
-.btn-primary:hover { box-shadow: 0 22px 46px -20px color-mix(in srgb, var(--accent) 100%, transparent); }
+.btn-primary:hover { box-shadow: 0 22px 46px -20px rgba(var(--accent-rgb), 1.0); }
 .empty-icon {
   color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 24%, transparent);
+  background: rgba(var(--accent-rgb), 0.12);
+  border-color: rgba(var(--accent-rgb), 0.24);
 }
-.room-card.live { border-color: color-mix(in srgb, var(--accent) 34%, transparent); }
+.room-card.live { border-color: rgba(var(--accent-rgb), 0.34); }
 .live-dot {
   background: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent),
-    0 0 12px color-mix(in srgb, var(--accent) 70%, transparent);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.16),
+    0 0 12px rgba(var(--accent-rgb), 0.7);
 }
-.field-go { color: var(--accent-ink); background: linear-gradient(140deg, var(--accent), color-mix(in srgb, var(--accent) 60%, white)); }
+.field-go { color: var(--accent-ink); background: var(--accent); background: linear-gradient(140deg, var(--accent), color-mix(in srgb, var(--accent) 60%, white)); }
 .accent-dot.active { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--text); }
 .toast {
-  border-color: color-mix(in srgb, var(--accent) 32%, var(--line));
+  border-color: var(--line-strong);
   background: rgba(10, 15, 20, 0.94);
   backdrop-filter: blur(16px);
 }
-.quick:hover { border-color: color-mix(in srgb, var(--accent) 34%, transparent); }
+.quick:hover { border-color: rgba(var(--accent-rgb), 0.34); }
 
 @media (max-width: 900px) {
   .hero { padding: 18px; border-radius: 20px; gap: 14px; }
@@ -2256,7 +2308,7 @@ body::after {
   background: linear-gradient(100deg, rgba(5, 7, 10, 0.94), rgba(5, 7, 10, 0.55) 60%, rgba(5, 7, 10, 0.2));
 }
 .screen-head.with-art h1 { font-size: clamp(24px, 3.2vw, 34px); }
-.screen-head.with-art p { color: color-mix(in srgb, var(--text) 70%, transparent); }
+.screen-head.with-art p { color: rgba(var(--text-rgb), 0.7); }
 
 /* ── avatars ───────────────────────────────────────────────────────────────
    One component, every face in the app: the Telegram profile picture when we
@@ -2307,8 +2359,8 @@ body::after {
   position: absolute;
   inset: -5px;
   border-radius: inherit;
-  border: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
-  box-shadow: 0 0 26px -6px color-mix(in srgb, var(--accent) 75%, transparent);
+  border: 2px solid rgba(var(--accent-rgb), 0.6);
+  box-shadow: 0 0 26px -6px rgba(var(--accent-rgb), 0.75);
   pointer-events: none;
 }
 .avatar-status {
@@ -2324,7 +2376,7 @@ body::after {
 }
 .avatar-status.on {
   background: var(--ok);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 26%, transparent);
+  box-shadow: 0 0 0 3px rgba(var(--ok-rgb), 0.26);
 }
 
 /* The small face in the topbar; it is the way to "You" on a phone. */
@@ -2455,7 +2507,7 @@ html[data-keyboard="open"] .main {
   font: inherit;
   font-size: 13.5px;
 }
-.gate-token input:focus { outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent); outline-offset: 1px; }
+.gate-token input:focus { outline: 2px solid rgba(var(--accent-rgb), 0.6); outline-offset: 1px; }
 .gate-token .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .gate-token small { color: var(--dim); font-size: 11.5px; line-height: 1.45; }
 
@@ -2488,9 +2540,9 @@ html[data-keyboard="open"] .main {
   align-items: center;
   padding: 14px;
   border-radius: 20px;
-  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
+  border: 1px solid var(--line);
   background:
-    radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 60%),
+    radial-gradient(120% 140% at 0% 0%, rgba(var(--accent-rgb), 0.14), transparent 60%),
     var(--surface-2, rgba(255, 255, 255, 0.03));
 }
 .resume-art { position: relative; width: 54px; height: 54px; border-radius: 14px; overflow: hidden; flex: none; }
@@ -2594,8 +2646,8 @@ kbd {
   max-width: 460px;
   padding: 22px;
   border-radius: 20px;
-  border: 1px solid color-mix(in srgb, #ff6b6b 30%, var(--line));
-  background: color-mix(in srgb, #ff6b6b 8%, transparent);
+  border: 1px solid rgba(255, 107, 107, 0.4);
+  background: rgba(255, 107, 107, 0.08);
 }
 .crash-icon { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; background: rgba(255, 107, 107, 0.16); color: #ff9a9a; }
 .crash h2 { margin: 0; font-size: 17px; }
@@ -2642,3 +2694,162 @@ kbd {
   .topbar, .dock, .tabs { background: var(--bg); }
   .sheet { background: var(--bg-elev); }
 }
+
+/* ==========================================================================
+   Nocturne 1.6 — the room takes the colour of the song
+   --------------------------------------------------------------------------
+   Everything below is additive: it tints, deepens and animates what the
+   sections above already draw, and it all degrades to the previous look
+   (no artwork, no View Transitions, reduced motion).
+   ========================================================================== */
+
+:root {
+  /* Overwritten per track by `lib/tint.ts`; the accent is the fallback so a
+     paused app with no song still looks like itself. */
+  --art-hue: 265;
+  --art-hue-2: 320;
+  --art-hue-3: 190;
+  --grain: 0.5;
+}
+
+/* The page light follows the artwork. Kept low-alpha: the panels and text
+   above it have to stay legible on a phone in daylight. */
+[data-tinted] body {
+  background:
+    radial-gradient(115% 78% at 10% -12%, hsl(var(--art-hue) 72% 46% / 0.26), transparent 62%),
+    radial-gradient(85% 66% at 96% 2%, hsl(var(--art-hue-2) 74% 48% / 0.2), transparent 64%),
+    radial-gradient(70% 50% at 50% 108%, hsl(var(--art-hue-3) 70% 44% / 0.14), transparent 70%),
+    var(--bg);
+  transition: background 900ms var(--ease);
+}
+
+/* On a light client the same alphas would turn into mud. The tint stays —
+   it is what makes the app feel alive — but at a third of the strength. */
+[data-scheme="light"][data-tinted] body {
+  background:
+    radial-gradient(115% 78% at 10% -12%, hsl(var(--art-hue) 80% 62% / 0.13), transparent 60%),
+    radial-gradient(85% 66% at 96% 2%, hsl(var(--art-hue-2) 82% 60% / 0.1), transparent 62%),
+    var(--bg);
+}
+
+/* A whisper of film grain: it kills the flat "web page" look of a large
+   gradient without costing an image request. */
+/* Old webviews have no `dvh` — the full-height shells would collapse. A plain
+   `vh` first, the modern unit second: the cascade picks the better one. */
+.app { min-height: 100vh; min-height: 100dvh; }
+.player { height: 100vh; height: 100dvh; }
+@media (max-width: 760px) {
+  .app { min-height: 100vh; min-height: 100dvh; }
+}
+
+.app::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  pointer-events: none;
+  /* Desktop only: a full-viewport `mix-blend-mode` layer is cheap with spare
+     GPU and expensive on a phone, where the tinted gradients are enough. */
+  display: none;
+  opacity: calc(0.05 * var(--grain));
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/></filter><rect width='160' height='160' filter='url(%23n)'/></svg>");
+  mix-blend-mode: overlay;
+}
+@media (min-width: 900px) {
+  .app::after { display: block; }
+}
+
+/* ── the dock borrows the artwork's light ──────────────────────────────── */
+.dock {
+  border-color: hsl(var(--art-hue) 60% 70% / 0.22);
+  box-shadow:
+    0 26px 60px -34px rgba(0, 0, 0, 0.95),
+    0 0 0 1px hsl(var(--art-hue) 70% 70% / 0.08) inset,
+    0 -18px 50px -40px hsl(var(--art-hue) 90% 60% / 0.55);
+}
+.dock-art .cover {
+  box-shadow: 0 12px 30px -16px hsl(var(--art-hue) 90% 40% / 0.85);
+  transition: transform 260ms var(--ease), box-shadow 260ms var(--ease);
+}
+.dock-art:active .cover { transform: scale(0.94); }
+
+/* ── the full player ───────────────────────────────────────────────────── */
+.pv-glow {
+  background:
+    radial-gradient(58% 58% at 50% 26%, hsl(var(--art-hue) 92% 62% / 0.55), transparent 72%),
+    radial-gradient(40% 40% at 78% 46%, hsl(var(--art-hue-2) 92% 60% / 0.34), transparent 74%);
+  opacity: 0.55;
+}
+.pv-backdrop {
+  opacity: 0.34;
+  filter: blur(72px) saturate(170%);
+}
+.pv-art {
+  border-color: hsl(var(--art-hue) 70% 80% / 0.2);
+  box-shadow:
+    0 46px 90px -42px rgba(0, 0, 0, 0.95),
+    0 0 0 1px hsl(var(--art-hue) 80% 88% / 0.07) inset,
+    0 24px 70px -40px hsl(var(--art-hue) 95% 55% / 0.75);
+}
+.pv-title,
+.pv-titles h1 { text-wrap: balance; }
+
+/* ── shared element: the cover travels between dock and player ─────────── */
+html[data-morph="open"] .dock-art .cover { view-transition-name: now-cover; }
+html[data-morph="close"] .pv-art .cover { view-transition-name: now-cover; }
+
+::view-transition-group(now-cover) {
+  animation-duration: 460ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+::view-transition-old(now-cover),
+::view-transition-new(now-cover) {
+  height: 100%;
+  object-fit: cover;
+  border-radius: 22px;
+  mix-blend-mode: normal;
+  animation-duration: 460ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 260ms;
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-morph] .dock-art .cover,
+  html[data-morph] .pv-art .cover { view-transition-name: none; }
+}
+
+/* ── type: optical sizing and balanced headlines ───────────────────────── */
+.hero-title,
+.pv-titles h1,
+.gate-body h1,
+h2 { text-wrap: balance; }
+.hero-title em,
+.gate-body h1 em {
+  background-size: 220% 100%;
+  animation: ink-drift 12s ease-in-out infinite alternate;
+}
+@keyframes ink-drift {
+  from { background-position: 0% 50%; }
+  to { background-position: 100% 50%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-title em,
+  .gate-body h1 em { animation: none; }
+}
+
+/* ── the locked gate: real art instead of an empty panel ───────────────── */
+.gate-art {
+  background-image: url("/brand/hero.jpg");
+  opacity: 0.62;
+  transform: scale(1.02);
+}
+.gate-body h1 { letter-spacing: -0.03em; }
+.gate-token input {
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--line-strong);
+  transition: border-color 180ms var(--ease), background 180ms var(--ease);
+}
+.gate-token input:focus { border-color: hsl(var(--art-hue) 90% 70% / 0.7); background: rgba(255, 255, 255, 0.09); }

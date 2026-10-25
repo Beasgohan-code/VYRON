@@ -7,6 +7,43 @@ Two version numbers move independently:
 
 ## Bot
 
+### 1.10.22 — 2026-10-25
+
+**The Mini App stops looking like a web page.** The design was already
+hand-written, but two things were quietly undoing it: `color-mix()` — which the
+whole palette is tinted with — needs Safari 16.2 / Chrome 111, and on anything
+older *every* rule that used it was dropped whole, leaving bare text with no
+panel fills, chips or glow; and `100dvh`, without which the phone shell
+collapses. Both now have plain fallbacks written first, with the modern
+syntax layered on top for the browsers that understand it. That single change
+is the difference between "designed" and "default HTML" on an older webview —
+and Telegram ships a lot of older webviews.
+
+**The room takes the colour of the song.** Every cover is already drawn from a
+hash of the track id, so the same hash now tints the interface: the page's
+light, the dock's glow, the player's ambience and its backdrop all follow the
+artwork, at a third of the strength on a light client. One hash and three CSS
+variables per track; nothing re-renders. The player's own duplicate hue
+calculation is gone, so the sheet, the dock and the cover cannot disagree.
+
+**The cover flies.** Tapping the dock's artwork now animates *that* picture up
+into the full player (View Transitions, with `flushSync` so React commits
+inside the snapshot). Browsers without the API, and anyone with reduced motion
+enabled, get the old instant swap.
+
+Smaller fixes found while checking the app against itself:
+
+* the rail and boot screens asked for `/brand/avatar.jpg` — an absolute path
+  that 404s on a deployment mounted at `/app/`, which is every deployment.
+  Both now resolve through `import.meta.env.BASE_URL`;
+* the grain overlay is desktop-only: a full-viewport `mix-blend-mode` layer is
+  cheap with a spare GPU and expensive on a phone;
+* the locked gate gets the real hero artwork instead of an empty panel;
+* the service worker's cache name is bumped so a client cannot keep the old
+  shell around the new palette.
+
+108 frontend tests (`tsc` clean) and 944 backend tests.
+
 ### 1.10.21 — 2026-10-25
 
 **`/vplay` is back, because auto-detection could never replace it.** Every

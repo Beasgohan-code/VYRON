@@ -15,7 +15,7 @@
  */
 /* Bumped when the cached shell would otherwise keep serving an old picture:
    activate deletes every cache that does not carry this prefix. */
-const VERSION = "vyron-2";
+const VERSION = "vyron-3";
 const SHELL = `${VERSION}-shell`;
 const ASSETS = `${VERSION}-assets`;
 const SHELL_FILES = [

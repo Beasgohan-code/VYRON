@@ -20,7 +20,8 @@ import {
   VolumeX,
   Wand2,
 } from "lucide-react";
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { Cover } from "../components/Cover";
 import { Equalizer } from "../components/Equalizer";
 import { Reactor } from "../components/Reactor";
@@ -28,9 +29,11 @@ import { Seek } from "../components/Seek";
 import { Sparks } from "../components/Sparks";
 import { TrackRow } from "../components/TrackRow";
 import { useFocusTrap } from "../lib/a11y";
+import { morphCover } from "../lib/morph";
+import { haptic } from "../lib/telegram";
 import { reveal, useTilt } from "../lib/anim";
 import { api } from "../lib/api";
-import { activeLyricLine, fmtDuration, hashOf } from "../lib/format";
+import { activeLyricLine, fmtDuration } from "../lib/format";
 import { useApp } from "../lib/store";
 
 interface LyricLine {
@@ -58,6 +61,11 @@ export function Player() {
   const [showLyrics, setShowLyrics] = useState(false);
   const [showQueue, setShowQueue] = useState(false);
   const stage = useRef<HTMLDivElement>(null);
+  /* Closing puts the artwork back in the dock instead of blinking it away. */
+  const close = () => {
+    haptic("light");
+    morphCover("close", () => flushSync(() => audio.setExpanded(false)));
+  };
   useFocusTrap(stage, Boolean(audio.track));
 
   const [sleepMinutes, setSleepMinutes] = useState(0);
@@ -89,7 +97,7 @@ export function Player() {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") audio.setExpanded(false);
+      if (event.key === "Escape") close();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -128,11 +136,9 @@ export function Player() {
   const total = audio.duration || track.duration || 0;
   const VolumeIcon = audio.muted || audio.volume === 0 ? VolumeX : audio.volume < 0.5 ? Volume1 : Volume2;
   const liked = (state?.favorites ?? []).some((item) => item.id === track.id);
-  const hue = hashOf(String(track.id ?? track.title ?? "")) % 360;
-  const tint = {
-    "--pv-glow": `hsl(${hue} 70% 54%)`,
-    "--pv-glow-soft": `hsl(${(hue + 46) % 360} 64% 46%)`,
-  } as CSSProperties;
+  /* No per-track colours computed here any more: the player reads the same
+     `--art-hue` variables the rest of the app is tinted with (lib/tint), so
+     the sheet, the dock and the artwork can never disagree about the hue. */
 
   const loadLyrics = async () => {
     if (lyrics) {
@@ -182,7 +188,6 @@ export function Player() {
       aria-label="Player"
       aria-modal="true"
       ref={stage}
-      style={tint}
       /* Swipe down to close: the gesture every phone music player has, and the
          thumb reaches it without hunting for the chevron. */
       onTouchStart={(event) => {
@@ -198,7 +203,7 @@ export function Player() {
         const distance = touch.clientY - start.y;
         if (distance > 90) {
           swipe.current = null;
-          audio.setExpanded(false);
+          close();
         }
       }}
       onTouchEnd={() => {
@@ -213,7 +218,7 @@ export function Player() {
       <Sparks active={audio.playing} />
 
       <header className="pv-head">
-        <button type="button" className="btn-icon" aria-label="Close player" onClick={() => audio.setExpanded(false)}>
+        <button type="button" className="btn-icon" aria-label="Close player" onClick={close}>
           <ChevronDown size={20} />
         </button>
         <span className="pv-context">

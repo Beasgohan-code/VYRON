@@ -1,5 +1,8 @@
 import { ChevronUp, Heart, Pause, Play, SkipBack, SkipForward } from "lucide-react";
+import { flushSync } from "react-dom";
 import { fmtDuration } from "../lib/format";
+import { morphCover } from "../lib/morph";
+import { haptic } from "../lib/telegram";
 import { useApp } from "../lib/store";
 import { Cover } from "./Cover";
 import { Equalizer } from "./Equalizer";
@@ -27,7 +30,11 @@ export function Dock() {
       <button
         type="button"
         className="dock-art"
-        onClick={() => audio.setExpanded(true)}
+        onClick={() => {
+          haptic("light");
+          // The artwork itself flies up into the player (shared element).
+          morphCover("open", () => flushSync(() => audio.setExpanded(true)));
+        }}
         aria-label="Open full player"
       >
         <Cover track={track} />
