@@ -7,6 +7,24 @@ Two version numbers move independently:
 
 ## Bot
 
+### 1.10.15 — 2026-10-25
+
+**A group that removes the bot gets its resources back.** Until now, being
+kicked mid-song left three things behind: the queue in memory, a snapshot of it
+on disk, and a per-chat settings record (volume 40, loop, 24/7, mood) that
+outlived the group. Telegram itself usually ends the call, but nothing told the
+player. A `my_chat_member` handler now catches its own removal, stops playback,
+leaves what is left of the call, drops the chat from the player and deletes its
+stored settings — so the next time that chat id appears, it starts from the
+defaults instead of inheriting a stranger's volume.
+
+**And a group that adds the bot gets an answer.** The same handler sends the
+group setup card on join: rights, streaming state, what is missing. Shizu and
+Videl both greet on join; VYRON stayed silent until somebody typed `/start`.
+
+Both backends learned `delete_chat_settings` (JSON/embedded and MongoDB) to make
+the cleanup real rather than cosmetic.
+
 ### 1.10.14 — 2026-10-25
 
 **Revoked API keys delete themselves after seven days.** A revoked key used to

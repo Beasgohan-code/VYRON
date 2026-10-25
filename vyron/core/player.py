@@ -999,6 +999,37 @@ class Player:
             except Exception as exc:  # a card is never worth losing the stop
                 logger.debug("queue-finished card failed in %s: %s", chat_id, exc)
 
+    async def abandon(self, chat_id: int) -> None:
+        """The bot is no longer in this chat: drop everything kept for it.
+
+        This is not `/stop`. A stop is a pause — the queue, the volume and the
+        loop mode wait for the next listener. Being removed is final: nothing
+        will ever play here again, so the queue, the poster card, the cached
+        stream state and the stored per-chat overrides all go. If the group is
+        deleted too, the call is gone already and `leave()` fails quietly.
+        """
+        chat_id = int(chat_id)
+        if self.queues.exists(chat_id):
+            await self.stop(chat_id, leave=True)
+        self.queues.drop(chat_id)
+        for table in (
+            self._settings_loaded,
+            self._in_call,
+        ):
+            table.discard(chat_id)
+        for table in (
+            self._recovered_at,
+            self._vc_attempts,
+            self._empty_checks,
+            self._locks,
+        ):
+            table.pop(chat_id, None)
+        self.schedule_save()
+        try:
+            await self.storage.delete_chat_settings(chat_id)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("could not forget chat settings for %s: %s", chat_id, exc)
+
     async def leave(self, chat_id: int) -> bool:
         state = self.queues.get(chat_id)
         state.reset_stream()

@@ -36,6 +36,10 @@ class Storage:
         data[key] = value
         await self.save_chat_settings(chat_id, data)
 
+    async def delete_chat_settings(self, chat_id: int) -> bool:
+        """Forget everything we knew about this chat (the bot was removed)."""
+        return False
+
     # favourites / history --------------------------------------------
     async def add_favorite(self, user_id: int, track: dict) -> bool:
         return False
@@ -212,6 +216,13 @@ class JsonStorage(Storage):
 
     async def chat_settings(self, chat_id: int) -> dict[str, Any]:
         return dict(self._data["chats"].get(str(chat_id), {}))
+
+    async def delete_chat_settings(self, chat_id: int) -> bool:
+        async with self._lock:
+            existed = self._data["chats"].pop(str(chat_id), None) is not None
+            if existed:
+                await self._flush()
+            return existed
 
     async def all_chat_ids(self) -> list[int]:
         return [int(k) for k in self._data["chats"].keys()]
@@ -628,6 +639,12 @@ class MongoStorage(Storage):
             {"$set": {**data, "chat_id": int(chat_id)}},
             True,
         )
+
+    async def delete_chat_settings(self, chat_id: int) -> bool:
+        result = await asyncio.to_thread(
+            self._db.chats.delete_one, {"chat_id": int(chat_id)}
+        )
+        return bool(getattr(result, "deleted_count", 0))
 
     async def all_chat_ids(self) -> list[int]:
         cursor = await asyncio.to_thread(
