@@ -839,13 +839,24 @@ class Downloader:
                     # A real file from a mirror or a catalogue: the extraction
                     # that was still running is no longer worth waiting for.
                     return tail.result()
-                try:
+                if ladder in finished and ladder.exception() is None:
                     # The extraction finished first: adopt its private file.
                     return self._adopt(ladder.result(), final)
-                except Exception as exc:
-                    errors.append(f"yt-dlp: {exc}")
+                if tail in finished:
+                    # Both engines have now been asked and neither produced a
+                    # file. Report both reasons instead of handing the caller a
+                    # tail it would only run a second time — and never an empty
+                    # sentence, which is what a listener would have been shown.
                     errors.extend(tail_errors)
-                    return None
+                    if ladder.done() and ladder.exception() is not None:
+                        errors.append(f"yt-dlp: {ladder.exception()}")
+                    elif not ladder.done():
+                        errors.append("yt-dlp: still extracting when the fallbacks gave up")
+                    raise DownloadError(" · ".join(errors) or "download failed")
+                # Only the extraction failed, and the fallbacks are still
+                # running: the caller's tail path takes it from here.
+                errors.append(f"yt-dlp: {ladder.exception()}")
+                return None
             finally:
                 for task in (ladder, tail):
                     if not task.done():

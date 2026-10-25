@@ -884,3 +884,37 @@ def test_a_dead_media_endpoint_is_silent():
             await server.close()
 
     asyncio.run(go())
+
+
+def test_a_failed_race_does_not_run_the_tail_twice(tmp_path, monkeypatch):
+    """Both engines were just asked; asking the loser again only adds latency."""
+    import time
+
+    from vyron.core import downloader as module
+
+    downloader = _downloader(tmp_path)
+    calls = {"tail": 0}
+
+    def slow_ytdlp(track, *, video, on_progress=None, dest=None):
+        time.sleep(0.2)  # the head start expires first, so the race happens
+        raise module.DownloadError("Failed to extract any player response")
+
+    async def failing_tail(track, *, on_progress=None, errors=None):
+        calls["tail"] += 1
+        await asyncio.sleep(0.05)
+        # The real tail records its reasons as each engine fails.
+        (errors if errors is not None else []).append("mirror: no downloadable URL")
+        raise module.DownloadError("mirror: no downloadable URL")
+
+    monkeypatch.setattr(module, "HEAD_START", 0.05)
+    monkeypatch.setattr(downloader, "_download_ytdlp", slow_ytdlp)
+    monkeypatch.setattr(downloader, "_audio_tail", failing_tail)
+
+    try:
+        asyncio.run(downloader.fetch(_yt_track("ytrace5")))
+    except module.DownloadError as exc:
+        text = str(exc)
+        assert "mirror" in text and text.strip(), text
+    else:  # pragma: no cover
+        raise AssertionError("a total failure must raise")
+    assert calls["tail"] == 1, calls  # the race already asked it once
