@@ -154,3 +154,30 @@ def test_the_download_card_survives_text_it_did_not_write():
     assert "alert(1)" in text and "<script>" not in text
     # a fraction outside 0..1 must clamp rather than draw a negative bar
     assert "100%" in text and "▱" not in text
+
+
+# ── the rich lane gets a second chance before it gives up ──────────────────
+def test_a_refused_rich_card_is_retried_without_the_optional_tags():
+    """One unsupported tag used to cost the whole rich card."""
+    from vyron.ui import rich
+
+    card = (
+        "<h2>🎧 ᴘʟᴀʏᴇʀ</h2><hr/>"
+        "<blockquote expandable><tg-thinking></tg-thinking> working</blockquote>"
+        "<aside>note</aside><footer>v1.0</footer>"
+    )
+    safe = rich.safe_markup(card)
+    assert "expandable" not in safe
+    assert "<tg-thinking>" not in safe
+    assert "<aside>" not in safe and "<blockquote>note</blockquote>" in safe
+    assert "<footer>" not in safe and "<i>v1.0</i>" in safe
+    assert "<h2>" in safe, "the part that makes it a rich card must survive"
+
+
+def test_the_rich_lane_can_explain_itself():
+    from vyron.ui import rich
+
+    line = rich.status()
+    assert isinstance(line, str) and line
+    if not rich.RICH_AVAILABLE:
+        assert "unavailable" in line

@@ -366,6 +366,16 @@ def register(client: Client) -> None:
                 "download → local file" if settings.play_from_disk else "stream URLs",
             )
         )
+        # Rich cards are the whole look of the bot; if Telegram refuses them
+        # this row is where the reason shows up instead of nowhere.
+        ui_state = rich.status()
+        rows.append(
+            _row(
+                f"{E('interface')} rich cards",
+                not ui_state.startswith(("unavailable", "off")),
+                rich.esc(ui_state),
+            )
+        )
 
         failures = sum(1 for _, value in rows if "<b>fail</b>" in value)
         head = B.banner(f"doctor {BULLET} v{__version__}", glyph="shield")

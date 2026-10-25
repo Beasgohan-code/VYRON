@@ -189,6 +189,55 @@ def normalize(markup: str) -> str:
     return "".join(parts)
 
 
+#: What went wrong the last time the rich lane refused a card. One line is
+#: enough for /doctor — and it is the difference between "rich messages are on"
+#: and "rich messages are on but Telegram keeps saying no".
+_last_rich_error: str = ""
+_rich_warned = False
+
+#: The constructs most likely to be refused by a Bot API build that is older
+#: than the one our cards assume. Dropping them is far better than dropping the
+#: whole rich card, which is what used to happen: one unsupported tag and the
+#: user got eighteen "━" characters instead of a heading.
+_SOFT_TAGS = re.compile(r"<tg-thinking\s*>\s*</tg-thinking>", re.I)
+
+
+def safe_markup(markup: str) -> str:
+    """The same card with the riskiest rich constructs removed."""
+    if not markup:
+        return ""
+    text = _SOFT_TAGS.sub("…", markup)
+    text = re.sub(r"(<blockquote)\s+expandable", r"\1", text, flags=re.I)
+    text = re.sub(r'(<table\b[^>]*?)\s+border="0"', r'\1 border="1"', text, flags=re.I)
+    text = re.sub(r"<aside>(.*?)</aside>", r"<blockquote>\1</blockquote>", text, flags=re.I | re.S)
+    text = re.sub(r"<footer\b[^>]*>(.*?)</footer>", r"<i>\1</i>", text, flags=re.I | re.S)
+    return text
+
+
+def _note_rich_failure(where: str, exc: BaseException) -> None:
+    global _last_rich_error, _rich_warned
+    _last_rich_error = f"{where}: {type(exc).__name__}: {exc}"
+    if not _rich_warned:
+        _rich_warned = True
+        logger.warning(
+            "rich %s refused (%s) — retrying without the optional tags, then "
+            "falling back to HTML",
+            where,
+            _last_rich_error,
+        )
+
+
+def status() -> str:
+    """One honest line about the rich lane, for /doctor."""
+    if not RICH_AVAILABLE:
+        return "unavailable — this Kurigram build has no send_rich_message"
+    if not rich_enabled():
+        return "off — RICH_MESSAGES is false or /uistyle turned it off"
+    if _last_rich_error:
+        return f"on, last refusal {_last_rich_error[:90]}"
+    return "on — sending rich cards"
+
+
 def to_html(markup: str) -> str:
     """Down-convert rich markup into classic parse_mode=HTML.
 
@@ -364,23 +413,26 @@ async def send(
     )
 
     if rich_ok:
-        try:
-            message = await client.send_rich_message(
-                chat_id=chat_id,
-                rich_message=InputRichMessage(html=normalize(markup)),
-                reply_markup=None if inline_buttons else keyboard,
-                reply_parameters=ReplyParameters(message_id=reply_to) if reply_to else None,
-                message_thread_id=thread_id,
-                disable_notification=silent,
-                protect_content=protect,
-                effect_id=effect_id,
-                ephemeral_message_parameters=eph,
-            )
-            if message is not None and eph is None:
-                _remember(chat_id, message.id)
-            return message
-        except Exception as exc:  # fall through to the HTML lane
-            logger.debug("rich send failed (%s) — falling back to HTML", exc)
+        for attempt, variant in enumerate((markup, safe_markup(markup))):
+            if attempt and variant == markup:
+                break
+            try:
+                message = await client.send_rich_message(
+                    chat_id=chat_id,
+                    rich_message=InputRichMessage(html=normalize(variant)),
+                    reply_markup=None if inline_buttons else keyboard,
+                    reply_parameters=ReplyParameters(message_id=reply_to) if reply_to else None,
+                    message_thread_id=thread_id,
+                    disable_notification=silent,
+                    protect_content=protect,
+                    effect_id=effect_id,
+                    ephemeral_message_parameters=eph,
+                )
+                if message is not None and eph is None:
+                    _remember(chat_id, message.id)
+                return message
+            except Exception as exc:  # try the safe variant, then the HTML lane
+                _note_rich_failure("send", exc)
 
     kwargs: dict[str, Any] = dict(
         chat_id=chat_id,
@@ -503,18 +555,21 @@ async def edit(
         and InputRichMessage is not None
         and _was_rich(chat_id, message_id)
     ):
-        try:
-            return await client.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                rich_message=InputRichMessage(html=normalize(markup)),
-                reply_markup=None if inline_buttons else keyboard,
-            )
-        except MessageNotModified:
-            return None
-        except Exception as exc:
-            logger.debug("rich edit failed (%s) — falling back", exc)
-            _forget(chat_id, message_id)
+        for attempt, variant in enumerate((markup, safe_markup(markup))):
+            if attempt and variant == markup:
+                break
+            try:
+                return await client.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    rich_message=InputRichMessage(html=normalize(variant)),
+                    reply_markup=None if inline_buttons else keyboard,
+                )
+            except MessageNotModified:
+                return None
+            except Exception as exc:
+                _note_rich_failure("edit", exc)
+        _forget(chat_id, message_id)
 
     try:
         return await client.edit_message_text(
