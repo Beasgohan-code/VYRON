@@ -7,6 +7,20 @@ Two version numbers move independently:
 
 ## Bot
 
+### 1.10.14 — 2026-10-25
+
+**Revoked API keys delete themselves after seven days.** A revoked key used to
+live in the store forever — a hash of a dead secret, growing a list nobody
+prunes. It is now kept for `REVOKED_GRACE_DAYS` (7) so `/apikeys` can still
+answer "did I rotate that one, or did it just stop working?", and then deleted
+outright: at boot, on every housekeeping sweep, and on demand from
+`/dbcleanup`. A revocation with no timestamp is never guessed at — it is left
+alone until something writes one.
+
+Both storage backends learned `delete_api_key` (JSON/embedded and MongoDB), the
+`/apikeys` card says how long a revoked key is kept, and `/dbstats` reports how
+many the last sweep removed.
+
 ### 1.10.13 — 2026-10-25
 
 **Everything faster: the download, the fallback, and the search behind them.**

@@ -1029,3 +1029,86 @@ def test_release_documents_name_the_current_version():
 
     assert f"### {API_VERSION}" in changelog
     assert __version__ != API_VERSION
+
+
+# ── revoked keys have a shelf life ─────────────────────────────────────────
+def test_a_key_revoked_eight_days_ago_is_deleted(tmp_path, monkeypatch):
+    """Seven days of "what was that key?" is enough; after that it is a liability."""
+    api, storage = _api(tmp_path, monkeypatch)
+
+    async def scenario():
+        old, _ = await api.issue(1, "old")
+        live, _ = await api.issue(1, "live")
+        recent, _ = await api.issue(1, "recent")
+
+        assert await api.revoke(1, old["prefix"])
+        assert await api.revoke(1, recent["prefix"])
+        # only the old one is past its grace period
+        await storage.update_api_key(old["id"], {"revoked_at": time.time() - 8 * 86400})
+
+        removed = await api.purge_revoked()
+
+        assert [item["label"] for item in removed] == ["old"]
+        labels = {item["label"] for item in await api.keys(1)}
+        assert labels == {"live", "recent"}
+
+    asyncio.run(scenario())
+
+
+def test_a_recent_revocation_is_kept_so_the_card_can_explain_it(tmp_path, monkeypatch):
+    api, _ = _api(tmp_path, monkeypatch)
+
+    async def scenario():
+        key, _ = await api.issue(2, "rotated")
+        assert await api.revoke(2, key["prefix"])
+        assert await api.purge_revoked() == []
+        listed = await api.keys(2)
+        assert listed and listed[0]["active"] is False
+        assert listed[0].get("revoked_at")
+
+    asyncio.run(scenario())
+
+
+def test_a_revocation_without_a_stamp_is_never_guessed_at(tmp_path, monkeypatch):
+    api, storage = _api(tmp_path, monkeypatch)
+
+    async def scenario():
+        key, _ = await api.issue(3, "ancient")
+        await storage.update_api_key(key["id"], {"active": False})
+        # no revoked_at: we cannot prove it is old, so it stays
+        assert await api.purge_revoked() == []
+        assert await api.keys(3)
+
+    asyncio.run(scenario())
+
+
+def test_the_grace_period_can_be_shortened(tmp_path, monkeypatch):
+    api, storage = _api(tmp_path, monkeypatch)
+
+    async def scenario():
+        key, _ = await api.issue(4, "yesterday")
+        await api.revoke(4, key["prefix"])
+        await storage.update_api_key(key["id"], {"revoked_at": time.time() - 2 * 86400})
+        assert await api.purge_revoked(days=30) == []
+        assert len(await api.purge_revoked(days=1)) == 1
+
+    asyncio.run(scenario())
+
+
+def test_the_housekeeping_sweep_reports_revoked_keys(tmp_path, monkeypatch):
+    from vyron.core import maintenance
+    from vyron.core import musicapi as musicapi_module
+
+    class _Stub:
+        async def purge_revoked(self, days=None):
+            assert days == musicapi_module.REVOKED_GRACE_DAYS
+            return [{"id": "gone"}]
+
+    monkeypatch.setattr(musicapi_module, "get_music_api", lambda: _Stub())
+    monkeypatch.setattr(runtime, "downloader", None)
+    monkeypatch.setattr(runtime, "storage", None)
+
+    removed = asyncio.run(maintenance.run_once())
+
+    assert removed["keys"] == 1
+    assert maintenance.status()["keys"] == 1

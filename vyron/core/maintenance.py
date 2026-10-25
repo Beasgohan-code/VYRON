@@ -5,6 +5,7 @@
 #
 #    * delete download files past `DOWNLOAD_CACHE_HOURS`
 #    * prune history/favourite rows past `MAINTENANCE_DAYS`
+#    * delete API keys revoked more than `REVOKED_GRACE_DAYS` ago (7 days)
 #
 #  Both are also available on demand (`/clearcache`, `/dbcleanup`); the loop
 #  just means a bot left running for weeks never fills the disk or the DB.
@@ -20,7 +21,7 @@ from vyron.runtime import runtime
 
 logger = logging.getLogger(__name__)
 
-_state: dict[str, float | int | None] = {"last": None, "files": 0, "rows": 0}
+_state: dict[str, float | int | None] = {"last": None, "files": 0, "rows": 0, "keys": 0}
 _task: asyncio.Task | None = None
 
 
@@ -30,9 +31,24 @@ def status() -> dict[str, object]:
         "last": _state["last"],
         "files": int(_state["files"] or 0),
         "rows": int(_state["rows"] or 0),
+        "keys": int(_state["keys"] or 0),
         "every_hours": settings.maintenance_hours,
         "days": settings.maintenance_days,
     }
+
+
+async def purge_keys(days: float | None = None) -> int:
+    """Delete API keys that were revoked more than *days* ago (default 7)."""
+    from vyron.core.musicapi import REVOKED_GRACE_DAYS, get_music_api
+
+    grace = REVOKED_GRACE_DAYS if days is None else days
+    try:
+        removed = await get_music_api().purge_revoked(grace)
+    except Exception as exc:  # pragma: no cover - housekeeping never raises
+        logger.debug("revoked-key purge failed: %s", exc)
+        return 0
+    _state["keys"] = len(removed)
+    return len(removed)
 
 
 async def run_once() -> dict[str, int]:
@@ -50,14 +66,20 @@ async def run_once() -> dict[str, int]:
             rows = sum(int(value) for value in removed.values())
         except Exception as exc:  # pragma: no cover - backend oddities
             logger.debug("database prune failed: %s", exc)
-    _state.update(last=time.time(), files=files, rows=rows)
-    if files or rows:
-        logger.info("housekeeping: %d files, %d rows removed", files, rows)
-    return {"files": files, "rows": rows}
+    keys = await purge_keys()
+    _state.update(last=time.time(), files=files, rows=rows, keys=keys)
+    if files or rows or keys:
+        logger.info(
+            "housekeeping: %d files, %d rows, %d revoked key(s) removed", files, rows, keys
+        )
+    return {"files": files, "rows": rows, "keys": keys}
 
 
 async def _loop() -> None:
     interval = max(1, settings.maintenance_hours) * 3600
+    # Keys first, and at boot: a revoked key past its grace period is a security
+    # artefact, not housekeeping, and the read is one small document.
+    await purge_keys()
     await asyncio.sleep(min(600, interval))  # don't sweep during the first minutes
     while True:
         await run_once()
@@ -86,4 +108,4 @@ async def stop() -> None:
     _task = None
 
 
-__all__ = ["run_once", "start", "status", "stop"]
+__all__ = ["purge_keys", "run_once", "start", "status", "stop"]

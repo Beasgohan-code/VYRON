@@ -428,7 +428,8 @@ def register(client: Client) -> None:
                 (
                     f"{E('spark')} last sweep",
                     f"{human_time(max(0.0, time.time() - float(sweep['last'])))} ago · "
-                    f"{sweep['files']} files · {sweep['rows']} rows",
+                    f"{sweep['files']} files · {sweep['rows']} rows · "
+                    f"{sweep.get('keys', 0)} revoked keys",
                 )
             )
         else:
@@ -471,6 +472,12 @@ def register(client: Client) -> None:
             logger.warning("prune failed: %s", exc)
             markup = B.note(f"{E('warn')} Cleanup failed: {rich.esc(truncate(str(exc), 140))}")
         else:
+            # The same sweep deletes API keys that were revoked more than a
+            # week ago: an owner asking for a cleanup should not have to wait
+            # for the background loop to get to them.
+            from vyron.core import maintenance
+
+            keys = await maintenance.purge_keys()
             total = sum(int(v) for v in removed.values())
             markup = (
                 B.banner("database pruned", glyph="check")
@@ -479,13 +486,15 @@ def register(client: Client) -> None:
                         (f"{E('clock')} older than", f"<b>{days} days</b>"),
                         ("history rows", f"<b>{removed.get('history', 0)}</b>"),
                         ("favourite rows", f"<b>{removed.get('favorites', 0)}</b>"),
+                        (f"{E('key')} revoked keys", f"<b>{keys}</b> deleted"),
                         (f"{E('cloud')} backend", f"<b>{storage.backend}</b>"),
                     ]
                 )
                 + B.note(
                     "Nothing to remove — the database is already tidy."
-                    if not total
-                    else f"{E('spark')} {total} row{'s' if total != 1 else ''} removed."
+                    if not (total or keys)
+                    else f"{E('spark')} {total} row{'s' if total != 1 else ''} removed"
+                    + (f" · {keys} revoked key{'s' if keys != 1 else ''} deleted." if keys else ".")
                 )
             )
         if status:

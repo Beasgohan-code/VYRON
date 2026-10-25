@@ -89,6 +89,9 @@ class Storage:
     async def update_api_key(self, key: str, patch: dict) -> bool:
         return False
 
+    async def delete_api_key(self, key: str) -> bool:
+        return False
+
     async def bump_api_key(self, key: str, *, uses: int = 1, size: int = 0, stamp: float | None = None) -> None:
         return None
 
@@ -352,6 +355,19 @@ class JsonStorage(Storage):
             if record is None:
                 return False
             record.update(patch)
+            await self._flush()
+            return True
+
+    async def delete_api_key(self, key: str) -> bool:
+        """Remove a key row outright (housekeeping of revoked keys)."""
+        async with self._lock:
+            bucket = self._data.setdefault("api_keys", {})
+            record = self._find_key(bucket, key)
+            if record is None:
+                return False
+            for reference, candidate in list(bucket.items()):
+                if candidate is record:
+                    bucket.pop(reference, None)
             await self._flush()
             return True
 
@@ -780,6 +796,13 @@ class MongoStorage(Storage):
             return bool(result.modified_count or result.matched_count)
 
         return bool(await asyncio.to_thread(_update))
+
+    async def delete_api_key(self, key: str) -> bool:
+        def _delete():
+            result = self._db.api_keys.delete_one(self._key_query(str(key)))
+            return bool(result.deleted_count)
+
+        return bool(await asyncio.to_thread(_delete))
 
     async def export_user(self, user_id: int) -> dict:
         def _load() -> dict:

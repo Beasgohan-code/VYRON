@@ -1724,6 +1724,16 @@ def _key_action_rows(keys: list[dict], *, limit: int = 8) -> str:
     return B.grid(buttons, columns=2)
 
 
+def _revoked_grace() -> int:
+    """`REVOKED_GRACE_DAYS`, imported late so the card never cycles a module."""
+    try:
+        from vyron.core.musicapi import REVOKED_GRACE_DAYS
+
+        return int(REVOKED_GRACE_DAYS)
+    except Exception:  # pragma: no cover - the constant always exists
+        return 7
+
+
 def api_keys_card(keys: list[dict], base: str) -> str:
     if not keys:
         return (
@@ -1747,7 +1757,8 @@ def api_keys_card(keys: list[dict], base: str) -> str:
         + B.table(["Label", "Key", "Scopes", "Uses", "State"], rows)
         + B.note(
             f"{E('shield')} Keys are stored as SHA-256 hashes. The full value is only shown "
-            f"when it is minted {DASH} rotate anything you have lost."
+            f"when it is minted {DASH} rotate anything you have lost. "
+            f"Revoked keys are deleted after {_revoked_grace()} days."
         )
         + _key_action_rows(keys)
         + B.row(

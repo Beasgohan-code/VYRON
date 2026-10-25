@@ -47,6 +47,11 @@ KEY_MARKER = "vyrn_"
 KEY_BODY_BYTES = 30  # token_urlsafe(30) → 40 url-safe characters
 PREFIX_LENGTH = 12  # "vyrn_" + 7 body chars, enough for a unique lookup
 MAX_KEYS_PER_OWNER = 25
+#: A revoked key is kept this long and then deleted for good. The grace period
+#: exists so `/apikeys` can still show what was revoked and by whom ("did I
+#: rotate that one, or did it just stop working?"); after it, keeping the record
+#: is only a liability — a hash of a dead secret, sitting in the store forever.
+REVOKED_GRACE_DAYS = 7
 RATE_WINDOW = 60.0
 KEY_CACHE_SECONDS = 10.0
 
@@ -290,6 +295,49 @@ class MusicAPI:
                 patch["revoked_by"] = int(by)
             return await self._patch(item, patch)
         return False
+
+    async def purge_revoked(self, days: float | None = None) -> list[dict[str, Any]]:
+        """Delete keys revoked more than *days* ago (default seven).
+
+        Returns the records that were removed, so a caller can journal or count
+        them. Runs from the housekeeping loop and once at boot; also safe to
+        call by hand. Never raises on a backend hiccup — a failed delete simply
+        leaves the row for the next sweep.
+        """
+        grace = REVOKED_GRACE_DAYS if days is None else max(0.0, float(days))
+        cutoff = time.time() - grace * 86400
+        removed: list[dict[str, Any]] = []
+        storage = self._storage()
+        for record in await self._load(fresh=True):
+            if record.get("active", True):
+                continue
+            revoked_at = record.get("revoked_at")
+            try:
+                stamp = float(revoked_at or 0.0)
+            except (TypeError, ValueError):
+                stamp = 0.0
+            if not stamp or stamp > cutoff:
+                # No revocation stamp means we cannot prove it is old enough:
+                # leave it, and let the next revoke write one.
+                continue
+            reference = str(record.get("id") or record.get("key") or record.get("prefix") or "")
+            if not reference:
+                continue
+            deleted = False
+            if storage is not None:
+                try:
+                    deleted = bool(await storage.delete_api_key(reference))
+                except Exception as exc:  # pragma: no cover - backend hiccup
+                    logger.debug("could not delete revoked key %s: %s", record.get("prefix"), exc)
+            self._memory.pop(reference, None)
+            if deleted or storage is None:
+                removed.append(record)
+        if removed:
+            self._invalidate()
+            logger.info(
+                "deleted %d revoked API key(s) older than %s day(s)", len(removed), grace
+            )
+        return removed
 
     async def rotate(
         self, owner_id: int, identifier: str, *, by: int | None = None

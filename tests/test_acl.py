@@ -162,6 +162,18 @@ def test_cast_vote_reports_disabled_and_duplicate(monkeypatch):
 
 
 # ── housekeeping ───────────────────────────────────────────────────────────
+def _stub_purge(count: int):
+    """A `maintenance.purge_keys` that reports *count* deletions."""
+
+    async def purge(days=None):
+        maintenance_state = count
+        from vyron.core import maintenance
+
+        maintenance._state["keys"] = maintenance_state
+        return maintenance_state
+
+    return purge
+
 def test_run_once_reports_what_it_removed(monkeypatch):
     from vyron.core import maintenance
 
@@ -174,11 +186,16 @@ def test_run_once_reports_what_it_removed(monkeypatch):
             assert days == 30
             return {"history": 2, "favorites": 1}
 
+    class FakeAPI:
+        async def purge_revoked(self, days=None):
+            return [{"id": "gone"}]
+
     monkeypatch.setattr(maintenance.runtime, "downloader", FakeDownloader())
     monkeypatch.setattr(maintenance.runtime, "storage", FakeStorage())
+    monkeypatch.setattr(maintenance, "purge_keys", _stub_purge(1))
 
     result = asyncio.run(maintenance.run_once())
-    assert result == {"files": 3, "rows": 3}
+    assert result == {"files": 3, "rows": 3, "keys": 1}
     assert maintenance.status()["files"] == 3
 
 
@@ -196,7 +213,7 @@ def test_run_once_survives_a_broken_backend(monkeypatch):
     monkeypatch.setattr(maintenance.runtime, "downloader", AngryDownloader())
     monkeypatch.setattr(maintenance.runtime, "storage", AngryStorage())
 
-    assert asyncio.run(maintenance.run_once()) == {"files": 0, "rows": 0}
+    assert asyncio.run(maintenance.run_once()) == {"files": 0, "rows": 0, "keys": 0}
 
 
 # ── MongoDB backend (fake driver, no network) ─────────────────────────────
