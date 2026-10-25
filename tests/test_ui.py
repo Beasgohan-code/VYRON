@@ -105,8 +105,16 @@ def test_the_live_block_says_paused_and_live():
 
 
 def test_the_now_playing_card_is_the_shape_the_user_asked_for():
-    """1 / ✨ Now playing / Artist - Title / ⏱ Duration / 👥 Requested by,
-    then the live block — exactly the card they pasted."""
+    """The card they pasted, line for line:
+
+        ✨ Now playing
+
+        Chris Grey - LET THE WORLD BURN (Official Lyric Video)
+
+        ⏱ Duration: 2:44
+
+        👥 Requested by: user
+    """
     from vyron.ui.rich import to_plain_text
 
     track = Track(
@@ -118,16 +126,24 @@ def test_the_now_playing_card_is_the_shape_the_user_asked_for():
         requested_by=7,
     )
     state = ChatState(chat_id=1, current=track, playing=True, offset=0, volume=100)
-    lines = to_plain_text(cards.now_playing_card(state)).splitlines()
+    paragraphs = to_plain_text(cards.now_playing_card(state)).split("\n\n")
 
-    assert lines[0] == "1"
-    assert lines[1].endswith("now playing") and "✨" in lines[1]
-    assert lines[2] == "Chris Grey - LET THE WORLD BURN (Official Lyric Video)"
-    assert lines[3].endswith("duration: 2:44") and "⏱" in lines[3]
-    assert lines[4].endswith("requested by: Rinu") and "👥" in lines[4]
-    # and the live block still follows it
-    assert any("streaming" in line for line in lines[5:])
-    assert len(lines[5]) == 0
+    assert paragraphs[0] == f"{E('spark')} Now playing"
+    assert paragraphs[1] == "Chris Grey - LET THE WORLD BURN (Official Lyric Video)"
+    assert paragraphs[2] == f"{E('clock')} Duration: 2:44"
+    assert paragraphs[3] == f"{E('users')} Requested by: Rinu"
+    # the live block follows the header, it does not replace it
+    assert "streaming" in paragraphs[4]
+
+
+def test_the_requested_by_line_survives_an_anonymous_track():
+    """No credit is still a line — a card that changes shape looks broken."""
+    from vyron.ui.rich import to_plain_text
+
+    track = Track(id="x", title="Rain", uploader="", duration=200)
+    state = ChatState(chat_id=1, current=track, playing=True)
+    paragraphs = to_plain_text(cards.now_playing_card(state)).split("\n\n")
+    assert paragraphs[3] == f"{E('users')} Requested by: user"
 
 
 def test_queue_card_pages():

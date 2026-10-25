@@ -7,6 +7,31 @@ Two version numbers move independently:
 
 ## Bot
 
+### 1.9.5 — 2026-10-25
+
+* **The now-playing message is the mock, line for line.** Exactly four facts,
+  one per paragraph, in plain title case — no decoration above them, no number
+  in front::
+
+      ✨ Now playing
+
+      Chris Grey - LET THE WORLD BURN (Official Lyric Video)
+
+      ⏱ Duration: 2:44
+
+      👥 Requested by: user
+
+  The live block (bar, `📡 streaming · 1:03 · 39% · 2:44`, `🔊 100%`) follows
+  underneath it, and `up next` after that when something is queued.
+* **`Requested by:` always has a value.** An uncredited track says `user`
+  instead of dropping the line, so the card does not change height between
+  songs.
+* **Autoplay is no longer printed on the card.** It is on by default, so the
+  badge was a line that never changed anything; `/autoplay` still reports it.
+* **Fixed: the now-playing helpers were defined twice.** 1.9.4 shipped two
+  copies of the heading/header/flags helpers; the second silently won.
+* Version 1.9.5.
+
 ### 1.9.4 — 2026-10-25
 
 * **The now-playing card is the card people already know.** One look at the

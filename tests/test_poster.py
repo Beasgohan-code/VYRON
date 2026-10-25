@@ -145,9 +145,8 @@ def test_announce_falls_back_to_the_text_card(monkeypatch):
     bot = _PhotoBot()
     state = _state()
     asyncio.run(nowplaying.announce(bot, 1, state))
-    from vyron.ui.theme import small_caps
 
-    assert bot.texts and small_caps("now playing") in bot.texts[0]["text"]
+    assert bot.texts and "Now playing" in bot.texts[0]["text"]
     assert state.np_message_id == 502
 
 

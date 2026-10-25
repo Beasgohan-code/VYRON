@@ -460,119 +460,45 @@ def _np_heading(track: Track) -> str:
 
 
 def _np_header(track: Track) -> list[str]:
-    """The five lines every now-playing surface starts with::
+    """The card, exactly as the user asked for it::
 
-        1
         ✨ Now playing
-        Chris Grey - LET THE WORLD BURN (Official Lyric Video)
-        ⏱ Duration: 2:44
-        👥 Requested by: Rinu
 
-    The number is the track's place in the play order — what is playing is
-    always 1 — and it is printed even with an empty queue so the card does not
-    change shape depending on what happens to be queued.
+        Chris Grey - LET THE WORLD BURN (Official Lyric Video)
+
+        ⏱ Duration: 2:44
+
+        👥 Requested by: user
+
+    One fact per line, in the words people use, a blank line between them so
+    nothing reads as a paragraph. Labels are plain title case — display-small-
+    caps belongs to the decorated cards, not to a message you glance at.
+
+    ``Requested by`` keeps its line even when nobody is credited, because a
+    now-playing card that changes shape between tracks looks broken.
     """
     total = int(track.duration or 0)
-    length = fmt_duration(total) if total else small_caps("live")
-    lines = [
-        "<b>1</b>",
-        f"{E('spark')} <b>{small_caps('now playing')}</b>",
+    length = fmt_duration(total) if total else "live"
+    return [
+        f"{E('spark')} <b>Now playing</b>",
         f"<b>{_np_heading(track)}</b>",
-        f"{E('clock')} <b>{small_caps('duration')}:</b> <code>{length}</code>",
+        f"{E('clock')} <b>Duration:</b> <code>{length}</code>",
+        f"{E('users')} <b>Requested by:</b> {_requester(track) or 'user'}",
     ]
-    requester = _requester(track)
-    if requester:
-        lines.append(f"{E('users')} <b>{small_caps('requested by')}:</b> {requester}")
-    return lines
 
 
 def _np_flags(state: ChatState, catalog=None) -> list[str]:
-    """Loop, 24/7, autoplay and how much is waiting — one quiet line, if any."""
+    """Loop, 24/7 and how much is waiting — one quiet line, if any.
+
+    Autoplay is deliberately not here: it is on by default, so printing it on
+    every card was a line of noise that never changed. ``/autoplay`` still
+    says whether it is on.
+    """
     flags = []
     if getattr(state.loop, "value", "off") != "off":
         flags.append(f"{E('loop')} {state.loop.label}")
     if state.always_on:
         flags.append(f"{E('clock')} 24/7")
-    if state.autoplay:
-        flags.append(f"{E('spark')} autoplay")
-    if state.queue:
-        queued = (
-            catalog.t("np.queued", count=len(state.queue))
-            if catalog is not None
-            else f"{len(state.queue)} queued"
-        )
-        flags.append(f"{E('queue')} {queued}")
-    return [f"<i>{' · '.join(flags)}</i>"] if flags else []
-
-
-def _np_up_next(state: ChatState, catalog=None) -> list[str]:
-    """One line for what follows, with the queue length only when it matters."""
-    if not state.queue:
-        return []
-    upcoming = state.queue[0]
-    label = (
-        catalog.t("np.up_next")
-        if catalog is not None
-        else small_caps("up next")
-    )
-    line = (
-        f"{E('skip')} <i>{label}</i> "
-        f"{esc(truncate(upcoming.title, 40))} · {fmt_duration(upcoming.duration)}"
-    )
-    if len(state.queue) > 1:
-        line += f" · <i>{len(state.queue)} queued</i>"
-    return [line]
-
-
-def _np_heading(track: Track) -> str:
-    """``Artist - Title``, linked so a tap opens the video.
-
-    The link is invisible: what a person reads is the line they expect, and
-    the words are the whole message — never a bare URL.
-    """
-    artist = esc(truncate(track.uploader, 40))
-    title = esc(truncate(track.title, 64))
-    text = f"{artist} - {title}" if artist else title
-    url = track.watch_url
-    return f'<a href="{esc(url)}">{text}</a>' if url else text
-
-
-def _np_header(track: Track) -> list[str]:
-    """The five lines every now-playing surface starts with::
-
-        1
-        ✨ Now playing
-        Chris Grey - LET THE WORLD BURN (Official Lyric Video)
-        ⏱ Duration: 2:44
-        👥 Requested by: Rinu
-
-    The number is the track's place in the play order — what is playing is
-    always 1 — and it is printed even with an empty queue so the card does not
-    change shape depending on what happens to be queued.
-    """
-    total = int(track.duration or 0)
-    length = fmt_duration(total) if total else small_caps("live")
-    lines = [
-        "<b>1</b>",
-        f"{E('spark')} <b>{small_caps('now playing')}</b>",
-        f"<b>{_np_heading(track)}</b>",
-        f"{E('clock')} <b>{small_caps('duration')}:</b> <code>{length}</code>",
-    ]
-    requester = _requester(track)
-    if requester:
-        lines.append(f"{E('users')} <b>{small_caps('requested by')}:</b> {requester}")
-    return lines
-
-
-def _np_flags(state: ChatState, catalog=None) -> list[str]:
-    """Loop, 24/7, autoplay and how much is waiting — one quiet line, if any."""
-    flags = []
-    if getattr(state.loop, "value", "off") != "off":
-        flags.append(f"{E('loop')} {state.loop.label}")
-    if state.always_on:
-        flags.append(f"{E('clock')} 24/7")
-    if state.autoplay:
-        flags.append(f"{E('spark')} autoplay")
     if state.queue:
         queued = (
             catalog.t("np.queued", count=len(state.queue))
@@ -619,12 +545,10 @@ def now_playing_card(state: ChatState, track: Track | None = None) -> str:
             )
         )
 
-    lines = _np_header(track)
-    lines.append("")
-    lines.append(progress_block(state, track))
-    lines += _np_flags(state)
-    lines += _np_up_next(state)
-    return "\n".join(lines)
+    # One fact per paragraph, then the live block underneath: the header is
+    # what the song *is*, the block is what it is *doing*.
+    rest = [progress_block(state, track), *_np_flags(state), *_np_up_next(state)]
+    return "\n\n".join(_np_header(track)) + "\n\n" + "\n".join(rest)
 
 
 def now_playing_caption(state: ChatState, catalog=None) -> str:
@@ -642,14 +566,12 @@ def now_playing_caption(state: ChatState, catalog=None) -> str:
         status_label = catalog.t("np.paused" if state.paused else "np.streaming")
         live_label = catalog.t("np.live")
 
-    lines = _np_header(track)
-    lines.append("")
-    lines.append(
-        progress_block(state, track, status_label=status_label, live_label=live_label)
-    )
-    lines += _np_flags(state, catalog)
-    lines += _np_up_next(state, catalog)
-    return "\n".join(lines)
+    rest = [
+        progress_block(state, track, status_label=status_label, live_label=live_label),
+        *_np_flags(state, catalog),
+        *_np_up_next(state, catalog),
+    ]
+    return "\n\n".join(_np_header(track)) + "\n\n" + "\n".join(rest)
 
 
 def now_playing_dm_caption(
