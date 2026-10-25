@@ -14,9 +14,12 @@ import time
 # already played, light dashes for what is left, and a ring as the playhead.
 # It is the shape people already read in every music bot — it survives being
 # half a centimetre tall on a phone, which a thin line does not.
-BAR_FULL = "█"
-BAR_EMPTY = "▬"
-KNOB = "◉"
+# Box drawing, not blocks: "█"/"▬" render as a solid highlight and a hairline
+# on iOS, which is what made the progress bar look like a stray character and a
+# long rule. Heavy-vs-light strokes read as a bar on every client.
+BAR_FULL = "━"
+BAR_EMPTY = "─"
+KNOB = "●"
 
 def parse_duration(value: str | int | float | None) -> int:
     """Parse ``1:02:03``, ``3:45``, ``95`` or ``'95'`` into seconds."""

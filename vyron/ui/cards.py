@@ -653,32 +653,22 @@ def player_panel(state: ChatState, track: Track | None = None) -> str:
     # colour for what it does: primary = move, success = forward, danger =
     # stop. A rich message carries its own buttons, so no keyboard is attached
     # underneath it (two button sets under one card is what `rich.send` avoids).
-    volume = int(getattr(state, "volume", 0) or 0)
-    controls = (
-        B.row(
-            B.btn(
-                f"{E('resume')} Resume" if paused else f"{E('pause')} Pause",
-                data="v:resume" if paused else "v:pause",
-                style="primary",
-            ),
-            B.btn(f"{E('skip')} Skip", data="v:skip", style="success"),
-            B.btn(f"{E('stop')} Stop", data="v:stop", style="danger"),
-        )
-        + B.row(
-            B.btn("⏪ 15s", data="v:seek:-15"),
-            B.btn(f"{E('volume')} {volume}%", data="v:vol:show"),
-            B.btn("⏩ 15s", data="v:seek:15"),
-        )
-        + B.row(
-            B.btn(f"{E('loop')} {state.loop.label}", data="v:loop"),
-            B.btn(f"{E('shuffle')} Shuffle", data="v:shuffle"),
-            B.btn(f"{E('queue')} Queue", data="v:queue:0"),
-        )
-        + B.row(
-            B.btn(f"{E('favorite')} Save", data="v:fav"),
-            B.btn(f"{E('lyrics')} Lyrics", data="v:lyrics"),
-            B.btn(f"{E('close')} Close", data="v:close", style="danger"),
-        )
+    # The same six controls as the reply keyboard — two rows, not four. A card
+    # buried under twelve buttons is a card nobody reads, which is exactly what
+    # the phone screenshot showed. The rest live where they belong: /seek,
+    # /volume, /shuffle, /fav, /lyrics and /queue.
+    controls = B.row(
+        B.btn(
+            f"{E('resume')} Resume" if paused else f"{E('pause')} Pause",
+            data="v:resume" if paused else "v:pause",
+            style="primary",
+        ),
+        B.btn(f"{E('skip')} Skip", data="v:skip", style="success"),
+        B.btn(f"{E('stop')} Stop", data="v:stop", style="danger"),
+    ) + B.row(
+        B.btn(f"{E('loop')} Loop {state.loop.label}", data="v:loop"),
+        B.btn(f"{E('queue')} Queue", data="v:queue:0"),
+        B.btn(f"{E('close')} Close", data="v:close", style="danger"),
     )
 
     head = (

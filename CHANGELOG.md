@@ -71,6 +71,20 @@ Also fixed for both lanes:
 * `/np` and the Now playing button show the song the way it is actually named
   (`Chris Grey - LET THE WORLD BURN`, not a repost handle).
 
+**Six buttons, not twelve.** The now-playing message arrived under four rows of
+keyboard — pause, skip, stop, −15s, volume, +15s, loop, shuffle, queue, save,
+lyrics, close — which on a phone is a keyboard with a card attached to it. It
+is now the shape Videl and Shizu ship: `[Pause][Skip][Stop]` /
+`[Loop off][Queue][Close]`. Everything that moved is still a command — `/seek`,
+`/volume`, `/shuffle`, `/fav`, `/lyrics` — and the rich panel carries the same
+six coloured buttons inside the message.
+
+The progress bar was drawn with `█` and `▬`, which iOS renders as a solid
+highlight and a hairline: one bright square, a dot, then a long grey rule. It
+is now `━` / `─` / `●`, which reads as a bar on every client. And when the
+poster cannot be drawn (no Pillow, no font, a render bug), the chat gets the
+song's **cover art** as the picture instead of dropping to a text card.
+
 Also in this build: mastheads are real headings in the rich lane and a quoted
 line (not a wall of `━`) in the classic one, a refused rich card is retried
 without its optional tags instead of falling back to plain HTML, `/doctor` says

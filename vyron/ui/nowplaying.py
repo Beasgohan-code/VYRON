@@ -156,6 +156,13 @@ async def announce(
             track=track.id,
             pillow=bool(thumbnails.PIL_AVAILABLE),
         )
+    if image is None and want_poster:
+        # No drawn poster (no Pillow, no font, a render bug). Send the song's
+        # own cover instead of dropping to a text card: a picture is what this
+        # message is for, and the CDN already has one.
+        from vyron.utils.net import fetch_bytes
+
+        image = await fetch_bytes(track.thumbnail, limit=1_500_000) if track.thumbnail else None
     message = None
     if image:
         message = await rich.send_photo(

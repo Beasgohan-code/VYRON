@@ -431,3 +431,42 @@ def test_a_fallback_table_does_not_end_its_line_in_a_dot():
     assert "one" in html and "two" in html
     assert not html.rstrip().endswith("·")
     assert all(not line.rstrip().endswith("·") for line in html.splitlines())
+
+
+def test_the_now_playing_keyboard_stays_six_buttons():
+    """A card buried under twelve buttons is a card nobody reads.
+
+    The phone screenshot had four rows of them. Videl ships five, Shizu six;
+    everything else here is a command (/seek /volume /shuffle /fav /lyrics).
+    """
+    from vyron.ui import keyboards
+
+    state = _panel_state()
+    markup = keyboards.now_playing(state)
+    buttons = [button for row in markup.inline_keyboard for button in row]
+    assert len(buttons) == 6, [button.text for button in buttons]
+    labels = " ".join(button.text.lower() for button in buttons)
+    for expected in ("pause", "skip", "stop", "loop", "queue", "close"):
+        assert expected in labels
+
+
+def test_the_rich_panel_shows_the_same_six_controls():
+    from vyron.ui import rich
+
+    rich.set_rich_enabled(True)
+    try:
+        markup = cards.player_panel(_panel_state())
+        assert markup.count("<tg-button ") == 6
+        assert markup.count("<tg-button-row>") == 2
+    finally:
+        rich.set_rich_enabled(None)
+
+
+def test_the_progress_bar_is_drawn_with_box_rules():
+    """"█"/"▬" render as a solid highlight and a hairline on iOS."""
+    from vyron.ui.progress import progress_bar
+
+    bar = progress_bar(80, 160, length=15)
+    assert bar.startswith("━") and "●" in bar and "─" in bar
+    assert "█" not in bar and "▬" not in bar
+    assert len(bar) == 15

@@ -244,3 +244,30 @@ def test_a_poster_refresh_edits_the_caption_in_place(monkeypatch):
     asyncio.run(nowplaying.announce(bot, 1, state, edit=True))
     assert bot.captions, "the live clock must be a caption edit"
     assert not bot.texts
+
+
+def test_the_cover_is_sent_when_the_poster_cannot_be_drawn(monkeypatch):
+    """No Pillow / no font / a render bug must not cost the chat its picture.
+
+    It fell back to a *text* card, which is how a chat that should have shown
+    artwork ended up with a paragraph and a keyboard.
+    """
+    from vyron.ui import nowplaying
+
+    async def no_poster(state, track, **_):
+        return None
+
+    async def cover(url, *, limit=0):
+        return b"\xff\xd8cover"
+
+    monkeypatch.setattr(nowplaying, "poster", no_poster)
+    monkeypatch.setattr("vyron.utils.net.fetch_bytes", cover)
+
+    bot = _PhotoBot()
+    state = _state()
+    state.current.thumbnail = "https://i.ytimg.com/vi/x/hqdefault.jpg"
+    asyncio.run(nowplaying.announce(bot, 1, state))
+
+    assert bot.photos, "the cover is still a picture"
+    assert bot.photos[0]["caption"]
+    assert state.np_message_id == 501

@@ -69,21 +69,15 @@ def now_playing(state: ChatState, *, is_fav: bool = False) -> KM:
         if state.paused
         else _btn(f"{G('pause')} Pause", "v:pause")
     )
+    # Six buttons, two rows — the shape Videl and Shizu ship, and the most a
+    # phone can show under a card before the keyboard becomes the message.
+    # Everything that moved out is still a command: /seek /volume /shuffle
+    # /fav /lyrics, and /queue shows the rest of the controls.
     rows = [
         [play_pause, _btn(f"{G('skip')} Skip", "v:skip"), _btn(f"{G('stop')} Stop", "v:stop")],
         [
-            _btn("⏪ 15s", "v:seek:-15"),
-            _btn(f"{G('volume')} {state.volume}%", "v:vol:show"),
-            _btn("⏩ 15s", "v:seek:15"),
-        ],
-        [
-            _btn(f"{G('loop')} {state.loop.label}", "v:loop"),
-            _btn(f"{G('shuffle')} Shuffle", "v:shuffle"),
+            _btn(f"{G('loop')} Loop {state.loop.label}", "v:loop"),
             _btn(f"{G('queue')} Queue", "v:queue:0"),
-        ],
-        [
-            _btn(f"{G('favorite')} {'Saved' if is_fav else 'Save'}", "v:fav"),
-            _btn(f"{G('lyrics')} Lyrics", "v:lyrics"),
             _btn(f"{G('back')} Close", "v:close"),
         ],
     ]
