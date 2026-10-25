@@ -7,6 +7,53 @@ Two version numbers move independently:
 
 ## Bot
 
+### 1.10.19 — 2026-10-25
+
+**A search stops when it has a page, not when it has the sixth result.** The
+Render log had `POST /api/search` taking 4.8–6.3 s: four sources were asked
+one after another and every one of them had to answer before anything was
+shown. Now a search returns as soon as it has half a page (never fewer than
+two, never more than asked for) and the rest is left running in the background
+for the next keystroke. Same results, a fraction of the wait.
+
+**Every name the other bots use now works here.** Shizu, Videl and Fallen
+taught their users `/end`, `/q`, `/next`, `/cleanup`, `/config`, `/rmplaylist`,
+`/asspfp`, `/setlang` and thirty more. All 38 of them are **aliases on the
+handler that already exists** — `/end` *is* `/stop`, not a second `/stop` that
+can drift — so a group that switches bots keeps typing what it knows and gets
+the same behaviour, the same card and the same permissions.
+
+**`/setlang <code>` sets it in one message.** The picker is four taps and a
+round trip; typing `/setlang es` (or `/language es`) now validates the code
+against the shipped catalogues, refuses one that does not exist with the list
+of the ones that do, and keeps the admin-only rule intact.
+
+**A working card can no longer outlive its handler.** The card that says
+`🔎 SEARCHING … nearly there` is kept alive by a ticker, and the ticker used to
+stop after its last stage. If the handler died — one unhandled exception was
+enough — the card sat there forever: the bot looked like it was about to play
+something and never did. The ticker now ends the card itself, and a search that
+raises becomes a real "nothing for that" card instead of a promise.
+
+**A walled server no longer asks YouTube to search.** Every query was spending
+six seconds on socket timeouts against an endpoint that was already answering
+"you are a bot", then falling back to catalogues that had the answer in one
+second. While the wall is known, YouTube's own search endpoints are skipped
+entirely, so a search is as fast as the catalogues that can actually play.
+
+**The stream budget counts tracks, not re-requests.** A seek, a pause toggle, a
+retry after a 429 — each one counted as a new stream, so one listener on two
+songs reached the 30-a-minute limit, got a 429, retried, and was refused again.
+The same track is the same stream for fifteen minutes; only a genuinely new
+track counts.
+
+**If only the assistant is kicked, the queue is cleared and the group is
+told.** The assistant is the account that joins the voice chat. A group that
+removed just that account used to keep a queue that could never play again:
+every track timed out, ten seconds at a time, and nothing ever said why.
+That removal is now recognised for what it is — playback stops, the queue is
+dropped and one card explains what an admin has to add back.
+
 ### 1.10.18 — 2026-10-25
 
 **A walled deployment stops re-proving the wall on every track.** The Render log
@@ -18,6 +65,13 @@ catalogue copy (same song, its own audio) — are now asked **together**, and th
 first real answer wins. The yt-dlp ladder still runs if both fail, but it is no
 longer the default path on a blocked host. A tap that took 15 s resolves in one
 or two.
+
+**A search stops when it has a page, not when it has the sixth result.** The
+catalogue lane only stopped at `limit`, so a query the engines could partly
+answer waited out the whole four-second budget for results that were never
+coming — the `slow request POST /api/search (4-6 s)` lines in the log. Half a
+page plus one is now enough to hand back; the lanes still running are cheaper to
+cancel than to await.
 
 **A stale button tap is not a crash.** `QUERY_ID_INVALID` means the tap was older
 than Telegram's answer window — normal in a busy group, and it was filling the

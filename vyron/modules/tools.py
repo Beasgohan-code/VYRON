@@ -17,7 +17,7 @@ from vyron.utils.commands import cmd
 
 
 def register(client: Client) -> None:
-    @client.on_message(cmd(["lyrics"]))
+    @client.on_message(cmd(["lyrics", "lyric", "ly"]))
     async def _lyrics(_: Client, message: Message) -> None:
         if not runtime.lyrics:
             return

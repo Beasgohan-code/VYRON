@@ -1122,6 +1122,42 @@ def test_a_junk_id_is_still_unknown(monkeypatch):
     assert asyncio.run(audio.lookup_playable("not-a-song", user_id=0)) is None
 
 
+def test_the_same_track_again_is_not_a_new_stream():
+    """The production loop: 429 → the browser retries → the retry is refused.
+
+    One listener on one song was reaching the per-minute limit, because every
+    re-request (a seek, a pause toggle, a retry after a 429) counted as a fresh
+    track. A repeat of the same track is the same stream.
+    """
+    from vyron.web.budget import Budget, BudgetExceeded
+
+    budget = Budget(per_minute=2, per_hour=10, per_user=2, total=3)
+    budget.check("u1", media="a")
+    budget.start("u1", media="a")
+    for _ in range(20):                     # seeks, retries, lock-screen toggles
+        budget.check("u1", media="a")
+        budget.start("u1", media="a")
+    budget.check("u1", media="b")           # a real new track still counts
+    budget.start("u1", media="b")
+    with pytest.raises(BudgetExceeded):
+        budget.check("u1", media="c")
+    # …and the track that was refused is not refused on its *repeat*
+    budget.check("u1", media="a")
+
+
+def test_a_repeat_expires_so_the_hour_limit_still_means_something():
+    from vyron.web import budget as module
+
+    budget = module.Budget(per_minute=5, per_hour=1, per_user=2, total=3)
+    budget.start("u1", now=0.0, media="a")
+    budget.check("u1", now=10.0, media="a")      # still the same stream
+    budget.start("u1", now=10.0, media="a")      # …and not counted twice
+    with pytest.raises(module.BudgetExceeded):
+        # After the repeat window it is a new stream again, so the hourly
+        # limit (1) applies to it exactly as it would to any other track.
+        budget.check("u1", now=module.REPEAT_WINDOW + 20.0, media="a")
+
+
 def test_stream_budget_counts_starts_and_slots():
     from vyron.web.budget import Budget, BudgetExceeded
 
@@ -1154,7 +1190,7 @@ def test_stream_answers_429_with_retry_after(monkeypatch):
 
     audio.BUDGET.reset()
 
-    def refuse(key):
+    def refuse(key, **kwargs):
         raise BudgetExceeded("hourly streaming limit reached", 42)
 
     monkeypatch.setattr(audio.BUDGET, "check", refuse)

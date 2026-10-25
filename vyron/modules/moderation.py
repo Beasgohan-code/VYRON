@@ -479,7 +479,7 @@ def register(client: Client) -> None:
             B.table(["user", "warns", "limit"], [(f"<code>{target}</code>", str(count), str(limit))]),
         )
 
-    @client.on_message(cmd(["resetwarns", "unwarn"]) & BOT_ADMIN)
+    @client.on_message(cmd(["resetwarns", "unwarn", "rmwarns"]) & BOT_ADMIN)
     async def _resetwarns(_: Client, message: Message) -> None:
         if not await _require_admin(client, message):
             return
@@ -639,7 +639,7 @@ def register(client: Client) -> None:
             B.row(B.btn(f"{E('check')} Welcome message saved", data="v:noop", style="success")),
         )
 
-    @client.on_message(cmd(["welcome"]) & BOT_ADMIN)
+    @client.on_message(cmd(["welcome", "welcomemode"]) & BOT_ADMIN)
     async def _welcome_status(_: Client, message: Message) -> None:
         text = await chatcfg.get(message.chat.id, "welcome", "")
         await rich.send(
@@ -710,7 +710,7 @@ def register(client: Client) -> None:
         await client.send_message(message.chat.id, text)
 
     # ── admin list ─────────────────────────────────────────────────────────
-    @client.on_message(cmd(["admins"]) & BOT_ADMIN)
+    @client.on_message(cmd(["admins", "adminlist"]) & BOT_ADMIN)
     async def _admins(_: Client, message: Message) -> None:
         try:
             rows = []

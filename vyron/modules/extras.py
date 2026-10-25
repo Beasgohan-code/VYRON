@@ -185,7 +185,7 @@ def register(client: Client) -> None:
         )
 
     # ── active voice chats ─────────────────────────────────────────────────
-    @client.on_message(cmd(["vc"]) & owner)
+    @client.on_message(cmd(["vc", "activevc"]) & owner)
     async def _activevc(_: Client, message: Message) -> None:
         if not runtime.player:
             return

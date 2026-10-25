@@ -29,6 +29,14 @@ PARALLEL_TOTAL = 10
 
 _WINDOW_MINUTE = 60.0
 _WINDOW_HOUR = 3600.0
+#: The same track asked for again this soon is the *same* stream, not a new
+#: one: a browser re-requests it after a seek, a toggle, a lock-screen change
+#: or a retry. Counting those was the production bug — one listener sat at 30
+#: "starts" a minute while listening to two songs, was refused with a 429, and
+#: the retry that followed counted again.
+REPEAT_WINDOW = 900.0
+#: A ceiling on the repeat table so a long uptime cannot grow it forever.
+_SEEN_MAX = 4096
 
 
 class BudgetExceeded(RuntimeError):
@@ -57,6 +65,8 @@ class Budget:
         self.total = total
         self._starts: dict[str, list[float]] = {}
         self._active: dict[str, int] = {}
+        # (identity, media) → when it was last counted as a start
+        self._seen: dict[tuple[str, str], float] = {}
 
     # ── window ────────────────────────────────────────────────────────────
     def _recent(self, key: str, now: float) -> list[float]:
@@ -67,9 +77,23 @@ class Budget:
             self._starts.pop(key, None)
         return history
 
-    def check(self, key: str, now: float | None = None) -> None:
-        """Raise :class:`BudgetExceeded` if *key* may not start another stream."""
+    def _repeat(self, key: str, media: str, now: float) -> bool:
+        """Was this exact track already counted for *key* a moment ago?"""
+        if not media:
+            return False
+        stamp = self._seen.get((key, media))
+        return stamp is not None and now - stamp < REPEAT_WINDOW
+
+    def check(self, key: str, now: float | None = None, *, media: str = "") -> None:
+        """Raise :class:`BudgetExceeded` if *key* may not start another stream.
+
+        A repeat of a track that has already been counted is always allowed:
+        the listener is not opening a new stream, they are rewinding the one
+        they already have.
+        """
         now = time.monotonic() if now is None else now
+        if self._repeat(key, media, now):
+            return
         history = self._recent(key, now)
         minute = [stamp for stamp in history if now - stamp < _WINDOW_MINUTE]
         if len(minute) >= self.per_minute:
@@ -79,11 +103,23 @@ class Budget:
             oldest = min(history)
             raise BudgetExceeded("hourly streaming limit reached", _WINDOW_HOUR - (now - oldest))
 
-    def start(self, key: str, now: float | None = None) -> None:
+    def start(self, key: str, now: float | None = None, *, media: str = "") -> None:
         """Count one new stream for *key* (call after :meth:`check`)."""
         now = time.monotonic() if now is None else now
         self._recent(key, now)
+        if media:
+            repeat = self._repeat(key, media, now)
+            self._seen[(key, media)] = now
+            if len(self._seen) > _SEEN_MAX:
+                self._prune_seen(now)
+            if repeat:
+                return          # the same track, still playing: not a new start
         self._starts.setdefault(key, []).append(now)
+
+    def _prune_seen(self, now: float) -> None:
+        for pair, stamp in list(self._seen.items()):
+            if now - stamp >= REPEAT_WINDOW:
+                self._seen.pop(pair, None)
 
     # ── slots ─────────────────────────────────────────────────────────────
     def take_slot(self, key: str) -> None:
@@ -113,6 +149,7 @@ class Budget:
     def reset(self) -> None:
         self._starts.clear()
         self._active.clear()
+        self._seen.clear()
 
 
 BUDGET = Budget()
@@ -131,5 +168,6 @@ __all__ = [
     "PARALLEL_TOTAL",
     "PER_HOUR",
     "PER_MINUTE",
+    "REPEAT_WINDOW",
     "identity_key",
 ]

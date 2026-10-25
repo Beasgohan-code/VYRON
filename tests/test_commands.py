@@ -178,3 +178,63 @@ def test_channel_controls_are_registered():
         "cautoplay", "cthumbnail", "cplayset", "addchannel", "delchannel",
     }
     assert expected <= names, sorted(expected - names)
+
+
+# ── the command names people arriving from other bots type ─────────────────
+PARITY_ALIASES = {
+    # alias → the command it is another name for
+    "end": "stop",
+    "cend": "cstop",
+    "clear": "clearqueue",
+    "q": "queue",
+    "next": "skip",
+    "removechannel": "delchannel",
+    "rmdownloads": "clearcache",
+    "ly": "lyrics",
+    "lyric": "lyrics",
+    "cleanup": "dbcleanup",
+    "config": "vars",
+    "variables": "vars",
+    "rmsudo": "delsudo",
+    "myplaylists": "playlists",
+    "listpl": "playlists",
+    "saveplaylist": "savepl",
+    "loadpl": "pplay",
+    "loadplaylist": "pplay",
+    "delpl": "pdelete",
+    "rmplaylist": "pdelete",
+    "deleteplaylist": "pdelete",
+    "asspfp": "setpfp",
+    "assbio": "setbio",
+    "assname": "setname",
+    "delasspfp": "delpfp",
+    "setflood": "antiflood",
+    "setlang": "language",
+    "activevc": "vc",
+    "contentlocks": "locks",
+    "gcast": "broadcast",
+    "assleaveall": "leaveall",
+    "skipvotes": "voteskip",
+    "sudo": "sudoers",
+    "rmwarns": "resetwarns",
+    "welcomemode": "welcome",
+    "adminlist": "admins",
+    "channelplay": "cplay",
+    "setchannel": "cplayset",
+}
+
+
+def test_every_parity_alias_is_registered():
+    """Users arriving from Shizu/Videl/Fallen type these; each must work."""
+    registered = set(_commands())
+    missing = [name for name in PARITY_ALIASES if name not in registered]
+    assert missing == [], f"aliases not registered: {missing}"
+
+
+def test_a_parity_alias_lives_on_the_same_handler_as_its_command():
+    """`/end` must be `/stop`, not a second implementation that can drift."""
+    found = _commands()
+    for alias, target in PARITY_ALIASES.items():
+        assert set(found[alias]) & set(found[target]), (
+            f"/{alias} and /{target} are different handlers"
+        )

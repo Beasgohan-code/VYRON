@@ -324,3 +324,30 @@ def test_a_miss_is_forgotten_in_minutes_not_an_hour(monkeypatch):
     expires, value = alternate._CACHE["youtube:yt2"]
     assert value is None
     assert expires - time.time() <= alternate.MISS_TTL + 1.0
+
+
+def test_half_a_page_is_a_page(monkeypatch):
+    """Waiting for the sixth result cost the whole budget on every thin query.
+
+    The Render log was full of `slow request POST /api/search (4-6 s)`: one
+    engine answered in 400 ms with three tracks, and the search still waited out
+    the deadline for a fourth. Three is a page a listener can pick from.
+    """
+    import time
+
+    async def lane(name, query, limit, timeout=None):
+        if name == "jiosaavn":
+            return [_saavn(f"s{i}") for i in range(3)]
+        await asyncio.sleep(5.0)  # the slow lane that adds nothing in time
+        return []
+
+    monkeypatch.setattr(alternate, "_from_source", lane)
+
+    started = time.monotonic()
+    found = asyncio.run(
+        alternate.search_all("Kesariya", 6, settings=FakeSettings(), order=["jiosaavn", "soundcloud"])
+    )
+    elapsed = time.monotonic() - started
+
+    assert len(found) == 3
+    assert elapsed < 1.0, f"took {elapsed:.1f}s — the thin page waited for the deadline"

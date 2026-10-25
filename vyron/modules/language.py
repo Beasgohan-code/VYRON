@@ -12,9 +12,9 @@ from pyrogram.types import Message
 
 from vyron.core import chatcfg, i18n
 from vyron.ui import blocks as B
-from vyron.ui import rich
+from vyron.ui import cards, rich
 from vyron.ui.theme import E
-from vyron.utils.helpers import is_chat_admin, is_owner, is_private_chat
+from vyron.utils.helpers import command_args, is_chat_admin, is_owner, is_private_chat
 from vyron.utils.commands import cmd
 
 
@@ -84,13 +84,42 @@ async def can_change(client: Client, message: Message) -> bool:
 
 
 def register(client: Client) -> None:
-    @client.on_message(cmd(["language", "lang"]))
+    @client.on_message(cmd(["language", "lang", "setlang"]))
     async def _language(_: Client, message: Message) -> None:
         current = str(await chatcfg.get(message.chat.id, "lang", "") or "")
+        # `/setlang ml` is the form people arriving from other bots type. It is
+        # the same command as `/language`, with the tap already made — so the
+        # picker is skipped instead of asking them to confirm what they said.
+        code = command_args(message).strip().lower()
+        saved = False
+        if code and code in i18n.available():
+            if not await can_change(client, message):
+                await rich.send(
+                    client,
+                    message.chat.id,
+                    cards.locked_card(
+                        "Only an admin (or the owner) can change the language here."
+                    ),
+                    reply_to=message.id,
+                )
+                return
+            await chatcfg.set(message.chat.id, "lang", code)
+            current = code
+            saved = True
+        elif code:
+            await rich.send(
+                client,
+                message.chat.id,
+                cards.warn_card(
+                    f"<b>{rich.esc(code)}</b> is not one of the languages I have. "
+                    f"Available: <code>{', '.join(i18n.available())}</code>."
+                ),
+                reply_to=message.id,
+            )
         await rich.send(
             client,
             message.chat.id,
-            language_card(current),
+            language_card(current, text_key="lang.saved" if saved else "lang.note"),
             markup_keyboard=keyboard(current),
             reply_to=message.id,
         )

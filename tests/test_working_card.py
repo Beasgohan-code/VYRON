@@ -196,3 +196,42 @@ def test_a_cover_url_is_dropped_before_the_rich_card_is_lost():
     safe = rich.safe_markup(card)
     assert "<img" not in safe
     assert "<h2>" in safe and "<b>title</b>" in safe
+
+
+# ── a card nobody edited must not outlive its handler ──────────────────────
+def test_an_abandoned_card_ends_itself(monkeypatch):
+    """The production card that said "nearly there" forever.
+
+    A handler that raises leaves the ticker as the only thing still holding
+    the message. It used to stop after the last stage and let the card sit
+    there, so the bot looked like it was about to play something and never
+    did. The ticker now writes the failure itself.
+    """
+    from vyron.modules import play
+
+    edits: list[str] = []
+
+    class FakeRich:
+        async def edit(self, client, chat_id, message_id, markup, **kwargs):
+            edits.append(markup)
+
+    monkeypatch.setattr(play, "rich", FakeRich())
+    monkeypatch.setattr(play, "LAST_RESORT_SECONDS", 0.05)
+
+    asyncio.run(
+        play._tick(
+            None,
+            1,
+            99,
+            title="searching",
+            glyph="search",
+            query="Past lives",
+            label="looking for",
+            steps=[(0.01, "nearly there")],
+        )
+    )
+
+    assert len(edits) == 2, "the stage, then the ending"
+    assert "nearly there" in edits[0]
+    assert "Send the command again" in edits[-1]
+    assert "nearly there" not in edits[-1]

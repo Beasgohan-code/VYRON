@@ -93,9 +93,9 @@ leaves when the queue ends.
 |---|---|---|
 | `/autoplay` `/cautoplay` | same | same |
 | `/gblock` `/gunblock` `/ublock` `/uunblock` `/blocklist` | same | same |
-| `/broadcast` `/gcast` | `/broadcast` | same |
-| `/addchannel` `/delchannel` `/setchannel` `/removechannel` | `/addchannel` `/delchannel` `/cplayset` | same |
-| `/language` `/lang` `/setlang` | `/language` `/lang` | same |
+| `/broadcast` `/gcast` | `/broadcast` (+`/gcast`) | same |
+| `/addchannel` `/delchannel` `/setchannel` `/removechannel` | `/addchannel` `/delchannel` `/cplayset` (+`/setchannel`) `/delchannel` (+`/removechannel`) | same |
+| `/language` `/lang` `/setlang` | `/language` `/lang` (+`/setlang <code>`) | same — `/setlang` also takes a code |
 | `/logger` | `/logger` `/logs` | better |
 | `/repo` `/id` | same | same |
 | `/pause` `/cpause` | same | same |
@@ -104,11 +104,11 @@ leaves when the queue ends.
 | `/playforce` `/vplayforce` `/cplayforce` `/cvplayforce` | — | **absent (deliberate)** |
 | `/pcreate` `/padd` `/premove` `/pview` `/pplay` `/cpplay` `/pdelete` | `/pcreate` `/padd` `/premove` `/pview` `/pplay` `/pdelete` | same |
 | `/resume` `/cresume` | same | same |
-| `/skip` `/cskip` | same (+`/voteskip`) | better |
+| `/skip` `/cskip` | same (+`/next`, `/voteskip`, `/skipvotes`) | better |
 | `/start` `/help` | same | same |
 | `/stats` | `/stats` `/sysstats` `/dbstats` | better |
 | `/stop` `/cstop` | same | same |
-| `/end` `/cend` `/clear` `/cclear` `/reboot` | `/stop` `/cstop` `/clearqueue` `/cclear` `/restart` | same (different names) |
+| `/end` `/cend` `/clear` `/cclear` `/reboot` | `/stop` (+`/end`) `/cstop` (+`/cend`) `/clearqueue` (+`/clear`) `/cclear` `/restart` | same (different names, old ones kept as aliases) |
 | `/seek` `/seekback` | `/seek` | same |
 | `/thumbnail` `/cthumbnail` | `/cthumbnail` | same |
 
@@ -171,17 +171,17 @@ leaves when the queue ends.
 | Videl command(s) | VYRON | verdict |
 |---|---|---|
 | `/ban` `/dban` `/unban` `/kick` `/dkick` `/mute` `/tmute` `/unmute` `/promote` `/demote` | same | same |
-| `/warn` `/dwarn` `/warns` `/resetwarns` `/rmwarns` `/unwarn` `/setwarnlimit` | same | same |
+| `/warn` `/dwarn` `/warns` `/resetwarns` `/rmwarns` `/unwarn` `/setwarnlimit` | `/warn` `/warns` `/resetwarns` (+`/rmwarns`) `/unwarn` `/warnlimit` | same |
 | `/purge` `/pin` `/unpin` | same | same |
-| `/setwelcome` `/welcome` `/welcomemode` `/setgoodbye` `/admins` `/adminlist` | `/setwelcome` `/welcome` `/setgoodbye` `/admins` | same |
+| `/setwelcome` `/welcome` `/welcomemode` `/setgoodbye` `/admins` `/adminlist` | `/setwelcome` `/welcome` (+`/welcomemode`) `/setgoodbye` `/admins` (+`/adminlist`) | same |
 | `/locks` `/lockpanel` `/contentlocks` `/antiflood` `/setflood` | `/locks` `/lockpanel` `/antiflood` `/lock` `/unlock` | same |
 | `/lyrics` `/ly` `/lyric` | `/lyrics` | same |
 | `/repo` `/id` | same | same |
-| `/cleanup` `/dbcleanup` | `/dbcleanup` | same |
-| `/saveplaylist` `/savepl` `/playlist` `/loadplaylist` `/loadpl` `/playlists` `/myplaylists` `/listpl` `/deleteplaylist` `/delpl` `/rmplaylist` | `/savepl` `/playlists` `/pplay` `/pdelete` `/pcreate` `/padd` `/pview` `/premove` | same |
-| `/voteskip` `/setvoteskip` `/skipvotes` `/queue` `/q` | `/voteskip` `/setvoteskip` `/queue` | same (`/q` alias not registered) |
+| `/cleanup` `/dbcleanup` | `/dbcleanup` (+`/cleanup`) | same |
+| `/saveplaylist` `/savepl` `/playlist` `/loadplaylist` `/loadpl` `/playlists` `/myplaylists` `/listpl` `/deleteplaylist` `/delpl` `/rmplaylist` | `/savepl` (+`/saveplaylist`) `/playlists` (+`/myplaylists`, `/listpl`) `/pplay` (+`/loadpl`, `/loadplaylist`) `/pdelete` (+`/delpl`, `/rmplaylist`, `/deleteplaylist`) `/pcreate` `/padd` `/pview` `/premove` | same |
+| `/voteskip` `/setvoteskip` `/skipvotes` `/queue` `/q` | `/voteskip` (+`/skipvotes`) `/setvoteskip` `/queue` (+`/q`) | same |
 | `/gblock` `/gunblock` `/ublock` `/uunblock` `/blocklist` | same | same |
-| `/channelplay` `/cplayset` `/setchannel` | `/cplay` `/cplayset` `/addchannel` | same |
+| `/channelplay` `/cplayset` `/setchannel` | `/cplay` (+`/channelplay`) `/cplayset` (+`/setchannel`) `/addchannel` | same |
 | `/pause` `/resume` `/skip` `/stop` `/end` `/clear` `/reboot` `/ping` (`/ping@` is `/ping` addressed to the bot, not a separate command) | `/pause` `/resume` `/skip` `/stop` `/clearqueue` `/restart` `/ping` | same |
 | `/speedtest` `/spt` | — | **absent (deliberate)** |
 
@@ -240,16 +240,16 @@ leaves when the queue ends.
 | `/play` `/vplay` `/p` | `/play` | same (`vplay`, `p` removed by the owner) |
 | `/song` `/vsong` `/video` `/music` | `/song` | same |
 | `/search` | `/search` + inline | same |
-| `/skip` `/next` `/pause` `/resume` `/stop` `/end` | `/skip` `/pause` `/resume` `/stop` | same |
+| `/skip` `/next` `/pause` `/resume` `/stop` `/end` | `/skip` (+`/next`) `/pause` `/resume` `/stop` (+`/end`) | same |
 | `/activevc` | `/vc` `/active` | same |
-| `/leaveall` `/assleaveall` | `/leaveall` | same |
-| `/asspfp` `/setpfp` `/delpfp` `/delasspfp` `/assbio` `/setbio` `/assname` `/setname` | `/setpfp` `/delpfp` `/setbio` `/setname` (+`/assistant` `/voice` panels) | same |
+| `/leaveall` `/assleaveall` | `/leaveall` (+`/assleaveall`) | same |
+| `/asspfp` `/setpfp` `/delpfp` `/delasspfp` `/assbio` `/setbio` `/assname` `/setname` | `/setpfp` (+`/asspfp`) `/delpfp` (+`/delasspfp`) `/setbio` (+`/assbio`) `/setname` (+`/assname`) | same |
 | `/broadcast` | `/broadcast` | same |
-| `/clearcache` `/rmdownloads` | `/clearcache` | same |
+| `/clearcache` `/rmdownloads` | `/clearcache` (+`/rmdownloads`) | same |
 | `/eval` `/sh` | `/eval` | same (`/sh` absent by design) |
-| `/addsudo` `/delsudo` `/rmsudo` `/sudolist` `/sudoers` `/sudo` | `/addsudo` `/delsudo` `/sudolist` `/sudoers` | same |
+| `/addsudo` `/delsudo` `/rmsudo` `/sudolist` `/sudoers` `/sudo` | `/addsudo` `/delsudo` (+`/rmsudo`) `/sudolist` `/sudoers` (+`/sudo`) | same |
 | `/stats` `/sysstats` | `/stats` `/sysstats` | same |
-| `/config` `/variables` | `/vars` | same |
+| `/config` `/variables` | `/vars` (+`/config`, `/variables`) | same |
 | `/speedtest` `/spt` | — | **absent (deliberate)** |
 | inline search | inline search | same |
 
@@ -265,6 +265,10 @@ Each item below came out of this comparison and is shipped:
 | 1.10.14 | revoked API keys delete themselves after 7 days | Videl/Fallen both accumulate keys forever |
 | 1.10.15 | removing the bot drops the queue, leaves the call and deletes the chat's settings; adding it sends the setup card | Shizu/Videl `bot_left_watcher` + `bot_added_watcher` |
 | 1.10.17 | `COOKIES_URL`: a cookie jar that refreshes itself, refuses placeholders, and re-reads on a detected bot-wall | Videl's cookie download/validation in `utils/youtube.py` |
+| 1.10.19 | 38 names from the other three bots are aliases on VYRON's existing handlers — one implementation, two names | their command tables (see the note below) |
+| 1.10.19 | `/setlang <code>` sets a language in one message instead of four taps | Shizu's `/setlang` |
+| 1.10.19 | if only the **assistant** is kicked, the queue is cleared and the group is told why; a queue that could never play again is gone | Shizu's `bot_left_watcher`, Videl's `utils/assistant.py` |
+| 1.10.19 | a source search stops at half a page instead of waiting for every source to answer | the Render log's 4.8–6.3 s `POST /api/search` |
 
 Deliberately **not** copied, with reasons:
 
@@ -275,4 +279,6 @@ Deliberately **not** copied, with reasons:
 | `/sh` (Fallen) | shell from chat on a host holding the bot token |
 | Fallen's `audio_dl()` shape (re-encode every id) | slower and lossier than copying the stream |
 | Shizu's `_SEEK_STATE` tracker | a second source of truth next to `player.started_at`; it drifts |
-| `/q`, `/end`, `/clear`, `/reboot`, `/vplay`, `/p`, `/next`, `/rmdownloads`, `/config`, `/variables`, `/sudo`, `/rmwarns`, `/myplaylists`, `/listpl` … | pure aliases of commands VYRON already has; the owner's rule is no new commands |
+| `/vplay`, `/p`, `/cvplay`, `/playforce` family, `/speedtest`, `/spt`, `/reboot` | removed or never added by the owner; `/restart` is the equivalent of `/reboot` |
+
+Old names are kept as **aliases on the same handler** rather than second implementations, so a user arriving from another bot can keep typing what they know and behaviour cannot drift between the two names: `/q` `/end` `/cend` `/next` `/clear` `/removechannel` `/rmdownloads` `/ly` `/lyric` `/cleanup` `/config` `/variables` `/rmsudo` `/sudo` `/myplaylists` `/listpl` `/saveplaylist` `/loadpl` `/loadplaylist` `/delpl` `/rmplaylist` `/deleteplaylist` `/asspfp` `/assbio` `/assname` `/delasspfp` `/setflood` `/setlang` `/activevc` `/contentlocks` `/gcast` `/assleaveall` `/skipvotes` `/rmwarns` `/welcomemode` `/adminlist` `/channelplay` `/setchannel`.

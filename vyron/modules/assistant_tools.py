@@ -122,7 +122,7 @@ def register(client: Client) -> None:
         me = await runtime.assistant.get_me()
         await rich.send(client, message.chat.id, _card(me), reply_to=message.id)
 
-    @client.on_message(cmd(["setname"]) & owner)
+    @client.on_message(cmd(["setname", "assname"]) & owner)
     async def _setname(_: Client, message: Message) -> None:
         if not await _guard(message):
             return
@@ -154,7 +154,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(cmd(["setbio"]) & owner)
+    @client.on_message(cmd(["setbio", "assbio"]) & owner)
     async def _setbio(_: Client, message: Message) -> None:
         if not await _guard(message):
             return
@@ -185,7 +185,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(cmd(["setpfp"]) & owner)
+    @client.on_message(cmd(["setpfp", "asspfp"]) & owner)
     async def _setpfp(_: Client, message: Message) -> None:
         if not await _guard(message):
             return
@@ -229,7 +229,7 @@ def register(client: Client) -> None:
         else:
             await rich.send(client, message.chat.id, markup)
 
-    @client.on_message(cmd(["delpfp"]) & owner)
+    @client.on_message(cmd(["delpfp", "delasspfp"]) & owner)
     async def _delpfp(_: Client, message: Message) -> None:
         if not await _guard(message):
             return

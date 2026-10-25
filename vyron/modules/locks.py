@@ -119,7 +119,7 @@ def _matches_lock(name: str, message: Message) -> bool:
 
 def register(client: Client) -> None:
     # ── commands ───────────────────────────────────────────────────────────
-    @client.on_message(cmd(["locks", "lockpanel"]) & filters.group)
+    @client.on_message(cmd(["locks", "lockpanel", "contentlocks"]) & filters.group)
     async def _panel(_: Client, message: Message) -> None:
         if not await _is_admin(client, message.chat.id, message.from_user.id):
             await rich.send(
@@ -138,7 +138,7 @@ def register(client: Client) -> None:
         flood = await chatcfg.get(message.chat.id, "flood", {})
         await rich.send(client, message.chat.id, locks_panel(locks, flood), reply_to=message.id)
 
-    @client.on_message(cmd(["antiflood"]) & filters.group)
+    @client.on_message(cmd(["antiflood", "setflood"]) & filters.group)
     async def _antiflood(_: Client, message: Message) -> None:
         if not await _is_admin(client, message.chat.id, message.from_user.id):
             return

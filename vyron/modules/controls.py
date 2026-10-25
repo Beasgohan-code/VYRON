@@ -82,7 +82,7 @@ def register(client: Client) -> None:
         else:
             await rich.send(message._client, message.chat.id, cards.warn_card("That track is not paused."))
 
-    @client.on_message(cmd(["skip"]))
+    @client.on_message(cmd(["skip", "next"]))
     async def _skip(_: Client, message: Message) -> None:
         if not await _guard(message):
             return
@@ -96,7 +96,7 @@ def register(client: Client) -> None:
         else:
             await rich.react(message, "⏭")
 
-    @client.on_message(cmd(["stop"]))
+    @client.on_message(cmd(["stop", "end"]))
     async def _stop(_: Client, message: Message) -> None:
         if not await _guard(message):
             return

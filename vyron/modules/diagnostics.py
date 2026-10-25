@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 def register(client: Client) -> None:
     # ── /sudoers ───────────────────────────────────────────────────────────
-    @client.on_message(cmd(["sudoers"]) & owner)
+    @client.on_message(cmd(["sudoers", "sudo"]) & owner)
     async def _sudoers(_: Client, message: Message) -> None:
         ids = sorted(settings.owners)
         names: dict[int, str] = {}

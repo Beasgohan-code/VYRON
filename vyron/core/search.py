@@ -800,34 +800,44 @@ class YouTube:
         instance_task = asyncio.create_task(
             self._instance_search(query, count + 2, requester), name="search:instances"
         )
+        # While this server is *known* to be refused, YouTube's own search
+        # endpoints are not asked at all: the Render log had six seconds of
+        # socket timeout per query, and the answer was always the same "bot"
+        # page. The walled day is exactly when search must feel instant.
+        walled = self.walled()
         # YT Music and a flat `ytsearch` are two different endpoints answering
         # the same question; asked one after the other, the second one's
         # latency was added to the first's for no reason.
-        flat_task = asyncio.create_task(
-            self._async_extract(f"ytsearch{fetch}:{query}", extract_flat="in_playlist"),
-            name="search:ytsearch",
+        flat_task = (
+            None
+            if walled
+            else asyncio.create_task(
+                self._async_extract(f"ytsearch{fetch}:{query}", extract_flat="in_playlist"),
+                name="search:ytsearch",
+            )
         )
         try:
-            try:
-                meta = await self._ytmusic_search(query, fetch)
-            except Exception as exc:
-                logger.info("YouTube Music search failed for %r: %s", query, exc)
-                meta = []
-            for entry in meta or []:
-                track = self._track_from_entry(entry, requester=requester)
-                if track:
-                    tracks.append(track)
-
-            if len(tracks) < count:
+            if not walled:
                 try:
-                    info = await flat_task
+                    meta = await self._ytmusic_search(query, fetch)
                 except Exception as exc:
-                    logger.info("ytsearch failed for %r: %s", query, exc)
-                    info = {}
-                for entry in (info or {}).get("entries") or []:
+                    logger.info("YouTube Music search failed for %r: %s", query, exc)
+                    meta = []
+                for entry in meta or []:
                     track = self._track_from_entry(entry, requester=requester)
                     if track:
                         tracks.append(track)
+
+                if len(tracks) < count and flat_task is not None:
+                    try:
+                        info = await asyncio.wait_for(flat_task, YOUTUBE_DEADLINE)
+                    except Exception as exc:
+                        logger.info("ytsearch failed for %r: %s", query, exc)
+                        info = {}
+                    for entry in (info or {}).get("entries") or []:
+                        track = self._track_from_entry(entry, requester=requester)
+                        if track:
+                            tracks.append(track)
 
             if len(tracks) < count:
                 try:
@@ -836,7 +846,7 @@ class YouTube:
                     logger.info("instance search gave nothing for %r: %s", query, exc)
         finally:
             for task in (instance_task, flat_task):
-                if not task.done():
+                if task is not None and not task.done():
                     task.cancel()
 
         if not tracks:

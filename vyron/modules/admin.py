@@ -115,7 +115,7 @@ def register(client: Client) -> None:
                 return await source.copy(chat_id, disable_notification=True)
         return await client.send_message(chat_id, text)
 
-    @client.on_message(cmd(["broadcast"]) & owner)
+    @client.on_message(cmd(["broadcast", "gcast"]) & owner)
     async def _broadcast(_: Client, message: Message) -> None:
         if broadcast_running["on"]:
             await rich.send(
@@ -250,7 +250,7 @@ def register(client: Client) -> None:
                 ),
             )
 
-    @client.on_message(cmd(["leaveall"]) & owner)
+    @client.on_message(cmd(["leaveall", "assleaveall"]) & owner)
     async def _leaveall(_: Client, message: Message) -> None:
         if not runtime.player:
             return

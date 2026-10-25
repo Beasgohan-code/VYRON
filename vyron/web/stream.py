@@ -360,7 +360,7 @@ async def stream(request: web.Request) -> web.StreamResponse:
 
     key = identity_key(user.user_id, request.remote)
     try:
-        BUDGET.check(key)
+        BUDGET.check(key, media=media_id)
     except BudgetExceeded as exc:
         logger.info("stream budget: %s (%s)", key, exc.reason)
         return _busy(exc)
@@ -411,7 +411,7 @@ async def stream(request: web.Request) -> web.StreamResponse:
         BUDGET.take_slot(key)
     except BudgetExceeded as exc:
         return _busy(exc)
-    BUDGET.start(key)
+    BUDGET.start(key, media=media_id)
     try:
         return await _stream_body(request, info, media_id, track)
     finally:

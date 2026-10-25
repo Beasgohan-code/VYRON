@@ -214,13 +214,20 @@ async def search_all(
     loop = asyncio.get_event_loop()
     deadline = loop.time() + timeout
 
+    # A *page* is not the goal; a usable page is. Waiting for the sixth result
+    # cost the full budget on every query the catalogues only partly answer —
+    # which is the "slow request POST /api/search (4-6 s)" in the Render log.
+    # Half a page plus one is enough to start, and the lanes that are still
+    # running are cheaper to cancel than to await.
+    enough = max(1, min(limit, max(2, limit // 2)))
+
     found: list[Track] = []
     seen: set[str] = set()
     pending: dict[asyncio.Task, str] = {
         asyncio.ensure_future(_from_source(name, query, limit)): name for name in names
     }
     try:
-        while pending and len(found) < limit:
+        while pending and len(found) < enough:
             remaining = deadline - loop.time()
             if remaining <= 0:
                 break

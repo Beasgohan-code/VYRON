@@ -196,7 +196,7 @@ def _target_user(message: Message) -> int | None:
 def register(client: Client) -> None:
     # ── vote skip ──────────────────────────────────────────────────────────
     @client.on_message(
-        cmd(["voteskip", "setvoteskip"]) & filters.group
+        cmd(["voteskip", "setvoteskip", "skipvotes"]) & filters.group
     )
     async def _voteskip(_: Client, message: Message) -> None:
         chat_id = message.chat.id
@@ -351,7 +351,7 @@ def register(client: Client) -> None:
         await rich.send(client, message.chat.id, card, reply_to=message.id)
 
     # ── /vars ──────────────────────────────────────────────────────────────
-    @client.on_message(cmd(["vars"]) & owner)
+    @client.on_message(cmd(["vars", "config", "variables"]) & owner)
     async def _vars(_: Client, message: Message) -> None:
         rows = var_rows()
         card = (
@@ -449,7 +449,7 @@ def register(client: Client) -> None:
         )
 
     # ── /dbcleanup ─────────────────────────────────────────────────────────
-    @client.on_message(cmd(["dbcleanup"]) & owner)
+    @client.on_message(cmd(["dbcleanup", "cleanup"]) & owner)
     async def _dbcleanup(_: Client, message: Message) -> None:
         storage = runtime.storage
         if storage is None:
@@ -503,7 +503,7 @@ def register(client: Client) -> None:
             await rich.send(client, message.chat.id, markup)
 
     # ── /clearcache ────────────────────────────────────────────────────────
-    @client.on_message(cmd(["clearcache"]) & owner)
+    @client.on_message(cmd(["clearcache", "rmdownloads"]) & owner)
     async def _clearcache(_: Client, message: Message) -> None:
         target = Path(settings.downloads_dir)
         # Walking a downloads directory is real disk work; do it off the loop.
@@ -548,7 +548,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(cmd(["delsudo"]) & owner)
+    @client.on_message(cmd(["delsudo", "rmsudo"]) & owner)
     async def _delsudo(_: Client, message: Message) -> None:
         target = _target_user(message)
         if target is None:

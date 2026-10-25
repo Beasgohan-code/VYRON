@@ -114,6 +114,12 @@ def _stop_ticker(message_id: int | None) -> None:
         task.cancel()
 
 
+#: How long a working card may sit after its last stage before the ticker ends
+#: it. The status card exists to remove doubt; doubt is exactly what an
+#: abandoned "nearly there" leaves behind.
+LAST_RESORT_SECONDS = 8.0
+
+
 async def _tick(
     client: Client,
     chat_id: int,
@@ -143,6 +149,31 @@ async def _tick(
             return
         except Exception:      # an edit that races the final answer is not an error
             return
+
+    # Every stage above is a *hope*: the handler that owns this card is still
+    # working. If the card is still here this much later, that handler died and
+    # nothing will ever edit it again — so the ticker becomes the one to end it.
+    # A card that says "nearly there" forever is worse than a plain failure:
+    # it looks like the bot is about to play something and then never does.
+    try:
+        await asyncio.sleep(LAST_RESORT_SECONDS)
+    except asyncio.CancelledError:
+        return
+    try:
+        await rich.edit(
+            client,
+            chat_id,
+            message_id,
+            cards.error_card(
+                "<blockquote>The sources did not answer for this one — that is on "
+                "this server, not on you. Send the command again.</blockquote>",
+                headline="this one timed out",
+            ),
+        )
+    except asyncio.CancelledError:
+        return
+    except Exception:      # the message was deleted or the bot was removed
+        return
 
 
 async def _thinking(
@@ -572,6 +603,11 @@ def register(client: Client) -> None:
         try:
             tracks = await runtime.youtube.search(query, requester=requester)
         except MediaError as exc:
+            await _edit(client, chat_id, status.id if status else None,
+                        _nothing_found(exc))
+            return
+        except Exception as exc:      # a bug in one source is not a dead card
+            logger.warning("search for %r crashed: %s", query, exc, exc_info=True)
             await _edit(client, chat_id, status.id if status else None,
                         _nothing_found(exc))
             return

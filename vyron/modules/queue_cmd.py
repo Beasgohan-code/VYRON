@@ -16,7 +16,7 @@ from vyron.utils.commands import cmd
 
 
 def register(client: Client) -> None:
-    @client.on_message(cmd(["queue"]))
+    @client.on_message(cmd(["queue", "q"]))
     async def _queue(_: Client, message: Message) -> None:
         if not runtime.player:
             return
@@ -32,7 +32,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(cmd(["clearqueue"]))
+    @client.on_message(cmd(["clearqueue", "clear"]))
     async def _clear(_: Client, message: Message) -> None:
         if not runtime.player:
             return

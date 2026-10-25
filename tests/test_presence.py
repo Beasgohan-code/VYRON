@@ -291,3 +291,109 @@ def test_mongo_storage_forgets_a_chat(monkeypatch):
 
     assert asyncio.run(storage.delete_chat_settings(-1001)) is True
     assert deleted == [{"chat_id": -1001}]
+
+
+# ── the assistant, which is the account that actually joins the call ───────
+ASSISTANT = 4242
+
+
+def with_assistant(monkeypatch, uid=ASSISTANT):
+    from vyron.runtime import runtime
+
+    monkeypatch.setattr(
+        runtime, "assistant", SimpleNamespace(me=SimpleNamespace(id=uid)), raising=False
+    )
+
+
+def test_the_assistant_is_told_apart_from_the_bot(monkeypatch):
+    from vyron.modules import presence
+
+    with_assistant(monkeypatch)
+    ours = update(member("LEFT", uid=ASSISTANT), member("MEMBER", uid=ASSISTANT))
+    mine = update(member("LEFT", uid=ME), member("MEMBER", uid=ME))
+    theirs = update(member("LEFT", uid=5), member("MEMBER", uid=5))
+    assert presence.subject_of(client_with(ME), ours) == "assistant"
+    assert presence.subject_of(client_with(ME), mine) == "bot"
+    assert presence.subject_of(client_with(ME), theirs) == ""
+    # an update about the bot is never mistaken for the assistant
+    assert presence.is_for_assistant(mine) is False
+
+
+def test_without_an_assistant_nothing_is_attributed_to_one(monkeypatch):
+    from vyron.modules import presence
+    from vyron.runtime import runtime
+
+    monkeypatch.setattr(runtime, "assistant", None, raising=False)
+    ours = update(member("LEFT", uid=ASSISTANT), member("MEMBER", uid=ASSISTANT))
+    assert presence.is_for_assistant(ours) is False
+    assert presence.subject_of(client_with(ME), ours) == ""
+
+
+def test_kicking_the_assistant_clears_the_queue_and_says_why(monkeypatch):
+    from vyron.modules import presence
+    from vyron.runtime import runtime
+    from vyron.ui import cards
+
+    abandoned: list[int] = []
+    cards_sent: list[tuple] = []
+
+    class FakePlayer:
+        async def abandon(self, chat_id):
+            abandoned.append(chat_id)
+
+    def fake_warn(text):
+        return f"<b>warn</b>{text}"
+
+    async def fake_send(client, chat_id, markup, **kwargs):
+        cards_sent.append((chat_id, markup))
+        return None
+
+    with_assistant(monkeypatch)
+    monkeypatch.setattr(runtime, "player", FakePlayer(), raising=False)
+    monkeypatch.setattr(cards, "warn_card", fake_warn)
+    from vyron.ui import rich
+
+    monkeypatch.setattr(rich, "send", fake_send)
+
+    result = asyncio.run(
+        presence.handle(
+            client_with(ME),
+            update(member("MEMBER", uid=ASSISTANT), member("BANNED", uid=ASSISTANT)),
+        )
+    )
+    assert result == "removed"
+    assert abandoned == [-1001]
+    assert len(cards_sent) == 1
+    chat_id, text = cards_sent[0]
+    assert chat_id == -1001
+    assert "assistant" in text or "voice account" in text
+
+
+def test_kicking_the_assistant_never_raises_when_messaging_fails(monkeypatch):
+    from vyron.modules import presence
+    from vyron.ui import rich
+
+    async def broken(client, chat_id, markup, **kwargs):
+        raise RuntimeError("chat is gone")
+
+    with_assistant(monkeypatch)
+    monkeypatch.setattr(rich, "send", broken)
+    assert asyncio.run(
+        presence.handle(
+            client_with(ME),
+            update(member("MEMBER", uid=ASSISTANT), member("LEFT", uid=ASSISTANT)),
+        )
+    ) == "removed"
+
+
+def test_the_assistant_joining_is_only_a_log_line(monkeypatch):
+    from vyron.modules import presence
+
+    with_assistant(monkeypatch)
+    result = asyncio.run(
+        presence.handle(
+            client_with(ME),
+            update(member("LEFT", uid=ASSISTANT), member("MEMBER", uid=ASSISTANT)),
+        )
+    )
+    assert result == "joined"

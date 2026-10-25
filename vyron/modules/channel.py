@@ -96,7 +96,7 @@ async def _target_chat(client: Client, message: Message) -> int | None:
 
 
 def register(client: Client) -> None:
-    @client.on_message(cmd(["cplay"]))
+    @client.on_message(cmd(["cplay", "channelplay"]))
     async def _cplay(_: Client, message: Message) -> None:
         """Stream into the linked channel's voice chat — text, link or reply.
 
@@ -216,7 +216,7 @@ def register(client: Client) -> None:
             await rich.edit(client, message.chat.id, status.id, markup)
 
     # ── /cplayset — pin the channel a group should stream into ────────────
-    @client.on_message(cmd(["cplayset"]))
+    @client.on_message(cmd(["cplayset", "setchannel"]))
     async def _cplayset(_: Client, message: Message) -> None:
         chat_id = message.chat.id
         user = message.from_user
@@ -276,7 +276,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(cmd(["cstop"]))
+    @client.on_message(cmd(["cstop", "cend"]))
     async def _cstop(_: Client, message: Message) -> None:
         if not runtime.player:
             return
@@ -443,7 +443,7 @@ def register(client: Client) -> None:
             reply_to=message.id,
         )
 
-    @client.on_message(cmd(["delchannel"]))
+    @client.on_message(cmd(["delchannel", "removechannel"]))
     async def _delchannel(_: Client, message: Message) -> None:
         chat_id = message.chat.id
         user = message.from_user
