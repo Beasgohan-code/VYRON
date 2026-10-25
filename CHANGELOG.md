@@ -7,6 +7,53 @@ Two version numbers move independently:
 
 ## Bot
 
+### 1.10.7 — 2026-10-25
+
+Taking the two things people actually complained about, plus what ShizuMusic
+does that VYRON did not.
+
+**"The thumbnail is not there when it plays."** The poster was being sent — and
+then `/play` edited its working card into a text "started" card underneath it,
+so the chat got a picture *and* a text twin of it, and on the next track the
+poster was edited in place while the text card stayed. A text message cannot
+become a photo in Telegram, so the rule is now explicit: the picture is the
+now-playing message.
+
+* the working card is deleted the moment the poster is on screen (`_settle`),
+  including from the search picker, so one play is one message;
+* an existing text now-playing card is *replaced* by the picture instead of
+  being edited into another text card;
+* the previous poster is deleted when a new one lands, and so is a session's
+  poster when the session ends;
+* the Mini App's DM mirror keeps one card per listener instead of leaving a
+  poster per song in their private chat;
+* a picture that cannot be uploaded now says why in the owner journal
+  (`art`) instead of only at debug level.
+
+**A song with no cover art gets a sleeve instead of a bullseye.** Catalogue
+results sometimes arrive without artwork and a CDN fetch can fail on a
+datacenter IP; the tile now draws the song's initials in the brand font over an
+accent wash — "LET THE WORLD BURN" becomes `LTW`, not an empty ring.
+
+**"When the queue finishes the assistant should leave."** It did call leave —
+but radio mode defaulted to *on*, so autoplay always found something and the
+bot never let go of the call. Radio is now an opt-in (`/autoplay on`, env
+`AUTOPLAY`), a stored `"autoplay": true` written by the old default is treated
+as a default rather than a decision (a stored `false` still wins), and the end
+of a session posts a designed card — tracks played, the last song, whether the
+assistant left — with three buttons: **Play again**, **Radio**, **Close**.
+
+**From ShizuMusic:**
+
+* the command message is deleted once it has been answered (groups only, never
+  fatal), done *after* its card exists so nothing is ever sent as a reply to a
+  deleted message;
+* `BLOCKED_WORDS` filters a request before it runs — empty by default, and
+  matched as whole words, because "Sex on Fire" is a song and "essex" is not
+  "sex";
+* the locked-content and resolver-probe notices are proper cards now, in the
+  same rhythm as the rest of the bot.
+
 ### 1.10.6 — 2026-10-25
 
 A boot log from Render, read line by line. Every fault below happened on a real

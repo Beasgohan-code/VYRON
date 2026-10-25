@@ -259,7 +259,18 @@ def _gradient(size: tuple[int, int], top: tuple[int, int, int], bottom: tuple[in
     return strip.resize(size)
 
 
-def _cover(cover: bytes | None, size: int = 360):
+def _initials(text: str, limit: int = 3) -> str:
+    """``Chris Grey - Let The World Burn`` → ``LTWB`` … capped at *limit*."""
+    words = [part for part in re.split(r"[\s\-–—/|()\[\]]+", text or "") if part]
+    words = [word for word in words if word[:1].isalnum()]
+    if not words:
+        return ""
+    if len(words) == 1:
+        return words[0][:2].upper()
+    return "".join(word[0] for word in words[:limit]).upper()
+
+
+def _cover(cover: bytes | None, size: int = 360, *, text: str = ""):
     if cover:
         try:
             image = Image.open(io.BytesIO(cover)).convert("RGB")
@@ -269,34 +280,51 @@ def _cover(cover: bytes | None, size: int = 360):
             return image.resize((size, size), Image.LANCZOS)
         except Exception as exc:
             logger.debug("cover decode failed: %s", exc)
-    # No cover art (search results often arrive without one): draw a sleeve
-    # that looks designed on purpose rather than an empty grey tile.
+    # No cover art (a catalogue result can arrive without one, and a CDN fetch
+    # can fail): draw a *sleeve*, not an empty tile — a soft accent wash, two
+    # thin rings, and the song's initials in the brand font. It reads as
+    # designed artwork instead of as something that failed to load, which is
+    # what the first version of this looked like on a phone.
     placeholder = _gradient((size, size), (30, 24, 56), (10, 11, 18))
-    draw = ImageDraw.Draw(placeholder, "RGBA")
     centre = size // 2
-    for index, radius in enumerate(range(int(size * 0.46), 0, -int(size * 0.055))):
-        alpha = 12 + index * 5
-        draw.ellipse(
-            (centre - radius, centre - radius, centre + radius, centre + radius),
-            outline=(255, 255, 255, alpha),
-            width=2,
-        )
     glow = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     ImageDraw.Draw(glow).ellipse(
-        (centre - 96, centre - 96, centre + 96, centre + 96),
-        fill=(*ACCENT, 90),
+        (centre - int(size * 0.34), centre - int(size * 0.34),
+         centre + int(size * 0.34), centre + int(size * 0.34)),
+        fill=(*ACCENT, 96),
     )
     placeholder = Image.alpha_composite(
-        placeholder.convert("RGBA"), glow.filter(ImageFilter.GaussianBlur(48))
-    ).convert("RGB")
-    draw = ImageDraw.Draw(placeholder)
-    draw.ellipse(
-        (centre - 46, centre - 46, centre + 46, centre + 46),
-        outline=(*ACCENT_2, 120),
-        width=3,
+        placeholder.convert("RGBA"), glow.filter(ImageFilter.GaussianBlur(int(size * 0.11)))
+    ).convert("RGBA")
+
+    draw = ImageDraw.Draw(placeholder, "RGBA")
+    for index, radius in enumerate((int(size * 0.40), int(size * 0.372))):
+        draw.ellipse(
+            (centre - radius, centre - radius, centre + radius, centre + radius),
+            outline=(255, 255, 255, 26 + index * 10),
+            width=1,
+        )
+
+    letters = _initials(text)
+    if letters:
+        letter_font = font(int(size * (0.34 if len(letters) <= 2 else 0.26)), 800, letters)
+        if letter_font is not None:
+            box = draw.textbbox((0, 0), letters, font=letter_font)
+            draw.text(
+                (centre - (box[2] - box[0]) / 2 - box[0], centre - (box[3] - box[1]) / 2 - box[1]),
+                letters,
+                font=letter_font,
+                fill=(255, 255, 255, 232),
+            )
+    # A small accent tick under the letters keeps the tile from looking empty
+    # when the title has no usable initials at all.
+    draw.rounded_rectangle(
+        (centre - int(size * 0.06), centre + int(size * 0.26),
+         centre + int(size * 0.06), centre + int(size * 0.26) + 4),
+        radius=2,
+        fill=(*ACCENT_2, 200),
     )
-    draw.ellipse((centre - 6, centre - 6, centre + 6, centre + 6), fill=ACCENT_2)
-    return placeholder
+    return placeholder.convert("RGB")
 
 
 def _rounded(image, radius: int):
@@ -458,7 +486,12 @@ def render(
     if not PIL_AVAILABLE or track is None:
         return None
     try:
-        art = _cover(cover, 360)
+        from vyron.utils.naming import display_parts, poster_name
+
+        # Initials come from the *name* the poster prints, not from the artist
+        # prefix: "Chris Grey - LET THE WORLD BURN" is "LTWB", not "CGL".
+        _artist, _name = display_parts(poster_name(track.title), track.uploader)
+        art = _cover(cover, 360, text=_name or poster_name(track.title))
         custom = _backdrop(backdrop)
         # With no cover art there is no song colour to pull, so the custom
         # artwork supplies the palette instead of a grey placeholder.

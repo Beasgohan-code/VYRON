@@ -370,3 +370,55 @@ def test_a_picture_is_edited_in_place_and_only_one_np_message_stays(monkeypatch)
     asyncio.run(nowplaying.announce(bot, 1, state))
     assert len(bot.photos) == 1
     assert (1, 501) in bot.deleted, "the chat keeps one now-playing picture, not a pile"
+
+
+def test_a_dm_keeps_one_mirrored_card(monkeypatch):
+    """The Mini App mirrors what it plays into the listener's DM.
+
+    Without this, a listening session left one poster per song in a private
+    chat — the same clutter the group used to have.
+    """
+    from vyron.ui import nowplaying
+
+    if not thumbnails.PIL_AVAILABLE:
+        pytest.skip("Pillow is not installed")
+
+    async def fake_poster(state, track, **_):
+        return b"\xff\xd8fake"
+
+    monkeypatch.setattr(nowplaying, "poster", fake_poster)
+    nowplaying._DM_LAST.clear()
+
+    class Bot(_TrackingBot):
+        async def send_photo(self, **kwargs):
+            self.photos.append(kwargs)
+            return await self._fresh()
+
+    bot = Bot()
+    state = _state()
+
+    asyncio.run(nowplaying.mirror_to_dm(bot, 4242, state, chat_title="Room"))
+    first = bot.photos and nowplaying._DM_LAST[4242][1]
+    state.current = Track(id="track-2", title="Next", duration=100)
+    asyncio.run(nowplaying.mirror_to_dm(bot, 4242, state, chat_title="Room"))
+
+    assert len(bot.photos) == 2
+    assert (4242, first) in bot.deleted, "the previous mirror is removed"
+    nowplaying._DM_LAST.clear()
+
+
+def test_a_song_without_cover_art_gets_a_lettered_sleeve():
+    """No cover art used to be a bullseye placeholder that read as "failed"."""
+    from vyron.utils.thumbnails import _cover, _initials
+
+    assert _initials("LET THE WORLD BURN") == "LTW"
+    assert _initials("Believer") == "BE"
+    assert _initials("") == ""
+
+    if not thumbnails.PIL_AVAILABLE:
+        pytest.skip("Pillow is not installed")
+    sleeve = _cover(None, 120, text="LET THE WORLD BURN")
+    assert sleeve.size == (120, 120)
+    # The letters are drawn, so the tile is not a flat gradient.
+    colours = {sleeve.getpixel((x, y)) for x in range(0, 120, 6) for y in range(0, 120, 6)}
+    assert len(colours) > 20

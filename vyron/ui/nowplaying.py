@@ -216,6 +216,13 @@ async def drop_message(bot, chat_id: int, message_id: int | None) -> None:
         rich.forget(chat_id, message_id)
 
 
+#: The last mirrored card per listener: ``(dm_chat_id, message_id)``.
+#: A DM is a conversation, not a feed — every song from the Mini App used to
+#: leave another poster in it.
+_DM_LAST: "OrderedDict[int, tuple[int, int]]" = OrderedDict()
+_DM_MAX = 200
+
+
 async def mirror_to_dm(bot, user_id: int, state: ChatState, *, chat_title: str = "") -> None:
     """Send the same poster to a person's DM — used for Mini App playback."""
     if bot is None or state is None or state.current is None or not user_id:
@@ -228,13 +235,25 @@ async def mirror_to_dm(bot, user_id: int, state: ChatState, *, chat_title: str =
     # The mirrored poster shows the *room* it is playing in — the DM inherits
     # the group's artwork, not whatever the listener set in private.
     image = await poster(state, track, bot=bot, chat_id=int(state.chat_id or user_id))
+    previous = _DM_LAST.get(int(user_id))
+    message = None
     try:
         if image:
-            await rich.send_photo(bot, int(user_id), image, caption)
+            message = await rich.send_photo(bot, int(user_id), image, caption)
         else:
-            await rich.send(bot, int(user_id), caption)
+            message = await rich.send(bot, int(user_id), caption)
     except Exception as exc:  # user never opened the bot, blocked it, etc.
         logger.debug("now-playing mirror to %s failed: %s", user_id, exc)
+    if message is None:
+        return
+    # The card was delivered to the *listener's* chat, not to the room.
+    _DM_LAST[int(user_id)] = (int(user_id), int(message.id))
+    _DM_LAST.move_to_end(int(user_id))
+    while len(_DM_LAST) > _DM_MAX:
+        _DM_LAST.popitem(last=False)
+    if previous and previous[1] != int(message.id):
+        # One live card in the DM too: the song before this one is history.
+        await drop_message(bot, previous[0], previous[1])
 
 
 __all__ = ["announce", "drop_message", "enabled", "mirror_to_dm", "poster"]

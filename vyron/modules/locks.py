@@ -219,8 +219,11 @@ def register(client: Client) -> None:
                 note = await rich.send(
                     client,
                     chat_id,
-                    f"{E(glyph)} <b>{label} are locked here</b> — "
-                    f"{rich.esc(display_name(user))}, that message was removed.",
+                    B.head(f"{label} locked", glyph=glyph)
+                    + B.context(
+                        f"{rich.esc(display_name(user))}, that message was removed — "
+                        f"{label.lower()} are off in this chat."
+                    ),
                 )
                 if note:
                     try:

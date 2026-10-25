@@ -25,7 +25,7 @@ Rich cards · premium emoji · instant search · zero-clutter controls
 |---|---|
 | 🎧 **Voice-chat streaming** | Lossless-feeling audio (or video) in any group voice chat, auto-started by the assistant account. |
 | 🔎 **Search-first UX** | `/play faded` shows the top 5 results with durations — tap one to stream. Links play instantly. |
-| 📜 **Real queue** | Add, remove, reorder, jump, shuffle, loop-off/one/all, autoplay related tracks when the queue empties. |
+| 📜 **Real queue** | Add, remove, reorder, jump, shuffle, loop-off/one/all. When the queue empties the assistant leaves the call and says so — radio mode (`/autoplay on`) keeps a room going instead. |
 | 💾 **Downloads** | `/song` and `/video` deliver real MP3/MP4 files with cover art, metadata and a disk cache. |
 | 📝 **Lyrics** | Synced or plain lyrics pulled from LRCLIB for whatever is playing. |
 | ❤️ **Favourites & history** | Per-user, persistent, shown as tidy tables. |
@@ -273,7 +273,7 @@ and translated instead of being flattened into "nothing could be extracted":
 | *cannot reach YouTube* | egress/DNS on the host | `PROXY` or a different region |
 
 `/doctor` prints the same sentence, and its first row is the **build**
-(`v1.10.6 · 2026-10-25`): if it still shows an older one, the deploy did not
+(`v1.10.7 · 2026-10-25`): if it still shows an older one, the deploy did not
 land — that is a different problem from a broken track.
 
 ### Every source, and how they back each other up
@@ -946,7 +946,8 @@ The interesting optional ones:
 | `DEFAULT_VOLUME` | `100` | 1–200 |
 | `MAX_QUEUE_SIZE` | `100` | per chat |
 | `IDLE_LEAVE_SECONDS` | `300` | leave an idle VC (`0` = never) |
-| `AUTOPLAY` | `true` | related tracks when the queue ends |
+| `AUTOPLAY` | `false` | radio mode for every chat by default — off, so the assistant leaves when the queue someone built runs out; a room turns it on with `/autoplay on` |
+| `BLOCKED_WORDS` | – | comma-separated words `/play` and `/song` refuse, matched as whole words (`sex` does not block `essex`) |
 | `COOKIES_FILE` | – | `cookies.txt` for age-restricted videos |
 | `PROXY` | – | `http://…` / `socks5://…` for yt-dlp |
 | `STREAM_FALLBACK` | `on` | ask Invidious/Piped for a direct URL when every yt-dlp client fails |

@@ -158,8 +158,11 @@ def register(client: Client) -> None:
         status = await rich.send(
             client,
             message.chat.id,
-            f"{E('clock')} <b>Probing every resolver…</b>\n<blockquote>same video, same second — "
-            "this is what your server can actually reach.</blockquote>",
+            B.head("probing every resolver", glyph="clock")
+            + B.context(
+                "One video, every tier, same second — this is what this server "
+                "can actually reach."
+            ),
             reply_to=message.id,
         )
 
