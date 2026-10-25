@@ -39,6 +39,57 @@ def signed_init_data(user_id: int = 424242, name: str = "Test User") -> str:
     return urlencode(fields)
 
 
+def test_state_survives_a_storage_that_is_down(monkeypatch):
+    """A dead collection must cost a section of the payload, not the whole app.
+
+    Production once answered 500 to every `/api/state` for minutes at a time —
+    the Mini App could not open at all — because one storage call raised.
+    """
+    from vyron.runtime import runtime
+
+    class Down:
+        def __getattr__(self, name):
+            async def boom(*args, **kwargs):
+                raise RuntimeError("mongo is down")
+
+            return boom
+
+    monkeypatch.setattr(runtime, "storage", Down(), raising=False)
+    token = auth.make_token(-100999, 424242, TOKEN)
+
+    async def scenario(client):
+        response = await client.get("/api/state", headers={"X-Vyron-Token": token})
+        assert response.status == 200, await response.text()
+        body = await response.json()
+        assert body["ok"] is True
+        assert body["favorites"] == [] and body["history"] == [] and body["playlists"] == []
+        assert body["stats"]["chats"] == 0
+        # The parts that do not need storage are still there.
+        assert body["chat"]["id"] == -100999
+
+    asyncio.run(_with_client(scenario))
+
+
+def test_json_helper_stringifies_values_it_does_not_know():
+    """bson ObjectIds and datetimes used to 500 the endpoint they appeared in."""
+    from datetime import datetime
+
+    from vyron.web.server import _json
+
+    response = _json({"when": datetime(2026, 10, 25, 9, 4, 20), "nested": [{"id": object()}]})
+    assert response.status == 200
+    assert response.content_type == "application/json"
+    assert "2026-10-25" in response.text
+
+
+def test_tracks_skips_a_row_it_cannot_convert():
+    from vyron.web import server
+
+    rows = [{"id": "abc", "title": "Kept", "duration": 120}, "not even a dict"]
+    titles = [row["title"] for row in server._tracks(rows)]
+    assert titles == ["Kept"]
+
+
 # ── auth primitives ─────────────────────────────────────────────────────────
 def test_token_roundtrip():
     token = auth.make_token(-1001234567890, 42, TOKEN, ttl=60)

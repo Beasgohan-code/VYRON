@@ -1,7 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
-import { Boundary } from "./components/Boundary";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { registerApp } from "./lib/pwa";
 import { AppProvider } from "./lib/store";
 /* Self-hosted variable fonts, replacing three `fonts.googleapis.com` requests
@@ -23,10 +23,10 @@ registerApp(() => window.dispatchEvent(new Event("vyron:update-ready")));
 
 createRoot(container).render(
   <StrictMode>
-    <Boundary>
+    <ErrorBoundary full>
       <AppProvider>
         <App />
       </AppProvider>
-    </Boundary>
+    </ErrorBoundary>
   </StrictMode>
 );

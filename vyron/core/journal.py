@@ -239,6 +239,12 @@ class Journal:
             # already in the mirror; re-adding it would double the tail on
             # every restart until the deque filled with duplicates.
             return
+        if event.meta.get("summary"):
+            # "restored 29 warning(s)" is bookkeeping about the mirror, not an
+            # event worth carrying forward. Mirroring it made every restart
+            # restate the previous restatements: the tail grew by one summary
+            # per boot and the count climbed 3 → 10 → 29 across a few deploys.
+            return
         if not self.persist:
             return
         with self._lock:
@@ -282,24 +288,44 @@ class Journal:
         if not isinstance(rows, list) or not rows:
             return 0
         loaded = 0
+        with self._lock:
+            seen = {
+                (str(item.get("level")), str(item.get("scope")), str(item.get("message")), str(item.get("ts")))
+                for item in self._persisted
+                if isinstance(item, dict)
+            }
         for row in rows[-self.PERSIST_MAX :]:
             if not isinstance(row, dict):
                 continue
             level = str(row.get("level") or "warn")
             if level not in self.PERSIST_LEVELS:
                 continue
+            scope = str(row.get("scope") or "previous")
+            message = str(row.get("message") or "")
+            # Judge the row on what it says, not on how it is flagged: stores
+            # written by older builds already contain summary rows.
+            if scope == "journal" and (message.startswith("restored ") or "warning(s)/error(s)" in message):
+                continue
+            key = (level, scope, message, str(row.get("ts")))
             with self._lock:
+                if key in seen:
+                    continue            # already mirrored in this run
+                seen.add(key)
                 self._persisted.append(row)   # keep mirroring them forward
             self.record(
                 level,
-                str(row.get("scope") or "previous"),
-                f"[previous run] {row.get('message') or ''}"[: _MAX_MESSAGE],
+                scope,
+                f"[previous run] {message}"[: _MAX_MESSAGE],
                 restored=True,
                 original_ts=row.get("ts"),
             )
             loaded += 1
         if loaded:
-            self.warn("journal", f"restored {loaded} warning(s)/error(s) from the previous run")
+            self.warn(
+                "journal",
+                f"restored {loaded} warning(s)/error(s) from the previous run",
+                summary=True,
+            )
         return loaded
 
     # ── convenience ────────────────────────────────────────────────────────

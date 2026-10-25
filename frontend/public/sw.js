@@ -13,7 +13,9 @@
  * Anything that carries state (the API, the audio proxy, auth) is never cached:
  * a stale queue or a cached "who am I" is worse than a spinner.
  */
-const VERSION = "vyron-1";
+/* Bumped when the cached shell would otherwise keep serving an old picture:
+   activate deletes every cache that does not carry this prefix. */
+const VERSION = "vyron-2";
 const SHELL = `${VERSION}-shell`;
 const ASSETS = `${VERSION}-assets`;
 const SHELL_FILES = [

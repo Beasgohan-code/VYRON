@@ -18,6 +18,7 @@ from vyron.core.journal import journal
 logger = logging.getLogger(__name__)
 
 _SLOW_MS = 4000
+_MAX_MESSAGE = 400
 # Endpoints that are long-lived by design: the log tail holds its connection
 # open for as long as the console is on screen, and streamed audio lasts as long
 # as the song. Calling those "slow" buries the requests that really are.
@@ -32,9 +33,14 @@ async def record_errors(request: web.Request, handler) -> web.StreamResponse:
     except web.HTTPException:
         raise
     except Exception as exc:
+        # The type and message go in the *message*, not only in the metadata:
+        # Render's log stream shows messages, so a bare "crashed" line forced a
+        # trip to /api/logs before anyone knew what had happened. The full
+        # traceback still travels in the meta.
         journal.error(
             "webapp",
-            f"{request.method} {request.path_qs[:120]} crashed",
+            f"{request.method} {request.path_qs[:120]} crashed: "
+            f"{type(exc).__name__}: {exc}"[: _MAX_MESSAGE],
             exc,
             status=500,
         )

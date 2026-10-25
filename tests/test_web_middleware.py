@@ -55,6 +55,9 @@ def test_slow_only_means_actually_slow(quiet_journal, monkeypatch):
             assert crash.status == 500
             assert any(level == "error" for level, _ in quiet_journal)
             assert any("crashed" in message for _, message in quiet_journal)
+            # The line has to name the failure: Render's stream shows messages
+            # only, so "GET /api/state crashed" on its own sent people digging.
+            assert any("RuntimeError: kaboom" in message for _, message in quiet_journal)
 
     asyncio.run(scenario())
 

@@ -7,6 +7,38 @@ Two version numbers move independently:
 
 ## Bot
 
+### 1.10.2 — 2026-10-25
+
+Sized for the phone it actually runs in, and two failures from the log.
+
+* **A new splash, and one that fits.** The boot picture is redrawn for a phone
+  (glow in the top third, deliberately empty below it) and every measurement on
+  that screen now scales with the viewport instead of assuming a desktop —
+  `clamp()` for the logo, the name and the gaps, safe-area padding at the foot,
+  and a short-screen rule that drops the stage list before anything is cut off.
+  The old oversized drift transform is gone, so the artwork keeps its own
+  proportions instead of being cropped by 8%. In a light client the splash no
+  longer writes dark ink on a dark picture.
+* **Home is denser.** At 390 px the hero used its first screen on a 29 px
+  headline and three full-size buttons, so "Trending now" — the reason to open
+  the app — started below the fold. Phone sizes now: 21–27 px headline, tighter
+  padding and gaps, smaller CTAs and stats, 132 px tiles; a second step at
+  370 px keeps the CTA row and the three stats on one line on an SE.
+* **`/api/state` cannot 500 the whole app any more.** The payload is a fan-out —
+  chat title, favourites, history, playlists, counters — and one raising call
+  used to answer 500 to every poll, which made the Mini App unopenable (the log
+  was full of `GET /api/state crashed`). Each part now degrades on its own and
+  says so in the journal, malformed rows are skipped, and the response is
+  written with `default=str`, so a bson ObjectId or a datetime in a stored
+  document is a stringified field instead of a dead endpoint.
+* **The log line names the failure.** `GET /api/state crashed: TypeError: …`,
+  because Render's stream shows messages only and a bare "crashed" forced a trip
+  to `/api/logs` before anyone knew what had happened.
+* **The journal stops restoring its own summaries.** "restored 21 warning(s)"
+  was mirrored, restored by the next boot, mirrored again — the tail grew a row
+  per restart and the count climbed 3 → 10 → 29 across deploys. Summaries are
+  bookkeeping now: not mirrored, ignored on restore, and de-duplicated.
+
 ### 1.10.1 — 2026-10-25
 
 The last four items from the review, and a floor under the whole app.

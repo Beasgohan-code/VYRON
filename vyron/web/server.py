@@ -14,6 +14,7 @@ import json
 import logging
 import time
 from pathlib import Path
+from typing import Any
 
 from aiohttp import web
 
@@ -47,6 +48,51 @@ _WEBAPP_ROOT = Path(
 # `webapp/dist` is the compiled SPA; fall back to the folder itself so a custom
 # or hand-written build (WEBAPP_DIR=…) keeps working.
 WEB_DIR = _WEBAPP_ROOT / "dist" if (_WEBAPP_ROOT / "dist" / "index.html").is_file() else _WEBAPP_ROOT
+
+
+def _json(payload: Any, status: int = 200, headers: dict[str, str] | None = None) -> web.Response:
+    """JSON that cannot fail on one odd value.
+
+    `web.json_response` raises on anything it does not recognise — a bson
+    ObjectId from Mongo, a datetime left inside a restored queue — and the whole
+    endpoint then answers 500. One stray value in one document used to be enough
+    to make the Mini App unopenable. Writing the value in its string form is a
+    slightly wrong field instead of a dead app.
+    """
+    body = json.dumps(payload, ensure_ascii=False, default=str)
+    return web.Response(
+        body=body,
+        status=status,
+        content_type="application/json",
+        headers=headers,
+    )
+
+
+async def _safe(label: str, awaitable: Any, fallback: Any) -> Any:
+    """Await *awaitable*; on failure journal it and answer with *fallback*.
+
+    The state payload is a fan-out — chat title, favourites, history, playlists,
+    counters — and they fail independently. Losing the chat title is a blank
+    header; losing the whole document is a blank app.
+    """
+    try:
+        return await awaitable
+    except Exception as exc:
+        journal.warn("webapp", f"{label} unavailable: {type(exc).__name__}: {exc}"[:300])
+        return fallback
+
+
+def _tracks(rows: Any) -> list[dict]:
+    """Stored rows → track payloads, skipping any row that will not convert."""
+    out: list[dict] = []
+    for row in rows or []:
+        try:
+            payload = _track_json(Track.from_dict(row))
+        except Exception:
+            continue
+        if payload:
+            out.append(payload)
+    return out
 
 
 def _track_json(track: Track | None, *, index: int | None = None) -> dict | None:
@@ -200,16 +246,23 @@ async def state(request: web.Request) -> web.Response:
             ),
         )
 
+    storage = runtime.storage
     chat_title, favorites, history, playlist_rows, counters = await asyncio.gather(
-        _chat_title(user.chat_id) if user.chat_id else _none(),
-        runtime.storage.favorites(user.user_id, 50) if runtime.storage else _none([]),
-        runtime.storage.history(user.user_id, 20) if runtime.storage else _none([]),
-        pl.list_playlists(user.user_id),
-        runtime.storage.counters() if runtime.storage else _none({}),
+        _safe("chat title", _chat_title(user.chat_id), "") if user.chat_id else _none(""),
+        _safe("favorites", storage.favorites(user.user_id, 50), []) if storage else _none([]),
+        _safe("history", storage.history(user.user_id, 20), []) if storage else _none([]),
+        _safe("playlists", pl.list_playlists(user.user_id), []),
+        _safe("counters", storage.counters(), {}) if storage else _none({}),
     )
-    playlists = [pl.summary(entry) for entry in playlist_rows]
+    playlists = []
+    for entry in playlist_rows:
+        try:
+            playlists.append(pl.summary(entry))
+        except Exception:      # one malformed row must not hide the others
+            continue
+    chat_count = len(await _safe("chat ids", storage.all_chat_ids(), [])) if storage else 0
 
-    return web.json_response(
+    return _json(
         {
             "ok": True,
             "version": runtime.version,
@@ -245,15 +298,13 @@ async def state(request: web.Request) -> web.Response:
                 "shuffle": state_obj.shuffle if state_obj else False,
                 "effects": state_obj.effects if state_obj else [],
             },
-            "favorites": [
-                {**_track_json(Track.from_dict(item))} for item in favorites
-            ],
-            "history": [{**_track_json(Track.from_dict(item))} for item in history],
+            "favorites": _tracks(favorites),
+            "history": _tracks(history),
             "playlists": playlists,
             "stats": {
                 "tracks": counters.get("tracks", 0),
                 "downloads": counters.get("downloads", 0),
-                "chats": len(await runtime.storage.all_chat_ids()) if runtime.storage else 0,
+                "chats": chat_count,
             },
         }
     )
@@ -270,7 +321,9 @@ def _json_etag(payload: dict, request: web.Request) -> web.Response:
     previous one — a song does not move between two ticks in the same second.
     An `ETag` turns those into an empty 304 instead of a fresh document.
     """
-    body = json.dumps(payload, separators=(",", ":")).encode()
+    # `default=str` for the same reason `_json` has it: one ObjectId or datetime
+    # in the queue must not turn a poll into a 500.
+    body = json.dumps(payload, separators=(",", ":"), default=str).encode()
     tag = _etag(body)
     headers = {"ETag": tag, "Cache-Control": "private, no-cache"}
     if request.headers.get("If-None-Match") == tag:
@@ -312,7 +365,7 @@ async def now_state(request: web.Request) -> web.Response:
         "streaming": runtime.streaming_ready,
         "chat": {
             "id": chat_id,
-            "title": await _chat_title(user.chat_id) if user.chat_id else None,
+            "title": await _safe("chat title", _chat_title(user.chat_id), "") if user.chat_id else None,
             "is_group": bool(user.chat_id) and chat_id < 0,
         },
         "now": now,
@@ -366,10 +419,10 @@ async def home(request: web.Request) -> web.Response:
     if runtime.charts is None:
         await _engine()      # a wake-up request should wait, not show an empty home
     if runtime.charts is None:
-        return web.json_response({"ok": True, "ready": False, **_EMPTY_HOME})
+        return _json({"ok": True, "ready": False, **_EMPTY_HOME})
 
-    payload = await runtime.charts.home()
-    return web.json_response({"ok": True, **payload})
+    payload = await _safe("charts", runtime.charts.home(), {})
+    return _json({"ok": True, **payload})
 
 
 async def _engine() -> bool:

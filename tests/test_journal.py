@@ -148,13 +148,71 @@ def test_the_journal_mirrors_only_problems_and_reloads_them(tmp_path):
     )
     assert "resolver cooling down" in text and "previous run" in text
     assert "started" not in text
-    # the restored entries keep being mirrored — exactly once each, plus the
-    # journal's own note about having restored them
+    # The restored entries keep being mirrored — exactly once each — but the
+    # journal's own note about having restored them is bookkeeping, not an
+    # event, so it must not join the tail (it used to be restored by the next
+    # boot, which is how the count climbed 3 → 10 → 29 across deploys).
     messages = [row["message"] for row in second._persisted]
     assert messages.count("resolver cooling down") == 1
-    assert messages.count("resolver cooling down") == 1
-    assert "mongo unavailable" in messages
-    assert len(second._persisted) == 3
+    assert messages.count("mongo unavailable") == 1
+    assert not any(message.startswith("restored ") for message in messages)
+    assert len(second._persisted) == 2
+
+
+def test_repeated_restores_do_not_inflate_the_tail(tmp_path):
+    import asyncio
+    import dataclasses
+
+    from vyron.config import settings as base
+    from vyron.core.journal import Journal
+    from vyron.database import JsonStorage
+
+    storage = JsonStorage(dataclasses.replace(base, data_dir=tmp_path))
+    asyncio.run(storage.connect())
+
+    first = Journal(path=None)
+    first.persist = True
+    first.warn("search", "resolver cooling down")
+    asyncio.run(storage.set_meta(Journal.PERSIST_META, list(first._persisted)))
+
+    sizes = []
+    for _ in range(4):
+        run = Journal(path=None)
+        run.persist = True
+        asyncio.run(run.restore(storage))
+        sizes.append(len(run._persisted))
+        asyncio.run(storage.set_meta(Journal.PERSIST_META, list(run._persisted)))
+
+    # Stable, not growing: one real warning stays one row, forever.
+    assert sizes == [1, 1, 1, 1], sizes
+
+
+def test_a_summary_row_from_an_older_build_is_ignored(tmp_path):
+    import asyncio
+    import dataclasses
+
+    from vyron.config import settings as base
+    from vyron.core.journal import Journal
+    from vyron.database import JsonStorage
+
+    storage = JsonStorage(dataclasses.replace(base, data_dir=tmp_path))
+    asyncio.run(storage.connect())
+    # Exactly what older builds left behind in Mongo.
+    asyncio.run(
+        storage.set_meta(
+            Journal.PERSIST_META,
+            [
+                {"level": "warn", "scope": "journal", "message": "restored 21 warning(s)/error(s) from the previous run", "ts": 1},
+                {"level": "warn", "scope": "journal", "message": "restored 22 warning(s)/error(s) from the previous run", "ts": 2},
+                {"level": "warn", "scope": "search", "message": "resolver cooling down", "ts": 3},
+            ],
+        )
+    )
+
+    run = Journal(path=None)
+    run.persist = True
+    assert asyncio.run(run.restore(storage)) == 1
+    assert [row["message"] for row in run._persisted] == ["resolver cooling down"]
 
 
 def test_restore_is_a_no_op_without_storage():
