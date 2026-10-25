@@ -93,12 +93,45 @@ async def _log(client: Client, text: str) -> None:
         pass
 
 
+#: Commands that also remove the message they answer. Spelled out rather than
+#: inferred from the leading `d`, so a future `/delete` cannot inherit the step.
+_DELETES_THE_MESSAGE = {"dban", "dkick", "dwarn"}
+
+
+def _removes_message(message: Message) -> bool:
+    """Was this typed as the delete-and-act variant?"""
+    command = (getattr(message, "command", None) or [""])[0]
+    return str(command).lower() in _DELETES_THE_MESSAGE
+
+
+async def _delete_offender(client: Client, message: Message) -> bool:
+    """`/dban`, `/dkick`, `/dwarn` — the message that earned it goes first.
+
+    The `d` is the whole difference from `/ban`: leaving the spam standing is
+    how a ban goes unnoticed, because the thing people are reading is still
+    there. Works on a reply; a bare user id has no message to remove, and that
+    is not an error.
+    """
+    replied = getattr(message, "reply_to_message", None)
+    if replied is None:
+        return False
+    try:
+        await replied.delete()
+        return True
+    except Exception as exc:  # no rights, too old, already gone
+        logger.debug(
+            "could not delete the offending message in %s: %s", message.chat.id, exc
+        )
+        return False
+
+
 def register(client: Client) -> None:
     # ── ban / unban / kick ─────────────────────────────────────────────────
-    @client.on_message(cmd(["ban"]) & BOT_ADMIN)
+    @client.on_message(cmd(["ban", "dban"]) & BOT_ADMIN)
     async def _ban(_: Client, message: Message) -> None:
         if not await _require_admin(client, message):
             return
+        gone = await _delete_offender(client, message) if _removes_message(message) else False
         target = await _resolve_id(client, _target(message))
         if not target:
             await rich.send(
@@ -119,7 +152,8 @@ def register(client: Client) -> None:
                 message.chat.id,
                 cards.notice_card(
                     "Banned",
-                    f"<code>{target}</code> is out and cannot rejoin.",
+                    f"<code>{target}</code> is out and cannot rejoin."
+                    + ("\n<blockquote>The message is gone too.</blockquote>" if gone else ""),
                     tone="warn",
                     icon="shield",
                 ),
@@ -171,10 +205,11 @@ def register(client: Client) -> None:
                 reply_to=message.id,
             )
 
-    @client.on_message(cmd(["kick"]) & BOT_ADMIN)
+    @client.on_message(cmd(["kick", "dkick"]) & BOT_ADMIN)
     async def _kick(_: Client, message: Message) -> None:
         if not await _require_admin(client, message):
             return
+        gone = await _delete_offender(client, message) if _removes_message(message) else False
         target = await _resolve_id(client, _target(message))
         if not target:
             await rich.send(
@@ -196,7 +231,8 @@ def register(client: Client) -> None:
                 message.chat.id,
                 cards.notice_card(
                     "Kicked",
-                    f"<code>{target}</code> was removed — they can come back with a new link.",
+                    f"<code>{target}</code> was removed — they can come back with a new link."
+                    + ("\n<blockquote>The message is gone too.</blockquote>" if gone else ""),
                     tone="warn",
                     icon="bolt",
                 ),
@@ -415,10 +451,11 @@ def register(client: Client) -> None:
             )
 
     # ── warns ──────────────────────────────────────────────────────────────
-    @client.on_message(cmd(["warn"]) & BOT_ADMIN)
+    @client.on_message(cmd(["warn", "dwarn"]) & BOT_ADMIN)
     async def _warn(_: Client, message: Message) -> None:
         if not await _require_admin(client, message):
             return
+        gone = await _delete_offender(client, message) if _removes_message(message) else False
         target = await _resolve_id(client, _target(message))
         if not target:
             await rich.send(
@@ -454,6 +491,8 @@ def register(client: Client) -> None:
                     style="primary" if count < limit - 1 else "danger",
                 )
             )
+        if gone:
+            markup += B.context("The message is gone too.")
         await rich.send(client, message.chat.id, markup)
 
     @client.on_message(cmd(["warns"]) & BOT_ADMIN)

@@ -7,6 +7,24 @@ Two version numbers move independently:
 
 ## Bot
 
+### 1.10.20 — 2026-10-25
+
+**Moderation that takes the message with it.** `/dban`, `/dkick` and `/dwarn`
+are the delete-and-act variants every other music bot ships: the message that
+earned the action goes first, so a ban is visible instead of leaving the spam
+standing above the card that announces it. They are the *same handlers* as
+`/ban`, `/kick` and `/warn` — one implementation, so the two names can never
+disagree about who gets banned — and a delete that fails (too old, no rights)
+never cancels the ban itself.
+
+**`/cpplay` plays a saved playlist where the channel can hear it.** `/pplay`
+queues a list in the chat you typed it in; `/cpplay` puts the same list in the
+linked channel's voice chat, starting the stream with the first track and
+queueing the rest. Without a linked or bound channel it says so and plays
+nothing, instead of quietly playing to the wrong room.
+
+Both are in the help card, the bot menu and the comparison table. 934 tests.
+
 ### 1.10.19 — 2026-10-25
 
 **A search stops when it has a page, not when it has the sixth result.** The

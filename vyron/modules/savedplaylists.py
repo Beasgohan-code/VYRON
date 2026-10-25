@@ -108,8 +108,30 @@ def register(client: Client) -> None:
         )
 
     # ── /pl <name>──────────────────────────────────────────────────────────
-    @client.on_message(cmd(["pplay", "loadpl", "loadplaylist"]))
+    @client.on_message(cmd(["pplay", "loadpl", "loadplaylist", "cpplay"]))
     async def _play_saved(_: Client, message: Message) -> None:
+        # `/cpplay` is the same playlist, played where the linked channel's
+        # voice chat is — the one thing `/pplay` cannot express.
+        channel_mode = message.command[0].lower() == "cpplay"
+        target_chat = message.chat.id
+        if channel_mode:
+            from vyron.modules.channel import resolve_target
+
+            resolved = await resolve_target(client, message)
+            if resolved is None:
+                await rich.send(
+                    client,
+                    message.chat.id,
+                    cards.warn_card(
+                        "<b>No linked channel to play in.</b>\n"
+                        "Bind one with <code>/cplayset @channel</code>, or link a "
+                        "channel to this group, then try again."
+                    ),
+                    reply_to=message.id,
+                )
+                return
+            target_chat = resolved
+
         name = command_args(message)
         if not name:
             await rich.send(
@@ -134,8 +156,18 @@ def register(client: Client) -> None:
         if not runtime.player:
             return
         queued = 0
-        for track in tracks:
-            position = await runtime.player.enqueue(message.chat.id, track)
+        for index, track in enumerate(tracks):
+            if channel_mode and index == 0:
+                # The first track starts the stream; the rest join the queue.
+                try:
+                    await runtime.player.play_track(
+                        target_chat, track, video=track.is_video
+                    )
+                    queued += 1
+                except Exception as exc:  # a dead track must not drop the list
+                    logger.warning("cpplay could not start the channel stream: %s", exc)
+                continue
+            position = await runtime.player.enqueue(target_chat, track)
             if position > 0:
                 queued += 1
         await rich.send(
@@ -146,9 +178,15 @@ def register(client: Client) -> None:
                 glyph="playlist",
                 label="playlist",
                 value=f"<b>{rich.esc(truncate(title, 30))}</b>",
-                note="It plays after whatever is already queued — nothing was interrupted."
-                if queued < len(tracks)
-                else "Everything in it went into the queue.",
+                note=(
+                    "It plays in the linked channel's voice chat."
+                    if channel_mode
+                    else (
+                        "It plays after whatever is already queued — nothing was interrupted."
+                        if queued < len(tracks)
+                        else "Everything in it went into the queue."
+                    )
+                ),
                 extra=[
                     ("plus", "queued", f"<b>{queued}</b> of {len(tracks)} tracks"),
                     ("clock", "length", f"<b>{fmt_duration(sum(t.duration for t in tracks))}</b>"),

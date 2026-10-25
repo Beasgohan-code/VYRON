@@ -221,6 +221,12 @@ PARITY_ALIASES = {
     "adminlist": "admins",
     "channelplay": "cplay",
     "setchannel": "cplayset",
+    # Not pure renames: the `d` variants also remove the replied message, but
+    # they are the same handler, so they can never disagree about the ban.
+    "dban": "ban",
+    "dkick": "kick",
+    "dwarn": "warn",
+    "cpplay": "pplay",
 }
 
 

@@ -95,6 +95,16 @@ async def _target_chat(client: Client, message: Message) -> int | None:
     return None
 
 
+async def resolve_target(client: Client, message: Message) -> int | None:
+    """The chat `/cplay` (and `/cpplay`) should stream into, or ``None``.
+
+    Public so the playlist half does not have to copy the resolution order:
+    the `/cplayset` binding wins, then the group's linked channel, then the
+    channel itself when the command is typed there.
+    """
+    return await _target_chat(client, message)
+
+
 def register(client: Client) -> None:
     @client.on_message(cmd(["cplay", "channelplay"]))
     async def _cplay(_: Client, message: Message) -> None:

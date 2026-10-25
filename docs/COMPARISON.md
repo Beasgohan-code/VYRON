@@ -64,7 +64,7 @@ leaves when the queue ends.
 | `ShizuMusic/modules/ping.py` | 163 | `/ping` `/speedtest` `/spt` | `modules/start.py` `/ping` + `modules/doctor.py` (395) | better for `/ping`; `/speedtest` absent (deliberate) |
 | `ShizuMusic/modules/play.py` | 341 | search → download → play, one edited status card | `modules/play.py` (1032) | better — links, playlists, replied files, candidates, `/song` upload |
 | `ShizuMusic/modules/playforce.py` | 166 | `/playforce` family (skips permissions) | — | **absent (deliberate)**: owner deleted force-play |
-| `ShizuMusic/modules/playlist.py` | 488 | `/pcreate` `/padd` `/pplay` `/premove` `/pview` `/pdelete` `/cpplay` | `modules/savedplaylists.py` (374) + `core/playlists.py` (150) + `modules/convenience.py` (242) | better — plus `/exportpl` `/importpl` |
+| `ShizuMusic/modules/playlist.py` | 488 | `/pcreate` `/padd` `/pplay` `/premove` `/pview` `/pdelete` `/cpplay` | `modules/savedplaylists.py` + `core/playlists.py` + `modules/convenience.py` | better — plus `/exportpl` `/importpl`, and `/cpplay` plays into the linked channel |
 | `ShizuMusic/modules/resume.py` | 60 | `/resume` `/cresume` | `modules/controls.py` | merged |
 | `ShizuMusic/modules/seek.py` | 275 | `/seek` `/seekback` with a local position tracker | `modules/controls.py` `/seek` + `utils/helpers.parse_seek` (144) | better — parses `90`, `1:30`, `+15`, `-10`, `+1:30`; no separate tracker to drift |
 | `ShizuMusic/modules/skip.py` | 115 | `/skip` `/cskip`, skip-to-index | `modules/controls.py` + `modules/channel.py` + `/voteskip` | better — plus vote-skip |
@@ -102,7 +102,7 @@ leaves when the queue ends.
 | `/ping` | same (+`/doctor`) | better |
 | `/speedtest` `/spt` | — | **absent (deliberate)** |
 | `/playforce` `/vplayforce` `/cplayforce` `/cvplayforce` | — | **absent (deliberate)** |
-| `/pcreate` `/padd` `/premove` `/pview` `/pplay` `/cpplay` `/pdelete` | `/pcreate` `/padd` `/premove` `/pview` `/pplay` `/pdelete` | same |
+| `/pcreate` `/padd` `/premove` `/pview` `/pplay` `/cpplay` `/pdelete` | `/pcreate` `/padd` `/premove` `/pview` `/pplay` (+`/cpplay`: the same list, played in the linked channel) `/pdelete` | same |
 | `/resume` `/cresume` | same | same |
 | `/skip` `/cskip` | same (+`/next`, `/voteskip`, `/skipvotes`) | better |
 | `/start` `/help` | same | same |
@@ -170,7 +170,7 @@ leaves when the queue ends.
 
 | Videl command(s) | VYRON | verdict |
 |---|---|---|
-| `/ban` `/dban` `/unban` `/kick` `/dkick` `/mute` `/tmute` `/unmute` `/promote` `/demote` | same | same |
+| `/ban` `/dban` `/unban` `/kick` `/dkick` `/mute` `/tmute` `/unmute` `/promote` `/demote` | same, and `/dban` `/dkick` `/dwarn` also delete the replied message | same |
 | `/warn` `/dwarn` `/warns` `/resetwarns` `/rmwarns` `/unwarn` `/setwarnlimit` | `/warn` `/warns` `/resetwarns` (+`/rmwarns`) `/unwarn` `/warnlimit` | same |
 | `/purge` `/pin` `/unpin` | same | same |
 | `/setwelcome` `/welcome` `/welcomemode` `/setgoodbye` `/admins` `/adminlist` | `/setwelcome` `/welcome` (+`/welcomemode`) `/setgoodbye` `/admins` (+`/adminlist`) | same |
@@ -269,6 +269,8 @@ Each item below came out of this comparison and is shipped:
 | 1.10.19 | `/setlang <code>` sets a language in one message instead of four taps | Shizu's `/setlang` |
 | 1.10.19 | if only the **assistant** is kicked, the queue is cleared and the group is told why; a queue that could never play again is gone | Shizu's `bot_left_watcher`, Videl's `utils/assistant.py` |
 | 1.10.19 | a source search stops at half a page instead of waiting for every source to answer | the Render log's 4.8–6.3 s `POST /api/search` |
+| 1.10.20 | `/dban` `/dkick` `/dwarn`: the message that earned it is deleted before the action, and a failed delete never cancels the ban | Videl's and Fallen's `d*` moderation set |
+| 1.10.20 | `/cpplay`: a saved playlist played into the linked channel's voice chat | Shizu's `/cpplay` |
 
 Deliberately **not** copied, with reasons:
 

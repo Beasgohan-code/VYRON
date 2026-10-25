@@ -189,3 +189,102 @@ def test_promote_uses_administrator_rights(monkeypatch, sent):
     )
     user_id, rights = client.promotions[0]
     assert user_id == MEMBER_ID and rights.can_delete_messages is True
+
+
+# ── the `d` variants: delete the message that earned it ────────────────────
+def _offender():
+    """A replied message that remembers being deleted."""
+    message = FakeMessage("buy followers cheap", user=FakeUser(MEMBER_ID, "Spammer"))
+    message.deleted = False
+
+    async def _delete():
+        message.deleted = True
+
+    message.delete = _delete
+    return message
+
+
+def test_dban_removes_the_message_then_bans(monkeypatch, sent):
+    from vyron.core import acl
+
+    monkeypatch.setattr(acl, "is_sudo", lambda _uid: False)
+    client = FakeClient(admin=True)
+    moderation.register(client)
+
+    offender = _offender()
+    _run(
+        client.handlers["_ban"],
+        client,
+        FakeMessage("/dban", user=FakeUser(ADMIN_ID, "Admin"), reply=offender),
+    )
+
+    assert offender.deleted is True, "the spam is still standing"
+    assert client.bans == [MEMBER_ID]
+    assert "gone too" in sent[-1]
+
+
+def test_plain_ban_leaves_the_message_alone(monkeypatch, sent):
+    """None of the moderation commands may delete anything by surprise."""
+    from vyron.core import acl
+
+    monkeypatch.setattr(acl, "is_sudo", lambda _uid: False)
+    client = FakeClient(admin=True)
+    moderation.register(client)
+
+    offender = _offender()
+    _run(
+        client.handlers["_ban"],
+        client,
+        FakeMessage("/ban", user=FakeUser(ADMIN_ID, "Admin"), reply=offender),
+    )
+
+    assert offender.deleted is False
+    assert client.bans == [MEMBER_ID]
+
+
+def test_a_message_that_cannot_be_deleted_still_bans(monkeypatch, sent):
+    from vyron.core import acl
+
+    monkeypatch.setattr(acl, "is_sudo", lambda _uid: False)
+    client = FakeClient(admin=True)
+    moderation.register(client)
+
+    offender = _offender()
+
+    async def too_old():
+        raise RuntimeError("message is too old to delete")
+
+    offender.delete = too_old
+    _run(
+        client.handlers["_ban"],
+        client,
+        FakeMessage("/dban", user=FakeUser(ADMIN_ID, "Admin"), reply=offender),
+    )
+
+    assert client.bans == [MEMBER_ID], "a failed delete cancelled the ban"
+
+
+def test_dkick_and_dwarn_are_the_same_handler(monkeypatch, sent):
+    from vyron.core import acl
+
+    monkeypatch.setattr(acl, "is_sudo", lambda _uid: False)
+    client = FakeClient(admin=True)
+    moderation.register(client)
+
+    kicked = _offender()
+    _run(
+        client.handlers["_kick"],
+        client,
+        FakeMessage("/dkick", user=FakeUser(ADMIN_ID, "Admin"), reply=kicked),
+    )
+    assert kicked.deleted is True
+    assert client.bans == [MEMBER_ID, -MEMBER_ID]
+
+    warned = _offender()
+    _run(
+        client.handlers["_warn"],
+        client,
+        FakeMessage("/dwarn", user=FakeUser(ADMIN_ID, "Admin"), reply=warned),
+    )
+    assert warned.deleted is True
+    assert "gone too" in sent[-1]
