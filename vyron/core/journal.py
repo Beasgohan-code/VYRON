@@ -1,0 +1,551 @@
+# ---------------------------------------------------------------------------
+#  VYRON — owner journal
+#
+#  A single, bounded, append-only record of what the process actually did:
+#  boot and shutdown, streaming start/stop, watchdog reconnects, database
+#  failures and every warning or error the loggers emit.
+#
+#  It exists because "the bot died at 3am" is not a diagnosis. Owners can read
+#  it three ways:
+#
+#      /logs                 inside Telegram (owner only)
+#      GET /api/logs         the Mini App's console (owner token required)
+#      GET /api/logs/stream  live tail (SSE) — the same lines, as they happen
+#      data/journal.jsonl    on disk, rotated at 4 MB
+#
+#  The ring buffer keeps the last 2000 events in memory so the API can serve a
+#  cursor (`?since=<seq>`) without touching the disk.
+# ---------------------------------------------------------------------------
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import platform
+import sys
+import threading
+import time
+import traceback
+from collections import Counter, deque
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Iterable
+
+logger = logging.getLogger(__name__)
+
+LEVELS: tuple[str, ...] = ("debug", "info", "ok", "warn", "error")
+_SEVERITY = {"debug": 10, "info": 20, "ok": 20, "warn": 30, "error": 40}
+
+_MAX_EVENTS = 2000
+_MAX_FILE_BYTES = 4 * 1024 * 1024
+_MAX_MESSAGE = 600
+
+# Logger prefixes are noisy (`vyron.core.player`); the scope is what an owner
+# scans for, so every event carries a short one.
+_SCOPES: tuple[tuple[str, str], ...] = (
+    ("vyron.core.player", "player"),
+    ("vyron.core.queue", "queue"),
+    ("vyron.core.search", "search"),
+    ("vyron.core.downloader", "download"),
+    ("vyron.core.watchdog", "watchdog"),
+    ("vyron.core.keepalive", "keepalive"),
+    ("vyron.core.maintenance", "maintenance"),
+    ("vyron.core.journal", "journal"),
+    ("vyron.web.stream", "stream"),
+    ("vyron.web.server", "webapp"),
+    ("vyron.web.auth", "auth"),
+    ("vyron.api.", "api"),
+    ("vyron.database", "database"),
+    ("vyron.clients", "telegram"),
+    ("vyron.modules", "command"),
+    ("pyrogram", "telegram"),
+    ("pytgcalls", "voice"),
+    ("ntgcalls", "voice"),
+    ("aiohttp", "http"),
+    ("motor", "database"),
+    ("pymongo", "database"),
+    ("asyncio", "asyncio"),
+)
+
+
+def _scope_for(name: str) -> str:
+    for prefix, scope in _SCOPES:
+        if name == prefix or name.startswith(prefix):
+            return scope
+    return name.rsplit(".", 1)[-1] or "app"
+
+
+def _trim(text: str, limit: int = _MAX_MESSAGE) -> str:
+    text = " ".join(str(text).split())
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+@dataclass(slots=True)
+class Event:
+    """One line in the journal."""
+
+    seq: int
+    ts: float
+    level: str
+    scope: str
+    message: str
+    meta: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "seq": self.seq,
+            "ts": self.ts,
+            "level": self.level,
+            "scope": self.scope,
+            "message": self.message,
+            "meta": self.meta,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Event":
+        return cls(
+            seq=int(data.get("seq", 0)),
+            ts=float(data.get("ts", 0)),
+            level=str(data.get("level", "info")),
+            scope=str(data.get("scope", "app")),
+            message=str(data.get("message", "")),
+            meta=dict(data.get("meta") or {}),
+        )
+
+
+class Subscription:
+    """A live tail of the journal, safe to feed from worker threads.
+
+    Every event is copied into an asyncio queue on the subscriber's own loop,
+    so a slow consumer (a phone on 3G, an idle browser tab) can never slow the
+    bot down: when the queue is full the oldest event is dropped.
+    """
+
+    def __init__(self, loop: asyncio.AbstractEventLoop, limit: int = 400) -> None:
+        self.loop = loop
+        self.queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=max(20, limit))
+        self.closed = False
+        self.dropped = 0
+
+    def push(self, payload: dict[str, Any]) -> None:
+        if self.closed:
+            return
+        try:
+            self.loop.call_soon_threadsafe(self._put, payload)
+        except RuntimeError:  # the loop is gone (shutdown or a closed tab)
+            self.closed = True
+
+    def _put(self, payload: dict[str, Any]) -> None:
+        if self.closed:
+            return
+        if self.queue.full():
+            try:
+                self.queue.get_nowait()
+                self.dropped += 1
+            except asyncio.QueueEmpty:  # pragma: no cover - race, harmless
+                pass
+        try:
+            self.queue.put_nowait(payload)
+        except asyncio.QueueFull:  # pragma: no cover - race, harmless
+            pass
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class Journal:
+    """Bounded event log — thread safe, JSONL backed, cursor addressable."""
+
+    def __init__(self, path: Path | None = None, capacity: int = _MAX_EVENTS) -> None:
+        self.path = path
+        self._events: deque[Event] = deque(maxlen=capacity)
+        # Mirror of the warnings/errors, kept across a restart (see `_mirror`).
+        self.persist = True
+        self._persisted: deque[dict[str, Any]] = deque(maxlen=self.PERSIST_MAX)
+        self._persist_task: asyncio.Task | None = None
+        self._lock = threading.Lock()
+        self._seq = 0
+        self._counts: Counter[str] = Counter()
+        self._handler: logging.Handler | None = None
+        # Optional callback fired for every event (used by the log channel).
+        self._sink: Any = None
+        # Live-tail subscribers (the SSE log stream).
+        self._subs: set[Subscription] = set()
+        self.started_at = time.time()
+        self.installed = False
+
+    # ── writing ────────────────────────────────────────────────────────────
+    def record(self, level: str, scope: str, message: str, **meta: Any) -> Event:
+        level = level if level in _SEVERITY else "info"
+        with self._lock:
+            self._seq += 1
+            event = Event(
+                seq=self._seq,
+                ts=time.time(),
+                level=level,
+                scope=scope or "app",
+                message=_trim(message),
+                meta={key: value for key, value in meta.items() if value is not None},
+            )
+            self._events.append(event)
+            self._counts[level] += 1
+            path = self.path
+        if path is not None:
+            self._persist(event, path)
+        sink = self._sink
+        if sink is not None:
+            try:
+                sink(event)
+            except Exception:  # a sink must never break the caller
+                pass
+        self._mirror(event)
+        with self._lock:
+            subscribers = list(self._subs)
+        if subscribers:
+            payload = event.to_dict()
+            for subscription in subscribers:
+                subscription.push(payload)
+        return event
+
+    def _persist(self, event: Event, path: Path) -> None:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if path.is_file() and path.stat().st_size > _MAX_FILE_BYTES:
+                rotated = path.with_suffix(path.suffix + ".1")
+                try:
+                    if rotated.exists():
+                        rotated.unlink()
+                    path.rename(rotated)
+                except OSError:
+                    pass
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(event.to_dict(), ensure_ascii=False, default=str) + "\n")
+        except OSError as exc:  # read-only disk — the ring buffer still works
+            if self.installed:
+                logging.getLogger("vyron.core.journal").debug("journal write failed: %s", exc)
+
+    # ── surviving a restart ───────────────────────────────────────────────
+    #: Warnings and errors are mirrored into the shared store, so a boot loop
+    #: (where the process dies before anyone reads /logs) is still visible
+    #: afterwards. Only the tail is kept — this is a diagnosis, not an archive.
+    PERSIST_LEVELS = frozenset({"warn", "error"})
+    PERSIST_MAX = 60
+    #: How many distinct restored lines are replayed at boot. A full 60-row tail
+    #: used to be dumped verbatim on every restart, which on a phone-sized log
+    #: view pushed this run's own lines off the screen.
+    PERSIST_RESTORE_LINES = 12
+    PERSIST_META = "journal_errors"
+
+    def _mirror(self, event: Event) -> None:
+        if event.level not in self.PERSIST_LEVELS:
+            return
+        if event.meta.get("restored"):
+            # already in the mirror; re-adding it would double the tail on
+            # every restart until the deque filled with duplicates.
+            return
+        if event.meta.get("summary"):
+            # "restored 29 warning(s)" is bookkeeping about the mirror, not an
+            # event worth carrying forward. Mirroring it made every restart
+            # restate the previous restatements: the tail grew by one summary
+            # per boot and the count climbed 3 → 10 → 29 across a few deploys.
+            return
+        if not self.persist:
+            return
+        with self._lock:
+            self._persisted.append(event.to_dict())
+            while len(self._persisted) > self.PERSIST_MAX:
+                self._persisted.popleft()
+            if self._persist_task is None or self._persist_task.done():
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    return          # no loop (a script or a test): nothing to save
+                self._persist_task = loop.create_task(self._flush_persisted())
+
+    async def _flush_persisted(self) -> None:
+        """Write the mirrored tail back, at most once every few seconds."""
+        await asyncio.sleep(2.0)
+        storage = None
+        try:
+            from vyron.runtime import runtime
+
+            storage = runtime.storage
+        except Exception:  # pragma: no cover - before runtime exists
+            return
+        if storage is None:
+            return
+        with self._lock:
+            payload = list(self._persisted)
+        try:
+            await storage.set_meta(self.PERSIST_META, payload)
+        except Exception as exc:  # pragma: no cover - never break a log call
+            logger.debug("journal tail could not be persisted: %s", exc)
+
+    async def restore(self, storage: Any) -> int:
+        """Load the previous run's warnings and errors into this one."""
+        if storage is None:
+            return 0
+        try:
+            rows = await storage.get_meta(self.PERSIST_META, []) or []
+        except Exception:
+            return 0
+        if not isinstance(rows, list) or not rows:
+            return 0
+        loaded = 0
+        counts: dict[tuple[str, str, str], int] = {}
+        first_ts: dict[tuple[str, str, str], str] = {}
+        order: list[tuple[str, str, str]] = []
+        with self._lock:
+            seen = {
+                (str(item.get("level")), str(item.get("scope")), str(item.get("message")), str(item.get("ts")))
+                for item in self._persisted
+                if isinstance(item, dict)
+            }
+        for row in rows[-self.PERSIST_MAX :]:
+            if not isinstance(row, dict):
+                continue
+            level = str(row.get("level") or "warn")
+            if level not in self.PERSIST_LEVELS:
+                continue
+            scope = str(row.get("scope") or "previous")
+            message = str(row.get("message") or "")
+            # Judge the row on what it says, not on how it is flagged: stores
+            # written by older builds already contain summary rows.
+            if scope == "journal" and (message.startswith("restored ") or "warning(s)/error(s)" in message):
+                continue
+            key = (level, scope, message, str(row.get("ts")))
+            with self._lock:
+                if key in seen:
+                    continue            # already mirrored in this run
+                seen.add(key)
+                self._persisted.append(row)   # keep mirroring them forward
+            bucket = (level, scope, message)
+            if bucket not in counts:
+                order.append(bucket)
+                first_ts[bucket] = row.get("ts")
+            counts[bucket] = counts.get(bucket, 0) + 1
+            loaded += 1
+        # One line per *distinct* message, with a ×N when it repeated, and a cap
+        # on how many are replayed — a boot should summarise the last run, not
+        # reprint it.
+        ranked = sorted(order, key=lambda item: -counts[item])
+        replayed, rest = ranked[: self.PERSIST_RESTORE_LINES], ranked[self.PERSIST_RESTORE_LINES :]
+        for level, scope, message in replayed:
+            repeats = counts[(level, scope, message)]
+            suffix = f"  (×{repeats})" if repeats > 1 else ""
+            self.record(
+                level,
+                scope,
+                f"[previous run] {message}{suffix}"[: _MAX_MESSAGE],
+                restored=True,
+                original_ts=first_ts[(level, scope, message)],
+                count=repeats,
+            )
+        if rest:
+            self.warn(
+                "journal",
+                f"[previous run] {len(rest)} more distinct warning(s)/error(s), "
+                f"{sum(counts[b] for b in rest)} line(s) — ask for the previous run's log",
+                summary=True,
+            )
+        if loaded:
+            self.warn(
+                "journal",
+                f"restored {loaded} warning(s)/error(s) from the previous run",
+                summary=True,
+            )
+        return loaded
+
+    # ── convenience ────────────────────────────────────────────────────────
+    def debug(self, scope: str, message: str, **meta: Any) -> Event:
+        return self.record("debug", scope, message, **meta)
+
+    def info(self, scope: str, message: str, **meta: Any) -> Event:
+        return self.record("info", scope, message, **meta)
+
+    def ok(self, scope: str, message: str, **meta: Any) -> Event:
+        return self.record("ok", scope, message, **meta)
+
+    def warn(self, scope: str, message: str, **meta: Any) -> Event:
+        return self.record("warn", scope, message, **meta)
+
+    def error(self, scope: str, message: str, exc: BaseException | None = None, **meta: Any) -> Event:
+        if exc is not None:
+            meta.setdefault("type", type(exc).__name__)
+            tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+            meta.setdefault("traceback", tb[-1800:])
+        return self.record("error", scope, message, **meta)
+
+    def set_sink(self, sink: Any) -> None:
+        """Attach (or clear) a callable that receives every recorded event."""
+        self._sink = sink
+
+    # ── live tail ──────────────────────────────────────────────────────────
+    def subscribe(self, *, limit: int = 400) -> Subscription:
+        """Register a live subscriber on the *running* loop."""
+        subscription = Subscription(asyncio.get_running_loop(), limit=limit)
+        with self._lock:
+            self._subs.add(subscription)
+        return subscription
+
+    def unsubscribe(self, subscription: Subscription) -> None:
+        subscription.close()
+        with self._lock:
+            self._subs.discard(subscription)
+
+    @property
+    def subscribers(self) -> int:
+        with self._lock:
+            return len(self._subs)
+
+    # ── reading ────────────────────────────────────────────────────────────
+    def events(
+        self,
+        *,
+        since: int = 0,
+        limit: int = 120,
+        levels: Iterable[str] | None = None,
+        scope: str | None = None,
+    ) -> list[dict[str, Any]]:
+        wanted = {level.lower() for level in levels} if levels else None
+        minimum = min((_SEVERITY[level] for level in wanted), default=0) if wanted else 0
+        with self._lock:
+            snapshot = list(self._events)
+        picked: list[Event] = []
+        for event in reversed(snapshot):
+            if since and event.seq <= since:
+                break
+            if scope and event.scope != scope:
+                continue
+            if wanted and event.level not in wanted and _SEVERITY[event.level] < minimum:
+                continue
+            picked.append(event)
+            if len(picked) >= limit:
+                break
+        return [event.to_dict() for event in reversed(picked)]
+
+    def tail(self, limit: int = 10) -> list[dict[str, Any]]:
+        return self.events(limit=limit)
+
+    def stats(self) -> dict[str, Any]:
+        with self._lock:
+            counts = dict(self._counts)
+            total = len(self._events)
+            seq = self._seq
+        return {
+            "seq": seq,
+            "buffered": total,
+            "counts": counts,
+            "errors": counts.get("error", 0),
+            "warnings": counts.get("warn", 0),
+            "uptime": max(0.0, time.time() - self.started_at),
+            "file": str(self.path) if self.path else "",
+        }
+
+    def clear(self, *, reason: str = "") -> int:
+        """Empty the ring buffer and record that it happened — once.
+
+        The caller's context lives in the entry itself: logging a second line
+        from the web console just made the same event appear twice.
+        """
+        with self._lock:
+            removed = len(self._events)
+            self._events.clear()
+        suffix = f" — {reason}" if reason else ""
+        self.info("journal", f"journal cleared ({removed} events dropped){suffix}")
+        return removed
+
+    def export(self) -> Path | None:
+        """Write the whole ring buffer to a temp file for `/logs export`."""
+        if self.path is None:
+            return None
+        with self._lock:
+            snapshot = list(self._events)
+        target = self.path.with_name(f"journal-export-{int(time.time())}.jsonl")
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with target.open("w", encoding="utf-8") as handle:
+                for event in snapshot:
+                    handle.write(json.dumps(event.to_dict(), ensure_ascii=False, default=str) + "\n")
+        except OSError:
+            return None
+        return target
+
+    # ── logging bridge ─────────────────────────────────────────────────────
+    def install(self, level: int = logging.INFO) -> None:
+        """Capture every logger (ours, pyrogram, tgcalls, aiohttp) into the journal."""
+        if self._handler is not None:
+            return
+        journal = self
+
+        class _Sink(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:  # pragma: no cover - logging glue
+                try:
+                    if record.name == "vyron.core.journal":
+                        return
+                    if record.levelno >= logging.ERROR:
+                        level_name = "error"
+                    elif record.levelno >= logging.WARNING:
+                        level_name = "warn"
+                    else:
+                        level_name = "info"
+                    message = record.getMessage()
+                    if record.exc_info:
+                        exc = record.exc_info[1]
+                        journal.error(
+                            _scope_for(record.name),
+                            message,
+                            exc if isinstance(exc, BaseException) else None,
+                        )
+                    else:
+                        journal.record(level_name, _scope_for(record.name), message)
+                except Exception:  # never let logging raise
+                    pass
+
+        handler = _Sink()
+        handler.setLevel(level)
+        root = logging.getLogger()
+        root.addHandler(handler)
+        self._handler = handler
+        self.installed = True
+
+    def uninstall(self) -> None:
+        if self._handler is None:
+            return
+        try:
+            logging.getLogger().removeHandler(self._handler)
+        finally:
+            self._handler = None
+            self.installed = False
+
+    # ── lifecycle helpers ──────────────────────────────────────────────────
+    def boot(self, *, version: str, storage: str, streaming: bool, handlers: int = 0) -> None:
+        self.info(
+            "boot",
+            f"VYRON {version} online",
+            python=platform.python_version(),
+            platform=f"{platform.system()} {platform.release()}",
+            storage=storage,
+            streaming=streaming,
+            handlers=handlers,
+            pid=__import__("os").getpid(),
+            argv=" ".join(sys.argv[:3]),
+        )
+
+    def shutdown(self, reason: str = "signal") -> None:
+        self.info("boot", f"shutting down ({reason})", uptime=round(self.stats()["uptime"], 1))
+
+
+# The process-wide journal. `main.py` points it at `data/journal.jsonl`.
+journal = Journal()
+
+
+def attach(path: Path | None) -> Journal:
+    """Point the shared journal at *path* and start capturing loggers."""
+    journal.path = path
+    journal.started_at = time.time()
+    journal.install()
+    return journal
+
+
+__all__ = ["Event", "Journal", "LEVELS", "Subscription", "attach", "journal"]

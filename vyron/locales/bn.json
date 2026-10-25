@@ -1,0 +1,33 @@
+{
+  "name": "বাংলা",
+  "strings": {
+    "lang.title": "ভাষা",
+    "lang.note": "VYRON-এর উত্তর এই চ্যাটের ভাষায় আসবে। একটি ভাষা বেছে নিন — সঙ্গে সঙ্গে কার্যকর হবে।",
+    "lang.current": "বর্তমান",
+    "lang.saved": "ভাষা সংরক্ষিত হয়েছে।",
+    "lang.unknown": "এই ভাষাটি উপলব্ধ নয়।",
+    "lang.admin_only": "এখানে কেবল অ্যাডমিনরা ভাষা বদলাতে পারেন।",
+    "lang.switched": "{name} নির্বাচন করা হয়েছে।",
+    "lang.page": "পৃষ্ঠা {page}/{pages}",
+    "np.streaming": "চলছে",
+    "np.paused": "থামানো",
+    "np.live": "লাইভ",
+    "np.up_next": "পরেরটি",
+    "np.queued": "{count} সারিতে",
+    "np.now_playing": "এখন চলছে",
+    "np.by": "শিল্পী",
+    "ctl.paused": "থামানো হয়েছে",
+    "ctl.resumed": "আবার শুরু",
+    "ctl.nothing_playing": "কিছু চলছে না",
+    "ctl.nothing_paused": "কিছু থামানো নেই",
+    "ctl.skipped": "পরেরটিতে গেল",
+    "ctl.queue_empty": "সারি খালি",
+    "ctl.stopped": "থামানো হয়েছে এবং ভয়েস চ্যাট ছাড়া হয়েছে",
+    "ctl.volume": "শব্দ: {volume}%",
+    "ctl.loop": "লুপ: {mode}",
+    "ctl.shuffled": "{count} টি ট্র্যাক শাফল করা হয়েছে",
+    "ctl.autoplay_on": "অটোপ্লে চালু",
+    "ctl.autoplay_off": "অটোপ্লে বন্ধ",
+    "ctl.seek": "{time} এ গেল"
+  }
+}

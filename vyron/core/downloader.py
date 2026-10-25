@@ -1,0 +1,1124 @@
+# ---------------------------------------------------------------------------
+#  VYRON — file downloads (audio / video) with an on-disk cache
+# ---------------------------------------------------------------------------
+# Downloading is where music bots usually fall over, so this module is built
+# around three rules:
+#
+#   1. **Never trust one yt-dlp invocation.** YouTube issues a different set of
+#      formats to each player client and rotates which ones need a PO token.
+#      The download therefore walks the same client ladder the stream resolver
+#      uses (default → android_vr → ios) and only gives up after all of them.
+#   2. **Never leave a half file where the cache will find it.** yt-dlp writes
+#      into a private temp directory; the finished file is moved into place in
+#      one atomic rename. A crashed download can no longer masquerade as a
+#      cached track and be served forever.
+#   3. **Have a second engine.** If yt-dlp cannot produce a file at all, the
+#      direct URL from Invidious/Piped is transcoded with ffmpeg (or saved raw
+#      when ffmpeg is missing) — the exact fallback chain the music API and
+#      `/song` share.
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import logging
+import re
+import shutil
+import subprocess
+import time
+from pathlib import Path
+from typing import Callable
+
+import yt_dlp
+
+from vyron.config import Settings
+from vyron.core.queue import Track
+
+logger = logging.getLogger(__name__)
+
+_SAFE_RE = re.compile(r"[^\w\-. ()\[\]]+", re.UNICODE)
+AUDIO_EXTS = ("mp3", "m4a", "opus", "webm", "ogg", "aac")
+#: Containers that are already what we serve, so a download of one is *moved*
+#: into the cache rather than re-encoded. Everything else (webm/opus, ogg) still
+#: goes through ffmpeg because Telegram's audio player is picky about them.
+COPY_SUFFIXES = ("mp3", "m4a", "aac")
+VIDEO_EXTS = ("mp4", "webm", "mkv")
+
+# yt-dlp clients, in the order that keeps working when web starts demanding a
+# PO token. `None` means "whatever yt-dlp picks", which is still the best first
+# bet on an IP that YouTube likes.
+CLIENT_LADDER: tuple[str | None, ...] = (None, "android_vr", "ios", "tv")
+
+ProgressHook = Callable[[float, str], None]
+
+#: MP3 bitrate for anything this module has to transcode. 320 is the ceiling
+#: listeners can hear on a phone, and the catalogues already serve that.
+MP3_KBPS = "320"
+#: How long yt-dlp may work alone before the mirrors are asked too. A healthy
+#: extraction finishes in two to four seconds; a walled or throttled one spends
+#: twenty seconds failing and *then* asks the fallbacks, which is the twenty
+#: seconds this race exists to remove.
+HEAD_START = 6.0
+#: AAC bitrate inside the generated MP4 — the video's sound, not its picture.
+VIDEO_AUDIO_KBPS = "256"
+
+
+class DownloadError(RuntimeError):
+    pass
+
+
+class Meter:
+    """Turn raw byte counts into the line a listener reads under the card.
+
+    ``42% · 3.1 MB / 7.4 MB · 2.4 MB/s · 2s left`` — because "downloading…"
+    that never changes is indistinguishable from a hung bot, and the difference
+    between a download and a dead one is *movement*.
+    """
+
+    def __init__(self, label: str = "downloading") -> None:
+        self.label = label
+        self.started = time.monotonic()
+        self._bytes = 0
+        self._at = self.started
+        self.speed = 0.0
+
+    def sample(self, done: int, total: int = 0) -> tuple[float, str]:
+        from vyron.ui.progress import human_size, human_time
+
+        now = time.monotonic()
+        window = now - self._at
+        if window >= 0.5:
+            self.speed = max(0.0, (done - self._bytes) / window)
+            self._bytes, self._at = done, now
+        fraction = (done / total) if total else 0.0
+        bits = [human_size(done) + (f" / {human_size(total)}" if total else "")]
+        if self.speed:
+            bits.append(f"{human_size(self.speed)}/s")
+        if total and self.speed and total > done:
+            bits.append(f"{human_time((total - done) / self.speed)} left")
+        head = f"{int(fraction * 100)}% · " if total else ""
+        return fraction, f"{self.label} · {head}" + " · ".join(bits)
+
+
+def safe_stem(text: str, limit: int = 70) -> str:
+    cleaned = _SAFE_RE.sub("_", text or "track").strip(" ._")
+    return (cleaned or "track")[:limit]
+
+
+def ffmpeg_path() -> str:
+    """`ffmpeg` on PATH, or "" — the Docker image ships it, bare hosts may not."""
+    return shutil.which("ffmpeg") or ""
+
+
+def _task(make_coroutine, name: str) -> asyncio.Task:
+    """Schedule an engine without letting a *synchronous* failure escape.
+
+    The engines are called through a lambda so an exception raised before the
+    first ``await`` lands inside the task — otherwise it would fly out of
+    `_audio_tail` and skip the sibling that is about to succeed.
+    """
+
+    async def runner():
+        return await make_coroutine()
+
+    return asyncio.create_task(runner(), name=name)
+
+
+def _atomic_move(source: Path, target: Path) -> Path:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if source.resolve() == target.resolve():
+        return target
+    try:
+        source.replace(target)
+    except OSError:  # different filesystems
+        shutil.copyfile(source, target)
+        source.unlink(missing_ok=True)
+    return target
+
+
+#: Sources whose bytes come from YouTube, and only those may be skipped when
+#: YouTube is refusing this host.
+_YOUTUBE_SOURCES = frozenset({"youtube", "ytmusic", "youtube_music", ""})
+
+
+def _is_youtube(track: Track) -> bool:
+    source = str(getattr(track, "source", "") or "").lower()
+    if source in _YOUTUBE_SOURCES:
+        return True
+    return bool(re.fullmatch(r"[\w-]{11}", str(getattr(track, "id", "") or "")))
+
+
+class Downloader:
+    """Downloads one track at a time per call, reusing previously cached files."""
+
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        self.settings.ensure_dirs()
+        self._locks: dict[str, asyncio.Lock] = {}
+
+    # ── what the resolver already knows ────────────────────────────────────
+    def _youtube_walled(self) -> bool:
+        """True while the stream resolver knows YouTube is refusing this host.
+
+        Production showed the cost of not asking: a walled server still walked
+        four yt-dlp clients (16 s each, 49 s in total) before falling back to
+        the mirror that actually had the song. The wall is the *same* fact for
+        both engines, so the downloader reads it instead of re-proving it.
+        """
+        try:
+            from vyron.runtime import runtime
+
+            engine = getattr(runtime, "youtube", None)
+            return bool(engine is not None and engine.walled())
+        except Exception:  # pragma: no cover - runtime not up yet
+            return False
+
+    def _note_wall(self, message: str) -> None:
+        """Tell the resolver what this attempt just learned about YouTube."""
+        try:
+            from vyron.runtime import runtime
+
+            engine = getattr(runtime, "youtube", None)
+            if engine is not None:
+                engine._note_wall(message)
+        except Exception:  # pragma: no cover - runtime not up yet
+            pass
+
+    # ── paths ──────────────────────────────────────────────────────────────
+    def audio_path(self, track: Track) -> Path:
+        return self.settings.downloads_dir / f"{track.source}-{track.id}.mp3"
+
+    def video_path(self, track: Track) -> Path:
+        return self.settings.downloads_dir / f"{track.source}-{track.id}.mp4"
+
+    def _existing(self, track: Track, exts: tuple[str, ...]) -> Path | None:
+        for ext in exts:
+            path = self.settings.downloads_dir / f"{track.source}-{track.id}.{ext}"
+            if path.is_file() and path.stat().st_size > 0:
+                return path
+        return None
+
+    def cached(self, track: Track, *, video: bool = False) -> Path | None:
+        path = self._existing(track, VIDEO_EXTS if video else AUDIO_EXTS)
+        if path:
+            path.touch()
+        return path
+
+    def _lock(self, key: str) -> asyncio.Lock:
+        lock = self._locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._locks[key] = lock
+        return lock
+
+    # ── accelerators ───────────────────────────────────────────────────────
+    def accelerator_order(self) -> tuple[str, ...]:
+        """`DOWNLOAD_ACCELERATOR` → the tools to try, in order.
+
+        `ranged` is the pure-Python range splitter: six connections and no
+        binary, so it is what runs on a host without aria2 — which is most of
+        them. It sits before plain `curl`, which is one connection.
+        """
+        preference = (getattr(self.settings, "download_accelerator", "") or "auto").lower()
+        if preference in {"none", "off", "aiohttp", "builtin"}:
+            return ()
+        if preference in {"aria2", "aria2c"}:
+            return ("aria2", "ranged", "curl")
+        if preference == "curl":
+            return ("curl", "ranged")
+        if preference in {"ranged", "parallel", "python"}:
+            return ("ranged", "curl")
+        return ("aria2", "ranged", "curl")
+
+    def _external_downloader(self) -> dict:
+        """yt-dlp's own hand-off: aria2c gets the media, yt-dlp gets the info.
+
+        This is what makes a `.m4a` land in two seconds instead of twenty, and
+        unlike a post-download accelerator it works for formats that need the
+        extractor to authorise each fragment.
+        """
+        import shutil
+
+        preference = (getattr(self.settings, "download_accelerator", "") or "auto").lower()
+        if preference not in {"auto", "aria2", "aria2c"}:
+            return {}
+        binary = shutil.which("aria2c")
+        if not binary:
+            return {}
+        return {
+            "external_downloader": {"default": binary},
+            "external_downloader_args": {
+                "default": [
+                    "-x", "16",
+                    "-s", "16",
+                    "-k", "1M",
+                    "--min-split-size=1M",
+                    "--file-allocation=none",
+                    "--console-log-level=error",
+                ]
+            },
+        }
+
+    # ── yt-dlp options ─────────────────────────────────────────────────────
+    def _base_opts(self) -> dict:
+        opts: dict = {
+            "quiet": True,
+            "no_warnings": True,
+            "noprogress": True,
+            "geo_bypass": True,
+            "nocheckcertificate": True,
+            "noplaylist": True,
+            "ignoreerrors": False,
+            # Retries are *per request*; the client ladder below handles the
+            # case where the whole extraction is refused.
+            "retries": 3,
+            "fragment_retries": 4,
+            "socket_timeout": 20,
+            # YouTube serves DASH audio in fragments; four at a time is the
+            # difference between "the song starts" and "the song starts after
+            # the whole file has been walked through one socket". Progressive
+            # (m4a) downloads get a big HTTP chunk so the same request is not
+            # re-handshaked every megabyte.
+            "concurrent_fragment_downloads": 4,
+            "http_chunk_size": 8 * 1024 * 1024,
+            "buffersize": 1024 * 1024,
+            "max_filesize": self.settings.max_download_mb * 1024 * 1024,
+            "nopart": False,
+            "overwrites": True,
+        }
+        from vyron.core import cookies
+
+        cookiefile = cookies.path() or self.settings.cookies_file
+        if cookiefile:
+            opts["cookiefile"] = cookiefile
+        proxy = self._youtube_proxy()
+        if proxy:
+            opts["proxy"] = proxy
+        if self.settings.ytdlp_args:
+            try:
+                from vyron.core.search import YouTube
+
+                opts.update(YouTube._parse_ytdlp_args(self.settings.ytdlp_args))
+            except Exception:  # pragma: no cover - operator args are advisory
+                pass
+        # The same browser fingerprint the resolver uses. Search was doing this
+        # and the download was not, so a video could be *named* perfectly and
+        # then refused when its bytes were asked for.
+        try:
+            from vyron.core.search import impersonate_target
+
+            target = impersonate_target(self.settings)
+        except Exception:  # pragma: no cover - never fatal
+            target = ""
+        if target:
+            opts.setdefault("impersonate", target)
+        opts.update(self._external_downloader())
+        return opts
+
+    def _youtube_proxy(self) -> str | None:
+        """The proxy the *resolver* already honours, for the download itself.
+
+        Only PROXY was consulted here, so a deployment that set YOUTUBE_PROXY
+        (or YT_DLP_PROXY, or a proxy list) got proxied metadata and then a
+        direct-IP download — which YouTube refuses with the very wall the proxy
+        was added to avoid.
+        """
+        settings = self.settings
+        candidates = [
+            getattr(settings, "youtube_proxy", "") or "",
+            getattr(settings, "proxy", "") or "",
+        ]
+        try:  # the list file is resolved last, and only when it exists
+            from vyron.engine.youtube import _first_line, validate_proxy
+        except Exception:  # pragma: no cover - engine always importable
+            return None
+        candidates.append(
+            _first_line(getattr(settings, "youtube_proxy_file", "") or "") or ""
+        )
+        for candidate in candidates:
+            candidate = candidate.strip()
+            if not candidate:
+                continue
+            try:
+                return validate_proxy(candidate)
+            except Exception as exc:
+                logger.warning("ignoring an unusable download proxy: %s", exc)
+                return None
+        return None
+
+    def _attempts(self) -> list[tuple[str, dict]]:
+        attempts: list[tuple[str, dict]] = []
+        for client in CLIENT_LADDER:
+            extra: dict = {}
+            if client:
+                extra["extractor_args"] = {"youtube": {"player_client": [client]}}
+            attempts.append((client or "default", extra))
+        return attempts
+
+    @staticmethod
+    def _hook(on_progress: ProgressHook | None, label: str):
+        from vyron.ui.progress import human_size, human_time
+
+        def hook(data: dict) -> None:
+            if not on_progress:
+                return
+            status = str(data.get("status") or "")
+            if status == "downloading":
+                total = data.get("total_bytes") or data.get("total_bytes_estimate") or 0
+                done = data.get("downloaded_bytes") or 0
+                fraction = float(done) / float(total) if total else 0.0
+                # yt-dlp already measured these; no point guessing them again.
+                bits = []
+                if total:
+                    bits.append(f"{human_size(done)} / {human_size(total)}")
+                else:
+                    bits.append(human_size(done))
+                speed = data.get("speed") or 0
+                if speed:
+                    bits.append(f"{human_size(speed)}/s")
+                eta = data.get("eta")
+                if eta:
+                    bits.append(f"{human_time(eta)} left")
+                head = f"{int(fraction * 100)}% · " if total else ""
+                on_progress(min(0.99, fraction), f"{label} · {head}" + " · ".join(bits))
+            elif status == "finished":
+                on_progress(0.99, f"{label} — converting")
+            elif status == "postprocessing":
+                on_progress(0.99, f"{label} — finishing")
+
+        return hook
+
+    def _no_mirror_reason(self) -> str:
+        """"no mirror had a downloadable URL" answered nothing.
+
+        When the resolver's own wall flag is up, the honest reason is that
+        YouTube refuses *this server*, and the remedy is a proxy — not that a
+        mirror was missing. Say so, because the alternative is an operator
+        retrying the same command forever.
+        """
+        try:
+            from vyron.runtime import runtime
+
+            engine = getattr(runtime, "youtube", None)
+            if engine is not None and getattr(engine, "walled", lambda: False)():
+                return (
+                    "YouTube is refusing this server's IP, so no id could be "
+                    "resolved and no mirror had the file — set YOUTUBE_PROXY "
+                    "to a working proxy, or use a catalogue track"
+                )
+        except Exception:  # pragma: no cover - runtime not up yet
+            pass
+        return "no mirror had a downloadable URL"
+
+    # ── yt-dlp engine ──────────────────────────────────────────────────────
+    def _download_ytdlp(
+        self,
+        track: Track,
+        *,
+        video: bool,
+        on_progress: ProgressHook | None = None,
+        dest: Path | None = None,
+    ) -> Path:
+        height = {"360p": 360, "480p": 480, "720p": 720, "1080p": 1080}.get(
+            self.settings.video_quality, 720
+        )
+        final = dest or (self.video_path(track) if video else self.audio_path(track))
+        work = self.settings.downloads_dir / f".work-{track.id}"
+        work.mkdir(parents=True, exist_ok=True)
+        last_error: Exception | None = None
+
+        same_error = 0
+        for name, extra in self._attempts():
+            work.mkdir(parents=True, exist_ok=True)
+            for leftover in work.glob("*"):
+                try:
+                    leftover.unlink()
+                except OSError:
+                    pass
+            opts = self._base_opts()
+            opts.update(extra)
+            opts.update(
+                {
+                    "outtmpl": str(work / "track.%(ext)s"),
+                    "progress_hooks": [self._hook(on_progress, "downloading")],
+                }
+            )
+            if video:
+                opts.update(
+                    {
+                        "format": (
+                            f"bestvideo[height<={height}][ext=mp4]+bestaudio[ext=m4a]/"
+                            f"best[height<={height}][ext=mp4]/best[height<={height}]/best"
+                        ),
+                        "merge_output_format": "mp4",
+                    }
+                )
+            else:
+                opts.update(
+                    {
+                        # AAC-in-m4a first: every player we serve (ntgcalls,
+                        # Telegram, the Mini App's <audio>) takes it, and it is
+                        # the format YouTube can hand over without a re-encode.
+                        "format": (
+                            "bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio/best"
+                        ),
+                        "postprocessors": (
+                            [
+                                {
+                                    # `best` keeps the source codec: an m4a is
+                                    # remuxed, not re-encoded. Transcoding a
+                                    # four-minute song to 320k MP3 was eight to
+                                    # twelve seconds of pure CPU *after* the
+                                    # download had already finished — the single
+                                    # biggest remaining delay in /song and in the
+                                    # first play of any YouTube track.
+                                    "key": "FFmpegExtractAudio",
+                                    "preferredcodec": "best",
+                                },
+                                {"key": "FFmpegMetadata", "add_metadata": True},
+                            ]
+                            if ffmpeg_path()
+                            else []
+                        ),
+                    }
+                )
+            try:
+                if on_progress:
+                    on_progress(0.02, f"resolving ({name})")
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    ydl.download([track.url or track.watch_url])
+                produced = sorted(
+                    (p for p in work.glob("track.*") if p.is_file() and p.stat().st_size > 0),
+                    key=lambda p: p.stat().st_size,
+                    reverse=True,
+                )
+                if not produced:
+                    raise DownloadError("no file was produced")
+                source = produced[0]
+                if source.stat().st_size > self.settings.max_download_mb * 1024 * 1024:
+                    raise DownloadError("that file is larger than the allowed size")
+                target = final if source.suffix == final.suffix else final.with_suffix(source.suffix)
+                _atomic_move(source, target)
+                return target
+            except Exception as exc:
+                message = str(exc)
+                # Two identical sentences mean the *server* is the problem, not
+                # the player client: another two attempts only cost 32 more
+                # seconds before the same answer.
+                same_error = same_error + 1 if last_error is not None and str(last_error) == message else 1
+                last_error = exc
+                logger.info("download via %s failed for %s: %s", name, track.id, exc)
+                self._note_wall(message)
+                if same_error >= 2:
+                    logger.info(
+                        "download for %s is deterministic, stopping the client ladder", track.id
+                    )
+                    break
+            finally:
+                shutil.rmtree(work, ignore_errors=True)
+
+        raise DownloadError(
+            f"yt-dlp could not download this track ({type(last_error).__name__}: {last_error})"
+            if last_error
+            else "yt-dlp could not download this track"
+        )
+
+    # ── direct-URL engine (Invidious / Piped + ffmpeg) ─────────────────────
+    async def _download_direct(
+        self,
+        track: Track,
+        *,
+        video: bool,
+        on_progress: ProgressHook | None = None,
+    ) -> Path:
+        from vyron.core.public_streams import get_public_streams
+
+        if not getattr(self.settings, "stream_fallback", True):
+            raise DownloadError("no fallback resolver is enabled")
+        height = {"360p": 360, "480p": 480, "720p": 720, "1080p": 1080}.get(
+            self.settings.video_quality, 720
+        )
+        direct = await get_public_streams(self.settings).resolve(
+            track.id, height=height if video else 0
+        )
+        if not direct:
+            raise DownloadError(self._no_mirror_reason())
+
+        if on_progress:
+            on_progress(0.1, f"downloading from {direct.source.split(':')[0]}")
+        final = (self.video_path(track) if video else self.audio_path(track)).with_suffix(
+            "." + (direct.ext or ("mp4" if video else "m4a"))
+        )
+        work = self.settings.downloads_dir / f".direct-{track.id}"
+        work.mkdir(parents=True, exist_ok=True)
+        raw = work / f"source.{direct.ext or 'm4a'}"
+        try:
+            await self._fetch_to(
+                direct.url, raw, direct.headers, on_progress, total=int(track.filesize or 0)
+            )
+            if raw.stat().st_size == 0:
+                raise DownloadError("the mirror sent an empty file")
+            if raw.stat().st_size > self.settings.max_download_mb * 1024 * 1024:
+                raise DownloadError("that file is larger than the allowed size")
+
+            binary = ffmpeg_path()
+            if not binary or raw.suffix == final.suffix:
+                return _atomic_move(raw, final)
+
+            if on_progress:
+                on_progress(0.85, "converting with ffmpeg")
+            args = (
+                [binary, "-y", "-loglevel", "error", "-i", str(raw), "-vn", "-c:a", "libmp3lame",
+                 "-b:a", f"{MP3_KBPS}k", str(final)]
+                if not video
+                else [binary, "-y", "-loglevel", "error", "-i", str(raw), "-c", "copy",
+                      "-movflags", "+faststart", str(final)]
+            )
+            result = await asyncio.to_thread(
+                subprocess.run, args, capture_output=True, timeout=900
+            )
+            if result.returncode != 0 or not final.is_file() or final.stat().st_size == 0:
+                logger.info("ffmpeg fallback failed: %s", (result.stderr or b"")[:400])
+                return _atomic_move(raw, final.with_suffix(raw.suffix))
+            return final
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+
+    # ── video from a substitute (the walled-IP answer) ─────────────────────
+    async def _artwork(self, track: Track) -> bytes | None:
+        """The cover bytes for *track*, or ``None`` when there is no picture."""
+        url = str(getattr(track, "thumbnail", "") or "").strip()
+        if not url.startswith("http"):
+            return None
+        try:
+            import aiohttp
+
+            timeout = aiohttp.ClientTimeout(total=20)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(url) as response:
+                    if response.status != 200:
+                        return None
+                    return await response.read()
+        except Exception as exc:  # pragma: no cover - network
+            logger.info("artwork fetch failed for %s: %s", track.id, exc)
+            return None
+
+    async def _video_from_substitute(
+        self, track: Track, *, on_progress: ProgressHook | None = None
+    ) -> Path:
+        """An MP4 of the same song when YouTube will not hand over its video.
+
+        A walled IP has no video to give. Rather than fail the request, take the
+        song from a catalogue that serves audio and build a real 720p MP4 around
+        it: the poster as the picture, the audio as the sound. It is the file
+        people actually wanted — something that plays, everywhere.
+        """
+        from vyron.core import alternate
+
+        binary = ffmpeg_path()
+        if not binary:
+            raise DownloadError("ffmpeg is not installed, so a video cannot be built")
+
+        if on_progress:
+            on_progress(0.05, "finding the same song")
+        found = await alternate.find(track, settings=self.settings)
+        if found is None or not found.url:
+            raise DownloadError("no catalogue carries this song")
+
+        audio = await self._download_stream(found)
+        frame = await self._video_frame(track)
+        if frame is None:
+            raise DownloadError("no artwork to build the picture from")
+
+        if on_progress:
+            on_progress(0.55, "building the video")
+        final = self.video_path(track).with_suffix(".mp4")
+        work = self.settings.downloads_dir / f".video-{track.id}"
+        work.mkdir(parents=True, exist_ok=True)
+        frame_path = work / "frame.jpg"
+        frame_path.write_bytes(frame)
+        args = [
+            binary, "-y", "-loglevel", "error",
+            # A still picture held for the length of the song: one frame in,
+            # 2 fps out, which keeps the encode fast without a judder.
+            "-loop", "1", "-framerate", "2", "-i", str(frame_path),
+            "-i", str(audio),
+            "-vf",
+            "scale=1280:720:force_original_aspect_ratio=decrease,"
+            "pad=1280:720:(ow-iw)/2:(oh-ih)/2,format=yuv420p",
+            "-c:v", "libx264", "-preset", "veryfast", "-tune", "stillimage",
+            "-r", "2", "-c:a", "aac", "-b:a", f"{VIDEO_AUDIO_KBPS}k",
+            "-shortest", "-movflags", "+faststart", str(final),
+        ]
+        try:
+            result = await asyncio.to_thread(
+                subprocess.run, args, capture_output=True, timeout=1800
+            )
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+        if result.returncode != 0 or not final.is_file() or final.stat().st_size == 0:
+            raise DownloadError(
+                f"ffmpeg could not build the video ({(result.stderr or b'')[:160]})"
+            )
+        logger.info(
+            "built a %s video for %r from %s", self.settings.video_quality, track.title, found.source
+        )
+        return final
+
+    async def _video_frame(self, track: Track) -> bytes | None:
+        """A 1280×720 still: the rendered poster, or the raw cover art."""
+        art = await self._artwork(track)
+        from vyron.utils import thumbnails
+
+        if thumbnails.PIL_AVAILABLE:
+            try:
+                from vyron.core.queue import ChatState
+
+                frame = await asyncio.to_thread(
+                    thumbnails.render, ChatState(chat_id=0, current=track), track, art
+                )
+                if frame:
+                    return frame
+            except Exception as exc:  # pragma: no cover - render paths
+                logger.info("poster render failed for %s: %s", track.id, exc)
+        return art
+
+    async def _fetch_to(
+        self,
+        url: str,
+        target: Path,
+        headers: dict[str, str],
+        on_progress: ProgressHook | None,
+        total: int = 0,
+    ) -> None:
+        """Fetch *url* into *target* with aria2 → curl → aiohttp.
+
+        A signed media URL is a plain HTTP file, so the accelerator that wins is
+        simply the fastest one installed: aria2 pulls it over 16 connections,
+        curl over one ranged transfer, and the pure-Python client covers images
+        that have neither binary.
+        """
+        from vyron.core import accelerator
+
+        cap = self.settings.max_download_mb * 1024 * 1024
+        meter = Meter("downloading")
+
+        def progress(written: int, served: int) -> None:
+            if not on_progress:
+                return
+            size = served or total
+            fraction, text = meter.sample(written, size)
+            on_progress(min(0.8, 0.1 + 0.7 * fraction) if size else 0.2, text)
+
+        try:
+            await accelerator.fetch(
+                url,
+                target,
+                headers=headers or {},
+                timeout=900,
+                cap=cap,
+                on_progress=progress,
+                order=self.accelerator_order(),
+                total=total,
+            )
+        except Exception as exc:
+            raise DownloadError(f"could not fetch the file ({exc})") from exc
+
+    # ── public API ─────────────────────────────────────────────────────────
+    async def fetch(
+        self,
+        track: Track,
+        *,
+        video: bool = False,
+        on_progress: ProgressHook | None = None,
+    ) -> Path:
+        """Cached file → yt-dlp ladder → direct-URL mirror. Always a real file."""
+        cached = self.cached(track, video=video)
+        if cached:
+            if on_progress:
+                on_progress(1.0, "cached")
+            return cached
+
+        async with self._lock(f"{track.id}:{'v' if video else 'a'}"):
+            cached = self.cached(track, video=video)
+            if cached:
+                return cached
+            from vyron.core.sources import DIRECT_SOURCES
+
+            if track.source in DIRECT_SOURCES and track.url:
+                # A direct stream: no extraction, no ladder — just the
+                # accelerator writing bytes into the cache.
+                return await self._download_stream(track, on_progress=on_progress)
+            errors: list[str] = []
+            # The wall is about *YouTube*. yt-dlp also downloads SoundCloud and
+            # Bandcamp, and those are exactly the substitutes we reach for when
+            # YouTube refuses us — so skipping the ladder for them meant a
+            # walled deployment could not play a single substitute track.
+            if self._youtube_walled() and _is_youtube(track):
+                errors.append("yt-dlp: skipped — YouTube is refusing this server")
+                logger.info(
+                    "skipping the yt-dlp ladder for %s — YouTube is walled, using a mirror",
+                    track.id,
+                )
+            else:
+                early = await self._ladder_with_head_start(
+                    track, video=video, on_progress=on_progress, errors=errors
+                )
+                if early is not None:
+                    return early
+            if video:
+                return await self._video_tail(track, on_progress=on_progress, errors=errors)
+            return await self._audio_tail(track, on_progress=on_progress, errors=errors)
+
+    @staticmethod
+    def _adopt(produced: Path, final: Path) -> Path:
+        """Move a raced file into the cache under the name its bytes deserve.
+
+        A copy-instead-of-transcode extraction hands back `.m4a`, not `.mp3`;
+        renaming AAC bytes to `.mp3` is how a file that plays fine becomes one
+        that strict players refuse, and how Telegram labels the wrong codec.
+        """
+        target = (
+            final
+            if produced.suffix.lower() == final.suffix.lower()
+            else final.with_suffix(produced.suffix)
+        )
+        return _atomic_move(produced, target)
+
+    async def _ladder_with_head_start(
+        self,
+        track: Track,
+        *,
+        video: bool,
+        on_progress: ProgressHook | None,
+        errors: list[str],
+    ) -> Path | None:
+        """yt-dlp first, and the fallbacks too if it is not done in time.
+
+        Sequential was the wrong shape: a refused or throttled extraction spends
+        its whole deadline (two clients × the socket timeout) before the mirror
+        or the catalogue is even asked, and the listener waits for all of it.
+        The ladder still gets a head start — a healthy extraction finishes in it
+        and never pays for a second download — and only a slow one is raced.
+
+        The raced extraction writes to a private path, so whichever side loses
+        can never move its file over the winner's.
+        """
+        final = self.video_path(track) if video else self.audio_path(track)
+        private = final.with_name(f".race-{final.name}")
+        with contextlib.suppress(OSError):
+            private.unlink(missing_ok=True)  # a leftover from an earlier race
+        ladder = asyncio.create_task(
+            asyncio.to_thread(
+                self._download_ytdlp,
+                track,
+                video=video,
+                on_progress=on_progress,
+                dest=private,
+            ),
+            name=f"download:ytdlp:{track.id}",
+        )
+        try:
+            done, _ = await asyncio.wait({ladder}, timeout=HEAD_START)
+            if done:
+                try:
+                    return self._adopt(ladder.result(), final)
+                except Exception as exc:
+                    errors.append(f"yt-dlp: {exc}")
+                    logger.warning("yt-dlp download failed for %s: %s", track.id, exc)
+                    return None
+            logger.info("yt-dlp is still working on %s — asking the mirrors too", track.id)
+            tail_errors: list[str] = []
+            tail = asyncio.create_task(
+                self._video_tail(track, on_progress=on_progress, errors=tail_errors)
+                if video
+                else self._audio_tail(track, on_progress=on_progress, errors=tail_errors),
+                name=f"download:tail:{track.id}",
+            )
+            try:
+                finished, _ = await asyncio.wait(
+                    {ladder, tail}, return_when=asyncio.FIRST_COMPLETED
+                )
+                if tail in finished and tail.exception() is None:
+                    # A real file from a mirror or a catalogue: the extraction
+                    # that was still running is no longer worth waiting for.
+                    return tail.result()
+                if ladder in finished and ladder.exception() is None:
+                    # The extraction finished first: adopt its private file.
+                    return self._adopt(ladder.result(), final)
+                if tail in finished:
+                    # Both engines have now been asked and neither produced a
+                    # file. Report both reasons instead of handing the caller a
+                    # tail it would only run a second time — and never an empty
+                    # sentence, which is what a listener would have been shown.
+                    errors.extend(tail_errors)
+                    if ladder.done() and ladder.exception() is not None:
+                        errors.append(f"yt-dlp: {ladder.exception()}")
+                    elif not ladder.done():
+                        errors.append("yt-dlp: still extracting when the fallbacks gave up")
+                    raise DownloadError(" · ".join(errors) or "download failed")
+                # Only the extraction failed, and the fallbacks are still
+                # running: the caller's tail path takes it from here.
+                errors.append(f"yt-dlp: {ladder.exception()}")
+                return None
+            finally:
+                for task in (ladder, tail):
+                    if not task.done():
+                        task.cancel()
+        finally:
+            # A thread cannot be cancelled, so a losing extraction may still be
+            # writing. It only ever writes to `private`; the next call for this
+            # track sweeps it before starting another.
+            pass
+
+    async def _catalogue_copy(
+        self, track: Track, *, on_progress: ProgressHook | None = None
+    ) -> Path:
+        """The same song from a catalogue that serves its own audio.
+
+        A listener who asked for "Kesariya" wants the song, not the exact
+        upload — and a 403 from YouTube is not their problem.
+        """
+        from vyron.core import alternate
+        from vyron.core.sources import DIRECT_SOURCES
+
+        found = await alternate.find(track, settings=self.settings)
+        if found is None:
+            raise DownloadError("no catalogue had a copy of this song")
+        logger.info("downloading %r from %s instead (%s)", track.title, found.source, found.id)
+        if found.source in DIRECT_SOURCES and found.url:
+            # A URL that *is* the audio.
+            return await self._download_stream(found, on_progress=on_progress)
+        # SoundCloud / Bandcamp: `url` is a page that has to be extracted.
+        # Fetching it as bytes wrote the HTML into a .mp3 and the stream then
+        # failed on the listener's side.
+        return await asyncio.to_thread(
+            self._download_ytdlp, found, video=False, on_progress=on_progress
+        )
+
+    async def _audio_tail(
+        self,
+        track: Track,
+        *,
+        on_progress: ProgressHook | None,
+        errors: list[str],
+    ) -> Path:
+        """The two audio engines that are left, run *at the same time*.
+
+        A mirror (Invidious/Piped + the accelerator) and a catalogue copy
+        (JioSaavn/Audius/SoundCloud) both end in a real file, they use
+        different hosts, and neither knows the other exists — so running them
+        one after the other only ever added their latencies up. Whichever
+        produces a file first wins and the other is cancelled; when both fail
+        the card gets both reasons, not just the last one.
+        """
+        mirror = _task(
+            lambda: self._download_direct(track, video=False, on_progress=on_progress),
+            "download:mirror",
+        )
+        catalogue = _task(
+            lambda: self._catalogue_copy(track, on_progress=on_progress),
+            "download:catalogue",
+        )
+        names = {mirror: "mirror", catalogue: "substitute"}
+        pending: set[asyncio.Task] = {mirror, catalogue}
+        try:
+            while pending:
+                done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+                for task in done:
+                    if not task.cancelled() and task.exception() is None:
+                        return task.result()
+                    reason = (
+                        "cancelled" if task.cancelled() else f"{task.exception()}"
+                    )
+                    label = names[task]
+                    errors.append(f"{label}: {reason}")
+                    logger.warning("%s download failed for %s: %s", label, track.id, reason)
+        finally:
+            for task in pending:
+                task.cancel()
+        raise DownloadError(" · ".join(errors))
+
+    async def _video_tail(
+        self,
+        track: Track,
+        *,
+        on_progress: ProgressHook | None,
+        errors: list[str],
+    ) -> Path:
+        """Video has one engine the audio path does not: the song, re-wrapped."""
+        try:
+            return await self._download_direct(track, video=True, on_progress=on_progress)
+        except Exception as exc:
+            errors.append(f"mirror: {exc}")
+            logger.warning("direct download failed for %s: %s", track.id, exc)
+        try:
+            return await self._video_from_substitute(track, on_progress=on_progress)
+        except Exception as exc:
+            errors.append(f"video: {exc}")
+            logger.warning("video fallback failed for %s: %s", track.id, exc)
+        raise DownloadError(" · ".join(errors))
+
+    @staticmethod
+    def _stream_suffix(track: Track) -> str:
+        """The real container of a direct URL, so the file is not mislabelled."""
+        from urllib.parse import urlsplit
+
+        path = urlsplit(str(track.url or "")).path.lower()
+        suffix = path.rsplit(".", 1)[-1] if "." in path else ""
+        if suffix in {"mp3", "m4a", "aac", "opus", "ogg", "webm", "flac", "wav"}:
+            return "m4a" if suffix == "aac" else suffix
+        return "mp3"
+
+    async def _download_stream(
+        self, track: Track, *, on_progress: ProgressHook | None = None
+    ) -> Path:
+        """Fetch a track whose `url` *is* the audio (Audius, JioSaavn, files).
+
+        The bytes are written with the container the server actually sent, then
+        transcoded to MP3 at ``MP3_KBPS`` when ffmpeg is available. Naming an
+        AAC stream ``.mp3`` (the old behaviour) produced files that strict
+        players refused and that Telegram labelled with the wrong codec.
+        """
+        from vyron.core import accelerator
+
+        suffix = self._stream_suffix(track)
+        stem = f"{track.source}-{track.id}"
+        work = self.settings.downloads_dir / f".stream-{track.id}"
+        work.mkdir(parents=True, exist_ok=True)
+        raw = work / f"source.{suffix}"
+        partial = raw.with_suffix(raw.suffix + ".part")
+
+        meter = Meter("downloading")
+        size = int(track.filesize or 0)
+
+        def _progress(done: int, served: int) -> None:
+            if not on_progress:
+                return
+            known = served or size
+            fraction, text = meter.sample(done, known)
+            on_progress(min(0.9, fraction) if known else 0.3, text)
+
+        try:
+            await accelerator.fetch(
+                track.url,
+                partial,
+                cap=self.settings.max_download_mb * 1024 * 1024,
+                on_progress=_progress,
+                order=self.accelerator_order(),
+                total=size,
+            )
+            partial.replace(raw)
+            if on_progress:
+                on_progress(0.92, "converting")
+
+            binary = ffmpeg_path()
+            if suffix in COPY_SUFFIXES:
+                # Already the container we serve: an mp3 stays an mp3, and AAC
+                # in m4a is played by ntgcalls, Telegram and every browser. The
+                # transcode below re-encoded those — ten seconds of CPU to make
+                # a file worse — so they are moved, not converted.
+                target = self.settings.downloads_dir / f"{stem}.{suffix}"
+                _atomic_move(raw, target)
+                if on_progress:
+                    on_progress(1.0, "done")
+                return target
+            if binary and suffix != "mp3":
+                final = self.audio_path(track)
+                args = [
+                    binary, "-y", "-loglevel", "error", "-i", str(raw), "-vn",
+                    "-c:a", "libmp3lame", "-b:a", f"{MP3_KBPS}k", str(final),
+                ]
+                result = await asyncio.to_thread(
+                    subprocess.run, args, capture_output=True, timeout=900
+                )
+                if result.returncode == 0 and final.is_file() and final.stat().st_size > 0:
+                    if on_progress:
+                        on_progress(1.0, "done")
+                    return final
+                logger.info(
+                    "transcode to mp3 failed for %s: %s",
+                    track.id,
+                    (result.stderr or b"")[:200],
+                )
+            # No ffmpeg, or it refused: keep the file it actually is.
+            target = self.settings.downloads_dir / f"{stem}.{suffix}"
+            _atomic_move(raw, target)
+        except DownloadError:
+            raise
+        except Exception as exc:
+            partial.unlink(missing_ok=True)
+            raise DownloadError(f"could not fetch the stream ({exc})") from exc
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+        if on_progress:
+            on_progress(1.0, "done")
+        return target
+
+    async def audio(
+        self,
+        track: Track,
+        *,
+        progress: Callable[[str], None] | None = None,
+        on_progress: ProgressHook | None = None,
+    ) -> Path:
+        callback = on_progress
+        if progress and not callback:
+            callback = lambda _fraction, text: progress(text)  # noqa: E731
+        return await self.fetch(track, video=False, on_progress=callback)
+
+    async def video(
+        self,
+        track: Track,
+        *,
+        progress: Callable[[str], None] | None = None,
+        on_progress: ProgressHook | None = None,
+    ) -> Path:
+        callback = on_progress
+        if progress and not callback:
+            callback = lambda _fraction, text: progress(text)  # noqa: E731
+        return await self.fetch(track, video=True, on_progress=callback)
+
+    # ── maintenance ────────────────────────────────────────────────────────
+    def clear(self) -> int:
+        """Delete every cached download (used by `/clearcache`)."""
+        removed = 0
+        for path in self.settings.downloads_dir.iterdir():
+            try:
+                if path.is_dir():
+                    shutil.rmtree(path, ignore_errors=True)
+                    removed += 1
+                else:
+                    path.unlink(missing_ok=True)
+                    removed += 1
+            except OSError:
+                continue
+        return removed
+
+    def cleanup(self) -> int:
+        """Delete cache entries older than DOWNLOAD_CACHE_HOURS."""
+        cutoff = time.time() - self.settings.download_cache_hours * 3600
+        removed = 0
+        for path in self.settings.downloads_dir.glob("*"):
+            try:
+                if path.is_file() and path.stat().st_mtime < cutoff:
+                    path.unlink(missing_ok=True)
+                    removed += 1
+                elif path.is_dir() and path.name.startswith((".work-", ".direct-")):
+                    shutil.rmtree(path, ignore_errors=True)
+                    removed += 1
+            except OSError:
+                continue
+        return removed
+
+    def cache_size(self) -> int:
+        total = 0
+        for path in self.settings.downloads_dir.rglob("*"):
+            try:
+                if path.is_file():
+                    total += path.stat().st_size
+            except OSError:
+                continue
+        return total
+
+
+__all__ = ["DownloadError", "Downloader", "ffmpeg_path", "safe_stem"]

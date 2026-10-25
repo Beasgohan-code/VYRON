@@ -1,0 +1,33 @@
+{
+  "name": "العربية",
+  "strings": {
+    "lang.title": "اللغة",
+    "lang.note": "ردود VYRON تتبع لغة هذه الدردشة. اختر لغة — تُطبَّق فورًا.",
+    "lang.current": "الحالية",
+    "lang.saved": "تم حفظ اللغة.",
+    "lang.unknown": "هذه اللغة غير متاحة.",
+    "lang.admin_only": "يمكن للمشرفين فقط تغيير اللغة هنا.",
+    "lang.switched": "تم التبديل إلى {name}.",
+    "lang.page": "صفحة {page}/{pages}",
+    "np.streaming": "قيد التشغيل",
+    "np.paused": "متوقف مؤقتًا",
+    "np.live": "مباشر",
+    "np.up_next": "التالي",
+    "np.queued": "{count} في الطابور",
+    "np.now_playing": "يعمل الآن",
+    "np.by": "للفنان",
+    "ctl.paused": "تم الإيقاف المؤقت",
+    "ctl.resumed": "تم الاستئناف",
+    "ctl.nothing_playing": "لا شيء قيد التشغيل",
+    "ctl.nothing_paused": "لا شيء متوقف مؤقتًا",
+    "ctl.skipped": "تم التخطي",
+    "ctl.queue_empty": "الطابور فارغ",
+    "ctl.stopped": "تم الإيقاف ومغادرة الدردشة الصوتية",
+    "ctl.volume": "مستوى الصوت: {volume}%",
+    "ctl.loop": "التكرار: {mode}",
+    "ctl.shuffled": "تم خلط {count} مقطعًا",
+    "ctl.autoplay_on": "التشغيل التلقائي مفعّل",
+    "ctl.autoplay_off": "التشغيل التلقائي معطّل",
+    "ctl.seek": "تم الانتقال إلى {time}"
+  }
+}

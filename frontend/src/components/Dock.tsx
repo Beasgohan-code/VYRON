@@ -1,0 +1,108 @@
+import { ChevronUp, Heart, Pause, Play, SkipBack, SkipForward } from "lucide-react";
+import { flushSync } from "react-dom";
+import { fmtDuration } from "../lib/format";
+import { morphCover } from "../lib/morph";
+import { haptic } from "../lib/telegram";
+import { useApp } from "../lib/store";
+import { Cover } from "./Cover";
+import { Equalizer } from "./Equalizer";
+
+/** The always-there mini player: artwork, title, transport, a hairline progress. */
+export function Dock() {
+  const { audio, isLiked, toggleLike, cast, toast } = useApp();
+  const track = audio.track;
+  if (!track) return null;
+
+  const total = audio.duration || track.duration || 0;
+  const percent = total ? Math.min(100, (audio.position / total) * 100) : 0;
+  // The buffer sits behind the playhead: on a slow connection that is the
+  // difference between "it is thinking" and "it is stuck".
+  const buffered = total ? Math.min(100, Math.max(percent, (audio.buffered / total) * 100)) : 0;
+  const liked = isLiked(track);
+
+  return (
+    <div className={`dock ${audio.playing ? "playing" : ""}`}>
+      <div className="dock-progress" aria-hidden="true">
+        <span className="dock-buffer" style={{ width: `${buffered}%` }} />
+        <span className="dock-played" style={{ width: `${percent}%` }} />
+      </div>
+
+      <button
+        type="button"
+        className="dock-art"
+        onClick={() => {
+          haptic("light");
+          // The artwork itself flies up into the player (shared element).
+          morphCover("open", () => flushSync(() => audio.setExpanded(true)));
+        }}
+        aria-label="Open full player"
+      >
+        <Cover track={track} />
+        <span className="dock-open">
+          <ChevronUp size={14} />
+        </span>
+      </button>
+
+      <div className="dock-info" onClick={() => audio.setExpanded(true)} role="presentation">
+        <b className="dock-title">{track.title}</b>
+        <span className={`dock-sub ${audio.error ? "err" : ""}`}>
+          {audio.error ? (
+            audio.error
+          ) : (
+            <>
+              {audio.playing ? <Equalizer playing bars={3} /> : null}
+              {track.uploader || "VYRON"}
+              {total ? ` · ${fmtDuration(audio.position)}` : ""}
+            </>
+          )}
+        </span>
+      </div>
+
+      <div className="dock-actions">
+        <button
+          type="button"
+          className="btn-icon dock-hide"
+          aria-label={liked ? "Remove from liked" : "Like this track"}
+          onClick={() => void toggleLike(track)}
+        >
+          <Heart size={17} fill={liked ? "currentColor" : "none"} />
+        </button>
+        {audio.error && (
+          <button
+            type="button"
+            className="btn-icon"
+            aria-label="Retry playback"
+            onClick={audio.retry}
+          >
+            <Play size={17} fill="currentColor" />
+          </button>
+        )}
+        <button type="button" className="btn-icon" aria-label="Previous" onClick={audio.prev}>
+          <SkipBack size={18} fill="currentColor" />
+        </button>
+        <button
+          type="button"
+          className="dock-play"
+          aria-label={audio.playing ? "Pause" : "Play"}
+          onClick={audio.toggle}
+        >
+          {audio.playing ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
+        </button>
+        <button type="button" className="btn-icon" aria-label="Next" onClick={() => audio.next()}>
+          <SkipForward size={18} fill="currentColor" />
+        </button>
+        <button
+          type="button"
+          className="btn-icon dock-hide"
+          aria-label="Play in the voice chat"
+          onClick={() => {
+            toast("Sending to the call…");
+            void cast(track, "play_now");
+          }}
+        >
+          ⌁
+        </button>
+      </div>
+    </div>
+  );
+}

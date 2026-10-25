@@ -1,0 +1,33 @@
+{
+  "name": "Español",
+  "strings": {
+    "lang.title": "idioma",
+    "lang.note": "Las respuestas de VYRON siguen este chat. Elige un idioma: se aplica al instante.",
+    "lang.current": "actual",
+    "lang.saved": "Idioma guardado.",
+    "lang.unknown": "Ese idioma no está disponible.",
+    "lang.admin_only": "Solo los administradores pueden cambiar el idioma aquí.",
+    "lang.switched": "Cambiado a {name}.",
+    "lang.page": "página {page}/{pages}",
+    "np.streaming": "reproduciendo",
+    "np.paused": "en pausa",
+    "np.live": "en directo",
+    "np.up_next": "a continuación",
+    "np.queued": "{count} en cola",
+    "np.now_playing": "sonando ahora",
+    "np.by": "de",
+    "ctl.paused": "En pausa",
+    "ctl.resumed": "Continuado",
+    "ctl.nothing_playing": "No se está reproduciendo nada",
+    "ctl.nothing_paused": "No hay nada en pausa",
+    "ctl.skipped": "Saltado",
+    "ctl.queue_empty": "La cola está vacía",
+    "ctl.stopped": "Detenido y salió del chat de voz",
+    "ctl.volume": "Volumen: {volume}%",
+    "ctl.loop": "Repetición: {mode}",
+    "ctl.shuffled": "{count} pistas mezcladas",
+    "ctl.autoplay_on": "Reproducción automática activada",
+    "ctl.autoplay_off": "Reproducción automática desactivada",
+    "ctl.seek": "Saltado a {time}"
+  }
+}

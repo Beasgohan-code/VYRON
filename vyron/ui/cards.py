@@ -1,0 +1,2480 @@
+# ---------------------------------------------------------------------------
+#  VYRON — cards
+#
+#  Two visual languages, one source of truth:
+#    · rich cards   — headings, tables, dividers, collapsible sections and
+#                     *coloured* in-message buttons (Bot API 10.3 / richgram)
+#    · live cards   — classic HTML that is edited in place every few seconds
+#
+# ---------------------------------------------------------------------------
+from __future__ import annotations
+
+import re
+import time
+
+from typing import Iterable
+
+from vyron.config import settings
+from vyron.core.lyrics import LyricsResult
+from vyron.core.queue import ChatState, Track
+from vyron.ui import blocks as B
+from vyron.ui.blocks import esc
+from vyron.ui.progress import (
+    fmt_duration,
+    human_clock,
+    human_size,
+    length_label,
+    human_time,
+    percentage,
+    progress_bar,
+    truncate,
+)
+from vyron.ui.progress import compact_number
+from vyron.ui.theme import BRAND, BRAND_DISPLAY, BULLET, DASH, E, SPARK, small_caps
+
+DOT = "·"
+
+# ── shared bits ─────────────────────────────────────────────────────────────
+def _requester(track: Track) -> str:
+    """The name, linked to the profile only when there is a profile.
+
+    An id of 0 (a track restored from disk, a poster from the web app) used to
+    produce `tg://user?id=0` — a tappable name that goes nowhere.
+    """
+    name = esc(truncate(track.requested_name, 28))
+    if not name:
+        return ""
+    if not track.requested_by:
+        return name
+    return f'<a href="tg://user?id={int(track.requested_by)}">{name}</a>'
+
+
+def progress_block(
+    state: ChatState,
+    track: Track,
+    *,
+    status_label: str = "",
+    live_label: str = "",
+) -> str:
+    """The live block: the bar, then the clock, then how loud.
+
+    Three lines, top to bottom, the way a player on a phone reads::
+
+        ██████◉▬▬▬▬▬▬▬▬▬
+        📡 streaming · 1:03 · 39% · 2:44
+        🔊 100%
+
+    Who asked lives in the card header, so it is not repeated here.
+
+    The bar gets its own line because it is the thing you glance at; the
+    numbers under it are what you read when you actually care. The digits are
+    ``<code>`` so the line does not wobble as the clock moves.
+    """
+    elapsed = max(0.0, float(state.elapsed() or 0))
+    total = int(track.duration or 0)
+    paused = bool(getattr(state, "paused", False))
+    glyph = E("pause") if paused else E("live")
+    # A caller with a translation catalog passes the label in; the card lane is
+    # English, the poster caption follows the chat's language.
+    status = status_label or ("paused" if paused else "streaming")
+    live = live_label or small_caps("live")
+
+    bar = progress_bar(elapsed, total, length=15)
+    if total:
+        clock = (
+            f"{glyph} <b>{status}</b> · {fmt_duration(elapsed)}"
+            f" · {percentage(elapsed, total)}% · {fmt_duration(total)}"
+        )
+    else:
+        clock = f"{glyph} <b>{status}</b> · {fmt_duration(elapsed)} · <i>{live}</i>"
+
+    lines = [f"<code>{bar}</code>", clock]
+    volume = int(getattr(state, "volume", 0) or 0)
+    lines.append(f"{E('volume')} {volume}%" if volume else f"{E('mute')} muted")
+    return "\n".join(lines)
+
+
+# ── start ───────────────────────────────────────────────────────────────────
+def start_card(
+    name: str,
+    stats: dict,
+    *,
+    streaming: bool = True,
+    live: dict | None = None,
+    greeting: str | None = None,
+    uptime: float | None = None,
+) -> str:
+    """Premium start card — soft header, status chips, clear features, coloured buttons."""
+    chats = int(stats.get("chats", 0) or 0)
+    tracks = int(stats.get("tracks", 0) or 0)
+    who = esc(truncate(name, 40))
+
+    hello = small_caps(esc(greeting).lower()) if greeting else small_caps("hello")
+    intro = (
+        f"{hello} <b>{who}</b>\n"
+        f"I'm <b>{BRAND_DISPLAY}</b> — your music player for Telegram.\n"
+        "Play in a voice chat, listen in the app, keep the file."
+    )
+
+    header = B.soft_header("hello", "Welcome", intro)
+
+    status_rows = [
+        (
+            "Status",
+            (
+                f"{B.status_chip('ONLINE', 'live')}  voice chat ready"
+                if streaming
+                else f"{B.status_chip('LIMITED', 'paused')}  no STRING_SESSION"
+            ),
+        ),
+    ]
+    if uptime:
+        status_rows.append(("Uptime", f"<b>{human_clock(uptime)}</b>"))
+    status_rows.append(("Reach", f"<b>{_compact(chats)}</b> chats · <b>{_compact(tracks)}</b> tracks"))
+    status_rows.append(("Version", f"v<b>{_version()}</b> · rich ui"))
+    status_block = B.pretty_table(status_rows)
+
+    if live and live.get("title"):
+        position = float(live.get("position") or 0)
+        duration = float(live.get("duration") or 0)
+        rows = [
+            ("Track", f"<b>{esc(truncate(str(live.get('title') or ''), 48))}</b>"),
+            ("Artist", esc(truncate(str(live.get("uploader") or "Unknown"), 32))),
+            (
+                "Progress",
+                f"<code>{progress_bar(position, duration, length=10)}</code> "
+                f"{fmt_duration(position)} / {fmt_duration(duration)}",
+            ),
+        ]
+        queued = int(live.get("queue") or 0)
+        rows.append(
+            (
+                "Up next",
+                f"<b>{queued}</b> tracks queued" if queued else "<i>nothing queued</i>",
+            )
+        )
+        return (
+            B.soft_header("hello", "Welcome Back", f"Hey <b>{who}</b> — music is already on.")
+            + B.pretty_table(rows)
+            + B.actions(
+                B.row(
+                    B.btn(
+                        f"{E('resume')} Resume" if live.get("paused") else f"{E('pause')} Pause",
+                        data="v:resume" if live.get("paused") else "v:pause",
+                        style="primary",
+                    ),
+                    B.btn(f"{E('skip')} Skip", data="v:skip", style="success"),
+                    B.btn(f"{E('stop')} Stop", data="v:stop", style="danger"),
+                ),
+                B.row(
+                    B.btn(f"{E('queue')} Queue", data="v:queue"),
+                    B.btn(f"{E('interface')} Open Player", data="v:app"),
+                    B.btn(f"{E('tools')} Commands", data="v:help:main"),
+                ),
+            )
+            + B.soft_footer(BRAND, f"{_compact(chats)} chats", f"v{_version()}")
+        )
+
+    features = B.items(
+        [
+            ("play", "Play", "streams into the voice chat — one tap to skip"),
+            ("search", "Find", "a title you half remember is enough"),
+            ("download", "Save", "MP3 320 or MP4 720p with cover art"),
+            ("interface", "Player", "the full player inside Telegram"),
+        ]
+    )
+
+    guide = B.details(
+        f"{E('rocket')} <b>Set it up in three steps</b>",
+        B.bullets(
+            [
+                "Add me to a group and grant <b>Manage voice chats</b>",
+                "Join a voice chat, then send <code>/play</code> + a song",
+                "Use the buttons or <code>/help</code> for everything else",
+            ]
+        ),
+    )
+
+    buttons = B.actions(
+        B.row(
+            B.btn(f"{E('play')} Play something", data="v:help:playback", style="success"),
+            B.btn(f"{E('interface')} Open player", data="v:app", style="primary"),
+        ),
+        B.row(
+            B.btn(f"{E('tools')} All commands", data="v:help:main"),
+            B.btn(f"{E('users')} Add to group", url=f"https://t.me/{settings.bot_username}?startgroup=true"),
+        ),
+    )
+
+    return (
+        header
+        + status_block
+        + B.section_title("What I can do")
+        + features
+        + guide
+        + buttons
+        + B.soft_footer(BRAND, f"{_compact(chats)} chats", f"v{_version()}")
+    )
+
+
+
+def group_start_card(
+    chat_title: str,
+    who: str,
+    rights: dict | None,
+    stats: dict,
+    *,
+    streaming: bool = True,
+    live: dict | None = None,
+) -> str:
+    """The card `/start` sends *in a group* — a different card, on purpose.
+
+    A private `/start` answers "what is this bot". A group `/start` has to
+    answer a different question: "is it set up here, and what does it still
+    need" — so this card reads the bot's real rights in this chat instead of
+    repeating the onboarding. ``rights`` is ``None`` when the probe could not
+    run (then the checklist is shown as instructions, not as failures).
+    """
+    title = esc(truncate(chat_title or "this group", 48))
+    mention = (
+        f'<a href="tg://user?id={int(who[1])}">{esc(truncate(who[0], 32))}</a>'
+        if isinstance(who, tuple) and len(who) == 2 and who[1]
+        else esc(truncate(str(who or "there"), 32))
+    )
+    chats = int(stats.get("chats", 0) or 0)
+    tracks = int(stats.get("tracks", 0) or 0)
+
+    if live:
+        track = esc(truncate(str(live.get("title") or "Unknown"), 48))
+        state_word = "paused" if live.get("paused") else "playing"
+        queued = int(live.get("queue") or 0)
+        body = (
+            B.soft_header("live", "Already Playing", "Music is active in this group")
+            + B.context(
+                f"{B.pill(state_word, 'live')} <b>{track}</b>\n"
+                f"{B.pill(f'{queued} queued', 'ok') if queued else B.pill('nothing queued', 'warn')}"
+                " · send <code>/play</code> to add another"
+            )
+            + B.actions(
+                B.row(
+                    B.btn(f"{E('queue')} The queue", data="v:queue", style="primary"),
+                    B.btn(f"{E('interface')} Player", data="v:app"),
+                ),
+                B.row(
+                    B.btn(f"{E('stop')} Stop the music", data="v:stop", style="danger"),
+                    B.btn(f"{E('tools')} All commands", data="v:help:main"),
+                ),
+            )
+            + B.footer(_stamp(chats, tracks))
+        )
+        return body
+
+    if rights is None:
+        needs_block = B.context(
+            "I could not read my own permissions here. If <code>/play</code> "
+            "says it cannot join, an admin can fix that in "
+            "<b>Group settings → Administrators</b>."
+        )
+    else:
+        rows = []
+        missing = []
+        for key, label, why in GROUP_NEEDS:
+            ready = bool(rights.get(key))
+            rows.append(
+                (
+                    "check" if ready else "cross",
+                    label,
+                    f"{'ready' if ready else 'missing'} — {why}",
+                )
+            )
+            if not ready:
+                missing.append(label)
+        needs_block = B.fields(rows) + (
+            B.note(
+                f"<b>{len(missing)} of {len(GROUP_NEEDS)} still to grant.</b> "
+                "Group settings → Administrators → add me, then tick "
+                + ", ".join(f"<i>{name}</i>" for name in missing)
+                + "."
+            )
+            if missing
+            else B.note("Everything needed is in place. Nothing else to set up.")
+        )
+
+    engine = (
+        f"{B.pill('voice chat ready', 'ok')} · the assistant can join calls"
+        if streaming
+        else f"{B.pill('no voice engine', 'warn')} · no <code>STRING_SESSION</code> — "
+        "<code>/song</code> still sends files"
+    )
+
+    return (
+        B.soft_header("hello", "Thanks for the Add", "Music for this group's voice chat")
+        + B.context(
+            f"{mention} brought me to <b>{title}</b>.\n"
+            "I play music into this group's voice chat — a song, a link, or a "
+            "file you reply to."
+        )
+        + B.section_title("status")
+        + B.fields(
+            [
+                (
+                    "live" if streaming else "warn",
+                    "engine",
+                    engine,
+                ),
+                ("users", "reach", f"<b>{_compact(chats)}</b> chats · "
+                 f"<b>{_compact(tracks)}</b> tracks played"),
+            ]
+        )
+        + B.section_title("what i need here")
+        + needs_block
+        + B.section_title("first song")
+        + B.details(
+            f"{E('rocket')} <b>Three ways to start</b>",
+            B.bullets(
+                [
+                    "Send <code>/play kesariya</code> — half a title is enough",
+                    "Paste a link, or reply to an audio file with <code>/play</code>",
+                    "Tap <b>All commands</b> below if you want the whole list",
+                ],
+                ordered=True,
+            ),
+            open=False,
+        )
+        + B.actions(
+            B.row(
+                B.btn(f"{E('play')} Player", data="v:app", style="primary"),
+                B.btn(f"{E('tools')} All commands", data="v:help:main"),
+            ),
+            B.row(B.btn(f"{E('info')} About", data="v:about")),
+        )
+        + B.footer(_stamp(chats, tracks))
+    )
+
+
+def _stamp(chats: int, tracks: int) -> str:
+    """The one footer line every welcome/status card ends with."""
+    return (
+        f"{_compact(chats)} chats · {_compact(tracks)} tracks played · "
+        f"v{_version()} · {small_caps('rich ui')}"
+    )
+
+
+def _compact(value: int) -> str:
+    try:
+        return compact_number(value)
+    except Exception:  # pragma: no cover
+        return str(value)
+
+
+def _version() -> str:
+    try:
+        from vyron import __version__
+
+        return __version__
+    except Exception:  # pragma: no cover
+        return "1.0"
+
+
+# ── help ────────────────────────────────────────────────────────────────────
+_HELP: dict[str, tuple[str, list[tuple[str, str]]]] = {
+    "main": (
+        "Basics",
+        [
+            ("/start", "open the home card"),
+            ("/play <song|link>", "stream audio in the voice chat"),
+        ("/playforce", "play now — keep the queue"),,
+            ("/vplay <song|link>", "stream the video instead"),
+            ("/song <song|link>", "send the MP3 here"),
+            ("/vsong <song|link>", "send the video file here"),
+            ("/search <text>", "browse results, then pick"),
+            ("/lyrics [song]", "lyrics for the current track"),
+            ("/ping", "latency + uptime"),
+        ],
+    ),
+    "playback": (
+        "Playback",
+        [
+            ("/vplay", "stream the picture, not just the sound"),
+            ("/pause · /resume", "hold or continue the stream"),
+            ("/skip [n]", "jump forward n tracks"),
+            ("/seek 1:30", "jump inside the track"),
+            ("/volume 1-200", "set assistant volume"),
+            ("/loop off|one|all", "cycle the repeat mode"),
+            ("/shuffle", "shuffle what is queued"),
+            ("/stop", "end the session and leave"),
+            ("/np", "refresh the now-playing card"),
+        ],
+    ),
+    "queue": (
+        "Queue",
+        [
+            ("/queue [page]", "paginated queue view"),
+            ("/remove <pos>", "drop one entry"),
+            ("/move <from> <to>", "reorder the queue"),
+            ("/jump <pos>", "play that entry right now"),
+            ("/clearqueue", "empty the queue, keep playing"),
+            ("/playlist <url>", "queue up to 50 tracks"),
+        ],
+    ),
+    "tools": (
+        "Tools",
+        [
+            ("/fav · /fav", "save and list favourites"),
+            ("/history", "your recently played"),
+            ("/settings", "per-chat defaults"),
+            ("/language", "English · हिन्दी · മലയാളം · ਪੰਜਾਬੀ"),
+            ("/voice", "voice engine: on/off, calls, quality"),
+            ("/logger", "mirror warnings to a channel (owner)"),
+            ("/247", "toggle 24/7 mode"),
+            ("/app", "open the player web app"),
+            ("/api", "the music API (keys, docs)"),
+            ("/exportpl <name>", "playlist → JSON file"),
+            ("/importpl", "reply to that file to restore it"),
+        ],
+    ),
+    "social": (
+        "Groups",
+        [
+            ("/voteskip set 3", "require votes before a skip"),
+            ("/voteskip", "cast your vote"),
+            ("/cplayset <id>", "stream into a specific channel"),
+            ("/cplay · /cstop · /cseek", "drive the linked channel's stream"),
+            ("/cpplay <name>", "play a saved playlist in the channel"),
+            ("/cvolume · /ceffects", "channel volume and audio effects"),
+            ("/similar", "tracks like the one playing"),
+            ("/skip <song>", "insert a track up front"),
+            ("/dban · /dkick · /dwarn", "act, and delete the message too"),
+            ("/savepl [name]", "save the queue to a playlist"),
+            ("/playlists · /playlists <name>", "list and queue your playlists"),
+            ("/song", "get the MP3 in the chat"),
+            ("/locks · /antiflood", "content locks and flood control"),
+            ("/gadmin", "the group manager panel"),
+            ("/rules · /setrules", "read or set this chat's rules"),
+            ("/chatinfo", "id, members, slow mode, invites"),
+            ("/settitle · /setdesc", "rename the chat"),
+            ("/setchatphoto · /delchatphoto", "chat picture from a reply"),
+            ("/slowmode 30s|off", "space out messages"),
+            ("/invitelink · /revokeinvite", "rotate the invite link"),
+            ("/approve · /approved", "exempt trusted members"),
+            ("/zombies [kick]", "clean up deleted accounts"),
+            ("/report", "flag a message to the admins"),
+            ("/mydata", "download everything the bot knows about you"),
+            ("/forgetme", "delete your history, favourites and playlists"),
+        ],
+    ),
+    "power": (
+        "Owner",
+        [
+            ("/eval <code>", "run python in the bot process"),
+            ("/vars", "configuration snapshot (masked)"),
+            ("/dbstats", "storage size and counters"),
+            ("/sudoers", "who can operate the bot"),
+            ("/clearqueue", "wipe downloads and temp files"),
+            ("/dbcleanup 30", "drop history older than N days"),
+            ("/addsudo · /delsudo", "grant or revoke bot access"),
+            ("/sudolist", "who can operate the bot"),
+            ("/stats · /vc", "usage and live sessions"),
+            ("/api", "music API card, docs and endpoints"),
+            ("/getapi [label] [scopes=…]", "mint an API key (owner)"),
+            ("/apikeys · /revoke · /rotatekey", "manage API keys (owner)"),
+            ("/apiusage", "API traffic per key (owner)"),
+            ("/apitoken", "owner token — mint, rotate, revoke"),
+            ("/apitoken revoke", "kill every owner token, instantly"),
+            ("/logs [errors|warn|info]", "owner journal: start, stop, errors"),
+            ("/logs export · /logs clear", "download or empty the journal"),
+            ("/assistant · /setname", "rebrand the voice-chat account"),
+            ("/setbio · /setpfp", "bio and profile picture"),
+        ],
+    ),
+}
+
+
+def _prefix_line() -> str:
+    """`/play !play .play ?play #play` — the configured set, as a hint."""
+    from vyron.utils.commands import prefixes
+
+    return "  ".join(f"{prefix}play" for prefix in prefixes())
+
+
+def help_card(section: str = "main") -> str:
+    """Premium help card — soft header, clean table, tabbed sections, coloured buttons."""
+    section = section if section in _HELP else "main"
+    title, rows = _HELP[section]
+    body = B.table(
+        None,
+        [(B.code(cmd), esc(desc)) for cmd, desc in rows],
+        border=1,
+    )
+    tips = B.details(
+        f"{E('info')} <b>Good to know</b>",
+        B.bullets(
+            [
+                f"Any of these prefixes works: <code>{esc(_prefix_line())}</code>",
+                "A link, a playlist, a reply to a file or plain words all work",
+                "In groups only admins can control playback",
+                "Anything you played once replays instantly — it is cached",
+            ]
+        ),
+    )
+    tabs = []
+    for key, label in (
+        ("main", "Basics"),
+        ("playback", "Playback"),
+        ("queue", "Queue"),
+        ("tools", "Tools"),
+        ("social", "Groups"),
+        ("power", "Owner"),
+    ):
+        style = "primary" if key == section else None
+        prefix = "• " if key == section else ""
+        tabs.append(B.btn(prefix + label, data=f"v:help:{key}", style=style))
+
+    return (
+        B.soft_header("tools", f"Commands · {title}", f"{len(rows)} commands in this section")
+        + B.note("Everything the bot can do, by area. Tabs switch the list in place.")
+        + body
+        + tips
+        + B.actions(
+            B.row(*tabs[:3]),
+            B.row(*tabs[3:]),
+            B.row(
+                B.btn(f"{E('back')} Start", data="v:start"),
+                B.btn(f"{E('close')} Close", data="v:close", style="danger"),
+            ),
+        )
+        + B.soft_footer(f"@{settings.bot_username}", BRAND, "all prefixes")
+    )
+
+
+
+def _np_heading(track: Track) -> str:
+    """``Artist - Title``, the way the song is actually named.
+
+    Two things were wrong with simply printing ``uploader - title``:
+
+    * a repost account became the artist — "Alone_BoYtm - Chris Grey – LET THE
+      WORLD BURN" for a song the title already credited correctly;
+    * the line was linked to ``track.watch_url``, which for a catalogue track
+      is the *stream URL* — a tap opened a CDN file, and the card printed the
+      words "api.audius.co/v1/tracks/…/stream".
+
+    So the name comes from `naming.display_parts`, and the link exists only
+    when there is a page behind it (a YouTube video), never a media URL.
+    """
+    from vyron.utils.naming import display_line
+
+    text = esc(truncate(display_line(track.title, track.uploader), 72))
+    url = ""
+    if track.source == "youtube" and track.id:
+        url = f"https://youtu.be/{track.id}"
+    elif str(track.url or "").startswith("http") and _is_page_url(track.url):
+        url = str(track.url)
+    return f'<a href="{esc(url)}">{text}</a>' if url else text
+
+
+#: A media endpoint is not a web page: linking to one from a card is a bug that
+#: looks like a feature (it opens a blob in the browser, or nothing at all).
+_MEDIA_PATH = re.compile(
+    r"(?i)(/stream|/download|\.mp3|\?.*(?:mime|range)=|\.m4a|\.mp4|\.webm)(?:\?|$)"
+)
+
+
+def _is_page_url(url: str) -> bool:
+    return not _MEDIA_PATH.search(str(url or ""))
+
+
+def _np_header(track: Track) -> list[str]:
+    """The card, exactly as the user asked for it::
+
+        ✨ Now playing
+
+        Chris Grey - LET THE WORLD BURN (Official Lyric Video)
+
+        ⏱ Duration: 2:44
+
+        👥 Requested by: user
+
+    One fact per line, in the words people use, a blank line between them so
+    nothing reads as a paragraph. Labels are plain title case — display-small-
+    caps belongs to the decorated cards, not to a message you glance at.
+
+    ``Requested by`` keeps its line even when nobody is credited, because a
+    now-playing card that changes shape between tracks looks broken.
+    """
+    total = int(track.duration or 0)
+    length = fmt_duration(total) if total else "live"
+    return [
+        f"{E('spark')} <b>Now playing</b>",
+        f"<b>{_np_heading(track)}</b>",
+        f"{E('clock')} <b>Duration:</b> {length}",
+        f"{E('users')} <b>Requested by:</b> {_requester(track) or 'user'}",
+    ]
+
+
+def _np_flags(state: ChatState, catalog=None) -> list[str]:
+    """Loop, 24/7 and how much is waiting — one quiet line, if any.
+
+    Autoplay is deliberately not here: it is on by default, so printing it on
+    every card was a line of noise that never changed. ``/autoplay`` still
+    says whether it is on.
+    """
+    flags = []
+    if getattr(state.loop, "value", "off") != "off":
+        flags.append(f"{E('loop')} {state.loop.label}")
+    if state.always_on:
+        flags.append(f"{E('clock')} 24/7")
+    if state.queue:
+        queued = (
+            catalog.t("np.queued", count=len(state.queue))
+            if catalog is not None
+            else f"{len(state.queue)} queued"
+        )
+        flags.append(f"{E('queue')} {queued}")
+    return [f"<i>{' · '.join(flags)}</i>"] if flags else []
+
+
+def _np_up_next(state: ChatState, catalog=None) -> list[str]:
+    """One line for what follows, with the queue length only when it matters."""
+    if not state.queue:
+        return []
+    upcoming = state.queue[0]
+    label = (
+        catalog.t("np.up_next")
+        if catalog is not None
+        else small_caps("up next")
+    )
+    line = (
+        f"{E('skip')} <i>{label}</i> "
+        f"{esc(truncate(upcoming.title, 40))} · {fmt_duration(upcoming.duration)}"
+    )
+    if len(state.queue) > 1:
+        line += f" · <i>{len(state.queue)} queued</i>"
+    return [line]
+
+
+def now_playing_card(state: ChatState, track: Track | None = None) -> str:
+    """The live card — edited in place every few seconds, so it stays short.
+
+    Read top to bottom: which track this is, how long it is, who asked for it,
+    where it is in the song, and what is next. The buttons live on the attached
+    keyboard, not in the text, because this message is edited rather than
+    re-sent.
+    """
+    track = track or state.current
+    if not track:
+        return (
+            B.banner("nothing playing", glyph="moon")
+            + B.context(
+                "Send <code>/play</code> with a song name, a link, or a reply to a file."
+            )
+        )
+
+    # One fact per paragraph, then the live block underneath: the header is
+    # what the song *is*, the block is what it is *doing*.
+    rest = [progress_block(state, track), *_np_flags(state), *_np_up_next(state)]
+    return "\n\n".join(_np_header(track)) + "\n\n" + "\n".join(rest)
+
+
+def player_panel(state: ChatState, track: Track | None = None) -> str:
+    """Premium colourful Now Playing card — rich headings, tables, status chips, coloured buttons."""
+    track = track or state.current
+    if not track:
+        return (
+            B.soft_header("moon", "Nothing Playing")
+            + B.note("Send <code>/play</code> with a song name, a link, or reply to a file.")
+            + B.soft_footer(BRAND)
+        )
+
+    from vyron.utils.naming import display_parts
+
+    artist, name = display_parts(track.title, track.uploader)
+    total = int(track.duration or 0)
+    asked = esc(truncate(track.requested_name, 26)) if track.requested_name else "—"
+    source = str(getattr(track, "source", "") or "YouTube")
+    paused = bool(getattr(state, "paused", False))
+    elapsed = max(0.0, float(state.elapsed() or 0))
+    volume = getattr(state, "volume", 100)
+    loop_label = getattr(getattr(state, "loop", None), "label", "Off")
+
+    # Colourful soft header
+    status_text = "Paused" if paused else "Now Playing"
+    subtitle = (
+        f"<b>{esc(truncate(name, 48))}</b><br/>"
+        f"{esc(truncate(artist or 'Unknown Artist', 32))} · {fmt_duration(total)}"
+    )
+    header = B.soft_header("headphones", status_text, subtitle)
+
+    # Colourful status table
+    table = B.pretty_table([
+        ("Status", B.status_chip("PAUSED" if paused else "LIVE", "paused" if paused else "live")),
+        ("Progress", f"{fmt_duration(elapsed)}  /  {fmt_duration(total)}"),
+        ("Volume", f"{volume}%"),
+        ("Loop", loop_label),
+        ("Requested", asked),
+        ("Source", esc(truncate(source, 18))),
+    ])
+
+    progress = progress_block(state, track)
+
+    # Up next
+    up_next = ""
+    if state.queue:
+        listed = "".join(
+            f"<li><b>{esc(truncate(item.title, 38))}</b> · {fmt_duration(item.duration)}</li>"
+            for item in state.queue[:5]
+        )
+        up_next = B.details(
+            f"{E('next')}  Up next · {len(state.queue)}",
+            f"<ul>{listed}</ul>",
+            open=False,
+        )
+
+    # Colourful buttons
+    controls = (
+        B.row(
+            B.btn(
+                f"{E('resume')} Resume" if paused else f"{E('pause')} Pause",
+                data="v:resume" if paused else "v:pause",
+                style="primary",
+            ),
+            B.btn(f"{E('skip')} Skip", data="v:skip", style="success"),
+            B.btn(f"{E('stop')} Stop", data="v:stop", style="danger"),
+        )
+        + B.row(
+            B.btn(f"{E('loop')} Loop", data="v:loop"),
+            B.btn(f"{E('queue')} Queue", data="v:queue:0"),
+            B.btn(f"{E('like')} Like", data="v:like"),
+        )
+    )
+
+    return (
+        header
+        + table
+        + progress
+        + up_next
+        + B.actions(controls)
+        + B.soft_footer(BRAND, "rich ui")
+    )
+
+
+def now_playing_caption(state: ChatState, catalog=None) -> str:
+    """The same card as a poster caption.
+
+    ``catalog`` is an i18n catalog; without one the English labels are used.
+    The poster and the text card never disagree because they are built from
+    the same lines.
+    """
+    track = state.current
+    if not track:
+        return ""
+    status_label = live_label = ""
+    if catalog is not None:
+        status_label = catalog.t("np.paused" if state.paused else "np.streaming")
+        live_label = catalog.t("np.live")
+
+    rest = [
+        progress_block(state, track, status_label=status_label, live_label=live_label),
+        *_np_flags(state, catalog),
+        *_np_up_next(state, catalog),
+    ]
+    return "\n\n".join(_np_header(track)) + "\n\n" + "\n".join(rest)
+
+
+def now_playing_dm_caption(
+    track: Track,
+    *,
+    chat_title: str = "",
+    state: ChatState | None = None,
+    catalog=None,
+) -> str:
+    """The "this just started from the app" note that lands in a DM."""
+    where = f" in <b>{esc(truncate(chat_title, 40))}</b>" if chat_title else ""
+    meta = " · ".join(
+        part
+        for part in (
+            esc(truncate(track.uploader or "", 30)),
+            fmt_duration(track.duration) if track.duration else "",
+        )
+        if part
+    )
+    body = (
+        f"{E('play')} <b>Playing{where}</b>\n"
+        f"<blockquote>{esc(truncate(track.title, 60))}"
+        + (f"\n{meta}" if meta else "")
+        + "</blockquote>"
+    )
+    if state is not None:
+        body += "\n" + now_playing_caption(state, catalog)
+    return body
+
+
+def _track_fields(track: Track, *, extra: tuple[str, str, str] | None = None) -> str:
+    """The three facts every "this track" card shows, in the same order."""
+    rows: list[tuple[str, str, str]] = [
+        ("note", "title", f"<b>{esc(truncate(track.title, 56))}</b>"),
+        ("user", "artist", esc(truncate(track.uploader, 32) or "unknown artist")),
+        ("clock", "length", f"<b>{length_label(track)}</b>"),
+    ]
+    if extra:
+        rows.append(extra)
+    return B.fields(rows)
+
+
+def queued_card(track: Track, position: int, *, extra_actions: str = "") -> str:
+    """Premium 'added to queue' card."""
+    return (
+        B.soft_header("check", "Added to Queue", f"Position <b>#{position}</b>")
+        + B.note("It plays after what is already queued — nothing was interrupted.")
+        + _track_fields(track, extra=("queue", "position", f"<b>#{position}</b> in the queue"))
+        + B.actions(
+            B.row(
+                B.btn(f"{E('queue')} Queue", data="v:queue", style="primary"),
+                B.btn(f"{E('now')} Now playing", data="v:np"),
+            ),
+            B.row(
+                B.btn(f"{E('search')} Find another", data="v:help:playback"),
+                B.btn(f"{E('close')} Close", data="v:close", style="danger"),
+            ),
+            extra_actions,
+        )
+        + B.soft_footer(BRAND, "no duplicates")
+    )
+
+
+def started_card(track: Track, *, note: str = "", extra_actions: str = "") -> str:
+    """Premium 'now streaming' card after /play."""
+    can_show_video = (
+        str(getattr(track, "source", "") or "").lower() in {"youtube", "ytmusic"}
+        and not getattr(track, "is_video", False)
+    )
+    last_row = (
+        B.row(
+            B.btn(f"{E('video')} Play as video", data="v:video"),
+            B.btn(f"{E('close')} Close", data="v:close", style="danger"),
+        )
+        if can_show_video
+        else B.row(B.btn(f"{E('close')} Close", data="v:close", style="danger"))
+    )
+    return (
+        B.soft_header("play", "Now Streaming", "The assistant joined and started this track.")
+        + (B.note(note) if note else "")
+        + _track_fields(track)
+        + B.actions(
+            B.row(
+                B.btn(f"{E('pause')} Pause", data="v:pause", style="primary"),
+                B.btn(f"{E('skip')} Skip", data="v:skip", style="success"),
+                B.btn(f"{E('stop')} Stop", data="v:stop", style="danger"),
+            ),
+            B.row(
+                B.btn(f"{E('queue')} Queue", data="v:queue"),
+                B.btn(f"{E('now')} Now playing", data="v:np"),
+            ),
+            last_row,
+            extra_actions,
+        )
+        + B.soft_footer(BRAND, "rich ui")
+    )
+
+
+
+def queue_card(state: ChatState, page: int = 0, per_page: int = 8) -> tuple[str, int]:
+    """Premium queue card — clean, elegant, easy to scan."""
+    if not getattr(state, "queue", None) and not getattr(state, "current", None):
+        return empty_queue_card(), 0
+
+    tracks = state.queue
+    pages = max(1, (len(tracks) + per_page - 1) // per_page)
+    page = max(0, min(page, pages - 1))
+    window = tracks[page * per_page : (page + 1) * per_page]
+
+    header = B.soft_header(
+        "queue",
+        "Queue",
+        f"{len(tracks)} tracks  ·  page {page + 1}/{pages}" if tracks else "Your queue is empty",
+    )
+
+    # Current track chip
+    now = ""
+    if state.current:
+        paused = getattr(state, "paused", False)
+        now = B.note(
+            f"{B.status_chip("PAUSED" if paused else "LIVE", "paused" if paused else "live")}   "
+            f"<b>{esc(truncate(state.current.title, 40))}</b>  ·  "
+            f"{fmt_duration(state.elapsed())} / {fmt_duration(state.current.duration)}"
+        )
+
+    if tracks:
+        body = B.table(
+            ["#", "Track", "Time"],
+            [
+                (
+                    f"<b>{page * per_page + i + 1}</b>",
+                    esc(truncate(t.title, 38)),
+                    fmt_duration(t.duration),
+                )
+                for i, t in enumerate(window)
+            ],
+            border=1,
+        )
+    else:
+        body = B.note(f"{E("moon")}  Queue is empty. Add songs with <code>/play</code>.")
+
+    # Navigation
+    nav = []
+    if page > 0:
+        nav.append(B.btn("‹ Prev", data=f"v:queue:{page - 1}"))
+    nav.append(B.btn(f"{page + 1} / {pages}", data="v:noop", style="primary"))
+    if page + 1 < pages:
+        nav.append(B.btn("Next ›", data=f"v:queue:{page + 1}"))
+
+    actions = B.actions(
+        B.row(
+            B.btn(f"{E("shuffle")} Shuffle", data="v:shuffle", style="success"),
+            B.btn(f"{E("now")} Now Playing", data="v:np"),
+            B.btn(f"{E("stop")} Clear", data="v:clearqueue", style="danger"),
+        ),
+        B.row(*nav) if nav else "",
+    )
+
+    total_dur = fmt_duration(sum((t.duration or 0) for t in tracks))
+    footer = B.soft_footer(
+        total_dur,
+        f"{getattr(getattr(state, "loop", None), "label", "Off")} loop",
+        f"{getattr(state, "volume", 100)}%",
+        "autoplay on" if getattr(state, "autoplay", False) else "autoplay off",
+    )
+
+    return header + now + body + actions + footer, pages
+
+
+# ── search & downloads ──────────────────────────────────────────────────────
+def _meta_line(track: Track) -> str:
+    """`channel · 3:45 · 2.4M plays` — only the parts we actually know."""
+    bits: list[str] = []
+    if track.uploader:
+        bits.append(esc(truncate(track.uploader, 28)))
+    bits.append(f"<code>{length_label(track)}</code>")
+    if getattr(track, "views", 0):
+        bits.append(f"{compact_number(track.views)} plays")
+    return f" {DOT} ".join(bits)
+
+
+def usage_card() -> str:
+    """What /play accepts — rich and clear."""
+    return (
+        B.soft_header("info", "How to Play", "One command, three ways in")
+        + B.note("A link and a reply are detected automatically; words go to search.")
+        + B.pretty_table([
+            ("Search", "<code>/play believer</code>"),
+            ("Link", "<code>/play https://youtu.be/…</code>"),
+            ("File", "reply to any audio / video with <code>/play</code>"),
+        ])
+        + B.note(
+            "The closest match starts straight away — if it is not the one you "
+            "meant, <b>other results</b> is one tap away."
+        )
+        + B.actions(
+            B.row(
+                B.btn(f"{E('play')} Playback guide", data="v:help:playback", style="primary"),
+                B.btn(f"{E('download')} Get a file", data="v:help:tools"),
+                B.btn(f"{E('close')} Close", data="v:close", style="danger"),
+            )
+        )
+        + B.soft_footer(BRAND, "/vplay · /song · /vsong")
+    )
+
+
+
+def search_card(
+    query: str,
+    tracks: Iterable[Track],
+    *,
+    mode: str = "play",
+    first: int = 0,
+    note: str = "",
+) -> str:
+    """Premium search results — elegant hierarchy and clear coloured actions."""
+    tracks = list(tracks)
+    verb = "Play" if mode == "play" else "Download"
+    action = "pick" if mode == "play" else "dl"
+
+    if not tracks:
+        return (
+            B.soft_header("search", "No Results")
+            + B.note(
+                f"Nothing found for <b>{esc(truncate(query, 42))}</b>.\n"
+                "Try a different name or paste a link."
+            )
+            + B.actions(
+                B.row(
+                    B.btn(f"{E('play')} Try /play", data="v:help:playback", style="primary"),
+                    B.btn(f"{E('close')} Close", data="v:close", style="danger"),
+                )
+            )
+            + B.soft_footer(BRAND)
+        )
+
+    top = tracks[first]
+
+    header = B.soft_header(
+        "search",
+        "Search Results",
+        f"<b>{esc(truncate(query, 36))}</b>  ·  {len(tracks)} results",
+    )
+
+    top_block = B.note(
+        f"{E('play')}  <b>{first + 1}. {esc(truncate(top.title, 46))}</b><br/>"
+        f"<i>{_meta_line(top)}</i>"
+    )
+
+    extra_rows = []
+    for offset, track in enumerate(tracks[first + 1 : first + 7], start=1):
+        num = first + offset + 1
+        extra_rows.append(
+            f"<b>{num}.</b>  {esc(truncate(track.title, 42))}<br/><i>{_meta_line(track)}</i>"
+        )
+    list_block = B.bullets(extra_rows) if extra_rows else ""
+
+    grid_btns = B.grid(
+        [
+            B.btn(
+                f"{first + i + 1} · {truncate(t.title, 16)}",
+                data=f"v:{action}:{first + i}",
+                style="primary" if i == 0 else None,
+            )
+            for i, t in enumerate(tracks[first : first + 6])
+        ],
+        columns=2,
+    )
+
+    quick = [
+        B.btn(f"{E('play')} {verb} #1", data=f"v:{action}:{first}", style="success"),
+    ]
+    if mode == "play":
+        quick.append(B.btn(f"{E('next')} Next", data=f"v:pick:n{first}"))
+        quick.append(B.btn(f"{E('queue')} Queue", data=f"v:pick:q{first}"))
+    quick.append(B.btn(f"{E('close')} Cancel", data="v:close", style="danger"))
+
+    return (
+        header
+        + (B.image(top.thumbnail) + "\n" if getattr(top, "thumbnail", None) else "")
+        + (B.note(note) if note else "")
+        + top_block
+        + list_block
+        + B.actions(grid_btns, B.row(*quick))
+        + B.soft_footer("relevance", "length", "popularity")
+    )
+
+def download_choice_card(track: Track) -> str:
+    """Choose audio or video — soft and clear."""
+    return (
+        B.soft_header("download", "Choose a Format", esc(truncate(track.title, 48)))
+        + B.pretty_table([
+            ("Duration", fmt_duration(track.duration)),
+            ("Channel", esc(truncate(getattr(track, "uploader", "") or "—", 28))),
+        ])
+        + B.actions(
+            B.row(
+                B.btn(f"{E('song')} Audio · MP3", data="v:get:audio:0", style="success"),
+                B.btn(f"{E('video')} Video · MP4", data="v:get:video:0", style="primary"),
+            ),
+            B.row(B.btn(f"{E('close')} Cancel", data="v:close", style="danger")),
+        )
+        + B.soft_footer(BRAND, "cached · repeats are instant")
+    )
+
+
+def download_card(
+    track: Track,
+    kind: str = "audio",
+    *,
+    step: str = "",
+    fraction: float = 0.0,
+) -> str:
+    """Live download progress card."""
+    icon = E("song") if kind == "audio" else E("video")
+    quality = "MP3 320" if kind == "audio" else "MP4 720p"
+    pct = max(0, min(100, int(fraction * 100)))
+    bar = "█" * (pct // 10) + "░" * (10 - pct // 10)
+    status = step or ("Downloading…" if fraction < 1 else "Ready")
+    return (
+        B.soft_header("download", f"Download · {quality}", esc(truncate(track.title, 44)))
+        + B.pretty_table([
+            ("Status", status),
+            ("Progress", f"<code>{bar}</code> {pct}%"),
+        ])
+        + B.soft_footer(BRAND, "do not close this chat")
+    )
+
+
+
+def favorites_card(items: list[dict]) -> str:
+    if not items:
+        return (
+            B.banner("favourites", glyph="favorite")
+            + B.context("Nothing saved yet. Send <code>/fav</code> while a track is playing.")
+            + B.actions(
+                B.row(
+                    B.btn(f"{E('play')} Play something", data="v:help:playback", style="primary"),
+                    B.btn(f"{E('close')} Close", data="v:close"),
+                )
+            )
+        )
+    body = B.table(
+        ["#", "title", "time"],
+        [
+            (
+                f"<b>{index + 1}</b>",
+                esc(truncate(str(item.get("title", "?")), 40)),
+                fmt_duration(int(item.get("duration") or 0)),
+            )
+            for index, item in enumerate(items[:10])
+        ],
+    )
+    return (
+        B.banner("favourites", glyph="favorite", meta=f"<i>{len(items)}</i>")
+        + B.context("Saved tracks, newest first. They never expire.")
+        + body
+        + B.actions(
+            B.row(
+                B.btn(f"{E('play')} Play the first", data="v:fav:play", style="primary"),
+                B.btn(f"{E('close')} Close", data="v:close"),
+            )
+        )
+        + B.footer(f"{E('heart')} /fav saves what is playing {BULLET} /unfav removes it")
+    )
+
+
+def history_card(items: list[dict]) -> str:
+    if not items:
+        return (
+            B.banner("recently played", glyph="clock")
+            + B.context("Your history will appear here after the first track.")
+            + B.actions(B.row(B.btn(f"{E('close')} Close", data="v:close")))
+        )
+    body = B.table(
+        ["#", "title"],
+        [
+            (f"<b>{index + 1}</b>", esc(truncate(str(item.get("title", "?")), 44)))
+            for index, item in enumerate(items[:10])
+        ],
+    )
+    return (
+        B.banner("recently played", glyph="clock", meta=f"<i>{len(items)}</i>")
+        + B.context("Everything this account has streamed, most recent first.")
+        + body
+        + B.actions(
+            B.row(
+                B.btn(f"{E('play')} Pick a song", data="v:help:playback", style="primary"),
+                B.btn(f"{E('close')} Close", data="v:close"),
+            )
+        )
+        + B.footer(f"{E('clock')} kept for you only {BULLET} /forgetme deletes it")
+    )
+
+# ── settings / stats / lyrics / about ───────────────────────────────────────
+def _lang_name(code) -> str:
+    try:
+        from vyron.core import i18n
+
+        return i18n.name(str(code or ""))
+    except Exception:  # pragma: no cover - never break a card
+        return "English"
+
+
+def settings_card(cfg: dict, chat_title: str = "") -> str:
+    """Premium per-chat settings — one soft card for everything that matters."""
+    title = esc(truncate(chat_title or "this chat", 36))
+    loop = str(cfg.get("loop") or cfg.get("loop_mode") or "off")
+    autoplay = bool(cfg.get("autoplay", False))
+    volume = int(cfg.get("volume") or 100)
+    always = bool(cfg.get("always_on") or cfg.get("247") or False)
+    lang = str(cfg.get("language") or cfg.get("lang") or "en")
+    return (
+        B.soft_header("settings", "Settings", title)
+        + B.pretty_table([
+            ("Loop", f"<b>{esc(loop)}</b>"),
+            ("Autoplay", B.status_chip("ON" if autoplay else "OFF", "live" if autoplay else "paused")),
+            ("Volume", f"<b>{volume}%</b>"),
+            ("24/7", B.status_chip("ON" if always else "OFF", "live" if always else "paused")),
+            ("Language", f"<code>{esc(lang)}</code>"),
+        ])
+        + B.actions(
+            B.row(
+                B.btn(f"{E('loop')} Loop", data="v:loop"),
+                B.btn(f"{E('play')} Autoplay", data="v:autoplay"),
+                B.btn(f"{E('volume')} Volume", data="v:volume"),
+            ),
+            B.row(
+                B.btn(f"{E('clock')} 24/7", data="v:247"),
+                B.btn(f"{E('globe')} Language", data="v:lang"),
+                B.btn(f"{E('close')} Close", data="v:close", style="danger"),
+            ),
+        )
+        + B.soft_footer(BRAND, "per-chat")
+    )
+
+
+
+def stats_card(
+    *,
+    uptime: float,
+    chats: int,
+    active: int,
+    tracks: int,
+    downloads: int,
+    cache_bytes: int,
+    backend: str,
+    version: str,
+    api: dict | None = None,
+    links: dict[str, str] | None = None,
+    system: dict | None = None,
+) -> str:
+    body = B.fields(
+        [
+            ("clock", "uptime", f"<b>{human_clock(uptime)}</b>"),
+            ("chat", "known chats", f"<b>{chats}</b>"),
+            ("live", "active players", f"<b>{active}</b>"),
+            ("note", "tracks played", f"<b>{tracks}</b>"),
+            ("download", "downloads", f"<b>{downloads}</b>"),
+            ("cloud", "cache", f"<b>{human_size(cache_bytes)}</b>"),
+            ("code", "storage", f"<b>{backend}</b>"),
+        ]
+    )
+    api_block = ""
+    if api and api.get("enabled"):
+        api_block = B.section_title("music api") + B.fields(
+            [
+                ("key", "keys", f"<b>{int(api.get('keys') or 0)}</b> / {int(api.get('keys_total') or 0)}"),
+                ("download", "requests", f"<b>{int(api.get('requests') or 0)}</b>"),
+                ("cloud", "traffic", f"<b>{human_size(int(api.get('bytes') or 0))}</b>"),
+                ("shield", "scopes", ", ".join(api.get("scopes") or []) or "read, search, download"),
+            ]
+        )
+    system_block = ""
+    if system:
+        rows: list[tuple[str, str, str]] = []
+        if system.get("cpu_percent") is not None:
+            cores = system.get("cores_logical") or system.get("cores_physical")
+            tail = f" · {int(cores)}c" if cores else ""
+            rows.append(("bolt", "cpu", f"<b>{system['cpu_percent']}%</b>{tail}"))
+        if system.get("ram_percent") is not None:
+            rows.append(
+                (
+                    "cloud",
+                    "ram",
+                    f"<b>{system['ram_used_gb']} / {system['ram_total_gb']} GB</b>"
+                    f" · {system['ram_percent']}%",
+                )
+            )
+        if system.get("disk_percent") is not None:
+            rows.append(
+                (
+                    "download",
+                    "disk",
+                    f"<b>{system['disk_used_gb']} / {system['disk_total_gb']} GB</b>"
+                    f" · {system['disk_percent']}%",
+                )
+            )
+        if system.get("os"):
+            host = f"{system['os']} {system.get('release') or ''}".strip()
+            py = system.get("python")
+            rows.append(("code", "host", f"<b>{esc(host)}</b>" + (f" · py {py}" if py else "")))
+        if system.get("loadavg") is not None:
+            rows.append(("stats", "load", f"<b>{system['loadavg']}</b>"))
+        if rows:
+            system_block = B.section_title("host") + B.fields(rows)
+
+    owner_row = ""
+    if links:
+        buttons = []
+        if links.get("player"):
+            buttons.append(B.btn(f"{E('crown')} Owner console", data="v:app", style="primary"))
+        if links.get("api"):
+            buttons.append(B.btn(f"{E('code')} API docs", url=links["api"], style="success"))
+        if links.get("token"):
+            buttons.append(B.btn(f"{E('shield')} Owner token", url=links["token"], style="link"))
+        if buttons:
+            owner_row = B.row(*buttons[:3])
+    return (
+        B.banner("statistics", glyph="stats", meta=f"<i>v{version}</i>")
+        + B.context("Live numbers from this instance — the same ones /health reports.")
+        + body
+        + system_block
+        + api_block
+        + B.actions(
+            B.row(
+                B.btn(f"{E('live')} Active", data="v:admin:active", style="primary"),
+                B.btn(f"{E('check')} Refresh", data="v:admin:stats", style="success"),
+            ),
+            B.row(
+                B.btn(f"{E('logs')} Journal", data="v:admin:logs"),
+                B.btn(f"{E('close')} Close", data="v:close"),
+            ),
+            owner_row,
+        )
+        + B.footer(f"{E('bolt')} VYRON v{version} {BULLET} Kurigram + PyTgCalls {BULLET} UI: richgram")
+    )
+
+
+def lyrics_card(track: Track, lyrics: LyricsResult | None) -> str:
+    """Soft lyrics card — title + body or empty state."""
+    title = esc(truncate(getattr(track, "title", None) or "Unknown", 48))
+    if not lyrics or not (getattr(lyrics, "text", None) or getattr(lyrics, "lines", None)):
+        return (
+            B.soft_header("note", "Lyrics", title)
+            + B.note("No lyrics found for this track.")
+            + B.actions(B.row(B.btn(f"{E('close')} Close", data="v:close", style="danger")))
+            + B.soft_footer(BRAND)
+        )
+    body = getattr(lyrics, "text", None) or ""
+    if not body and getattr(lyrics, "lines", None):
+        body = "\n".join(
+            getattr(line, "text", str(line)) for line in (lyrics.lines or [])[:80]
+        )
+    body = esc(truncate(body, 3500))
+    return (
+        B.soft_header("note", "Lyrics", title)
+        + f"<blockquote>{body}</blockquote>"
+        + B.actions(B.row(B.btn(f"{E('close')} Close", data="v:close", style="danger")))
+        + B.soft_footer(BRAND, "synced when available")
+    )
+
+
+
+def music_api_card(
+    base: str,
+    stats: dict,
+    *,
+    compact: bool = False,
+    metrics: dict | None = None,
+    owner: bool = False,
+) -> str:
+    """Card for /api — the professional music API served by this deployment."""
+    root = (base or "").rstrip("/")
+    docs = f"{root}/v1/docs" if root else "/v1/docs"
+    openapi = f"{root}/v1/openapi.json" if root else "/v1/openapi.json"
+    enabled = bool(stats.get("enabled", True))
+    status = f"{E('check')} live" if enabled else f"{E('cross')} disabled"
+    auth = (
+        f"{E('warn')} open — no key needed"
+        if stats.get("open")
+        else f"{E('shield')} <code>X-API-Key</code> required"
+    )
+    served = int(stats.get("requests") or 0)
+    body = B.fields(
+        [
+            ("globe", "base url", f"<code>{esc(root or 'set WEBAPP_URL')}</code>"),
+            ("bolt", "status", f"<b>{status}</b> {BULLET} {auth}"),
+            ("clock", "rate limit", f"<b>{int(stats.get('rate_limit') or 0)}</b> req/min per key"),
+            ("key", "active keys",
+             f"<b>{int(stats.get('keys') or 0)}</b> of {int(stats.get('keys_total') or 0)}"),
+            ("download", "served",
+             f"<b>{served}</b> requests {BULLET} {human_size(int(stats.get('bytes') or 0))}"),
+            ("cloud", "storage",
+             f"<b>{esc(str(stats.get('storage') or 'json'))}</b> {BULLET} API v2.0"),
+        ]
+    )
+    if metrics:
+        body += B.fields(
+            [
+                ("stats", "hits today",
+                 f"<b>{int(metrics.get('requests') or 0)}</b> {BULLET} "
+                 f"{int(metrics.get('downloads') or 0)} downloads"),
+                ("clock", "latency",
+                 f"p50 <b>{metrics.get('latency_ms', {}).get('p50', 0)}ms</b> {BULLET} "
+                 f"p95 <b>{metrics.get('latency_ms', {}).get('p95', 0)}ms</b>"),
+            ]
+        )
+    endpoints = B.details(
+        f"{E('code')} <b>Endpoints</b> {DASH} canonical",
+        B.table(
+            ["Method", "Path", "Scope"],
+            [
+                ("<b>POST</b>", "/v1/tracks", "<code>down</code>"),
+                ("<b>GET</b>", "/v1/tracks/{id}", "<code>read</code>"),
+                ("<b>GET</b>", "/v1/tracks/{id}/stream", "<code>down</code>"),
+                ("<b>POST</b>", "/v1/downloads", "<code>down</code>"),
+                ("<b>GET</b>", "/v1/downloads/{id}", "<code>down</code>"),
+                ("<b>GET</b>", "/v1/downloads/{id}/file", "<code>down</code>"),
+                ("<b>GET</b>", "/v1/search?q=", "<code>srch</code>"),
+                ("<b>GET</b>", "/v1/lyrics?title=", "<code>read</code>"),
+                ("<b>GET</b>", "/v1/me", "<code>—</code>"),
+                ("<b>GET</b>", "/v1/metrics", "<code>adm</code>"),
+            ],
+        ),
+        open=not compact,
+    )
+    legacy = B.details(
+        f"{E('shield')} <b>Drop-in API</b>",
+        B.table(
+            ["Method", "Path"],
+            [
+                ("<b>POST</b>", "/v1/track/by-video-id"),
+                ("<b>POST</b>", "/v1/track/by-query"),
+                ("<b>GET</b>", "/v1/info/by-video-id"),
+                ("<b>GET</b>", "/v1/key"),
+            ],
+        )
+        + B.note(f"{E('info')} Old integrations keep working — just swap the base URL."),
+        open=False,
+    )
+    snippet = (
+        f"curl -X POST {root}/v1/tracks \\\n"
+        f'  -H "X-API-Key: vyrn_..." -H "Content-Type: application/json" \\\n'
+        f"  -d '{{\\\"video_id\\\":\\\"dQw4w9WgXcQ\\\"}}' --output track.mp3"
+    )
+    usage = (
+        B.note(f"{E('code')} <b>Quick start</b>\n<pre>{esc(snippet)}</pre>")
+        if not compact
+        else ""
+    )
+    scopes_line = B.note(
+        f"{E('shield')} scopes: <code>read</code> {BULLET} <code>search</code> {BULLET} "
+        f"<code>download</code> {BULLET} <code>admin</code> — mint with "
+        f"<code>/getapi label scopes=read,search days=30</code>"
+    )
+    return (
+        B.banner(f"music api {DASH} VYRON", glyph="globe")
+        + B.note(
+            f"{SPARK} A music API for other bots and apps {DASH} same URL as this bot "
+            f"and its Mini App. No second deployment, no extra port."
+        )
+        + body
+        + scopes_line
+        + endpoints
+        + legacy
+        + usage
+        + B.divider()
+        + B.row(
+            B.btn(f"{E('code')} Docs", url=docs, style="primary"),
+            B.btn(f"{E('globe')} Open API", url=f"{root}/v1/" if root else settings.git_repo, style="link"),
+        )
+        + B.row(
+            B.btn(f"{E('spark')} Spec", url=openapi, style="success"),
+            B.btn(f"{E('queue')} Commands", data="v:help:main", style="link"),
+            B.btn(f"{E('close')} Close", data="v:close", style="danger"),
+        )
+        + (
+            B.row(
+                B.btn(f"{E('crown')} Owner console", data="v:app", style="primary"),
+                B.btn(f"{E('key')} Owner token", data="v:token:rotate"),
+                B.btn(f"{E('shield')} Owner help", data="v:help:power", style="link"),
+            )
+            if owner
+            else ""
+        )
+        + B.footer(
+            f"{E('info')} keys: <code>/getapi</code> {BULLET} Mini App → Music API "
+            f"{BULLET} docs at <code>/v1/docs</code>"
+        )
+    )
+
+
+def api_key_card(
+    key: str,
+    label: str,
+    base: str,
+    rate: int,
+    *,
+    scopes=None,
+    expires_at: float | None = None,
+    owner_id: int | None = None,
+    key_id: str = "",
+) -> str:
+    """The one-and-only view of a freshly minted key."""
+    root = (base or "").rstrip("/")
+    expiry = (
+        "never expires"
+        if not expires_at
+        else f"expires {time.strftime('%d %b %Y', time.gmtime(expires_at))}"
+    )
+    return (
+        B.banner(f"api key {DASH} ready", glyph="key")
+        + B.note(
+            f"{E('warn')} <b>Copy it now</b> {DASH} this is the only time the full key is shown. "
+            f"It is stored hashed, so nobody (not even the bot) can show it again."
+        )
+        + B.note(f"{E('key')} <code>{esc(key)}</code>")
+        + B.fields(
+            [
+                ("note", "label", f"<b>{esc(label)}</b>"),
+                ("shield", "scopes", _scope_chips(scopes or ["read", "search", "download"])),
+                ("clock", "rate limit", f"<b>{rate}</b> req/min {BULLET} {expiry}"),
+                ("globe", "base url", f"<code>{esc(root or 'set WEBAPP_URL')}</code>"),
+            ]
+        )
+        + B.details(
+            f"{E('code')} <b>Try it</b>",
+            "<pre>"
+            + esc(
+                f'curl {root}/v1/me -H "X-API-Key: {key}"\n'
+                f'curl -X POST {root}/v1/tracks -H "X-API-Key: {key}" \\\n'
+                f'  -H "Content-Type: application/json" -d \'{{"video_id":"dQw4w9WgXcQ"}}\' -o track.mp3'
+            )
+            + "</pre>",
+            open=True,
+        )
+        + B.divider()
+        + B.row(
+            B.btn(f"{E('code')} Docs", url=f"{root}/v1/docs" if root else settings.git_repo, style="primary"),
+            (
+                B.btn(f"{E('cross')} Revoke", data=f"v:key:revoke:{key_id}", style="danger")
+                if key_id
+                else B.btn(f"{E('close')} Close", data="v:close", style="link")
+            ),
+            B.btn(f"{E('key')} All keys", data="v:token:keys", style="link"),
+        )
+        + B.footer(
+            f"{E('info')} revoke with <code>/revoke {key[:12]}…</code> {BULLET} "
+            f"rotate with <code>/rotatekey {key[:12]}…</code>"
+        )
+    )
+
+
+def _key_action_rows(keys: list[dict], *, limit: int = 8) -> str:
+    """One revoke button per live key — deleting a credential should be a tap."""
+    live = [item for item in keys if item.get("active", True)][:limit]
+    buttons = [
+        B.btn(
+            f"{E('cross')} {esc(truncate(str(item.get('label') or item.get('prefix') or 'key'), 14))}",
+            data=f"v:key:revoke:{str(item.get('id') or '')}",
+            style="danger",
+        )
+        for item in live
+    ]
+    if not buttons:
+        return ""
+    return B.grid(buttons, columns=2)
+
+
+def _revoked_grace() -> int:
+    """`REVOKED_GRACE_DAYS`, imported late so the card never cycles a module."""
+    try:
+        from vyron.core.musicapi import REVOKED_GRACE_DAYS
+
+        return int(REVOKED_GRACE_DAYS)
+    except Exception:  # pragma: no cover - the constant always exists
+        return 7
+
+
+def api_keys_card(keys: list[dict], base: str) -> str:
+    if not keys:
+        return (
+            B.banner("api keys", glyph="key")
+            + B.note(f"{E('moon')} No keys yet {DASH} mint one with <code>/getapi label</code>.")
+            + B.row(B.btn(f"{E('code')} Docs", url=f"{(base or '').rstrip('/')}/v1/docs", style="primary"))
+        )
+    active = sum(1 for item in keys if item.get("active", True))
+    rows = [
+        (
+            f"<b>{esc(str(item.get('label') or 'key'))[:16]}</b>",
+            f"<code>{esc(str(item.get('masked') or mask_ish(item)))}</code>",
+            _scope_chips(item.get("scopes")),
+            f"{int(item.get('uses') or 0)}",
+            _expiry_state(item),
+        )
+        for item in keys
+    ]
+    return (
+        B.banner("api keys", glyph="key", meta=f"<i>{active}/{len(keys)} active</i>")
+        + B.table(["Label", "Key", "Scopes", "Uses", "State"], rows)
+        + B.note(
+            f"{E('shield')} Keys are stored as SHA-256 hashes. The full value is only shown "
+            f"when it is minted {DASH} rotate anything you have lost. "
+            f"Revoked keys are deleted after {_revoked_grace()} days."
+        )
+        + _key_action_rows(keys)
+        + B.row(
+            B.btn(f"{E('code')} Docs", url=f"{(base or '').rstrip('/')}/v1/docs", style="primary"),
+            B.btn(f"{E('close')} Close", data="v:close", style="link"),
+        )
+        + B.footer(f"revoke <code>/revoke &lt;id|prefix&gt;</code> {BULLET} rotate <code>/rotatekey</code> {BULLET} {BRAND}")
+    )
+
+
+def token_card(
+    token: str,
+    *,
+    base: str = "",
+    owner_id: int = 0,
+    ttl_days: int = 30,
+    epoch: int = 0,
+    active_keys: int = 0,
+) -> str:
+    """``/apitoken`` — one screen for the owner's credentials and how to kill them."""
+    root = (base or "").rstrip("/") or "WEBAPP_URL"
+    return (
+        B.banner("owner access", glyph="crown")
+        + B.note(
+            f"{SPARK} This token is your key to the <b>music API</b> and to scripts.\n"
+            f"The Mini App never needs it — Telegram already proves who you are."
+        )
+        + B.note(f"{E('key')} <code>{esc(token)}</code>")
+        + B.fields(
+            [
+                ("user", "owner", f"<code>{owner_id or '—'}</code>"),
+                ("clock", "expires", f"<b>{ttl_days} days</b> from the last rotate"),
+                (
+                    "shield",
+                    "generation",
+                    f"<b>{int(epoch) + 1}</b> {BULLET} revoking kills every older token",
+                ),
+                ("code", "header", "<code>X-Owner-Token: …</code>"),
+                ("key", "api keys", f"<b>{int(active_keys)}</b> active"),
+            ]
+        )
+        + B.details(
+            f"{E('code')} <b>Try it</b>",
+            "<pre>"
+            + esc(
+                f'curl -s "{root}/v1/me" -H "X-Owner-Token: {token}"\n'
+                f'curl -s "{root}/v1/admin/keys" -H "X-Owner-Token: {token}"'
+            )
+            + "</pre>",
+            open=False,
+        )
+        + B.divider()
+        + B.row(
+            B.btn(f"{E('play')} Open player", data="v:app", style="primary"),
+            B.btn(f"{E('code')} API docs", url=f"{root}/v1/docs", style="success"),
+        )
+        + B.row(
+            B.btn(f"{E('rocket')} Rotate", data="v:token:rotate"),
+            B.btn(f"{E('cross')} Revoke all", data="v:token:revoke", style="danger"),
+            B.btn(f"{E('key')} API keys", data="v:token:keys", style="link"),
+        )
+        + B.footer(
+            f"{E('shield')} a token lasts 30 days; <b>Revoke all</b> invalidates every one "
+            f"instantly — including any you already shared"
+        )
+    )
+
+
+def token_revoked_card(*, epoch: int = 0, keys_revoked: int = 0) -> str:
+    """Confirmation after a revocation — says plainly what still works."""
+    return (
+        B.banner("tokens revoked", glyph="shield")
+        + B.note(
+            "Every owner token minted before now is <b>dead</b>. "
+            "The Mini App keeps working — it authenticates with Telegram, not this token."
+        )
+        + B.fields(
+            [
+                ("bolt", "generation", f"<b>{int(epoch) + 1}</b>"),
+                ("key", "api keys revoked", f"<b>{int(keys_revoked)}</b>"),
+                ("info", "next step", "mint a fresh one with <code>/apitoken</code>"),
+            ]
+        )
+        + B.actions(B.row(B.btn(f"{E('check')} Got it", data="v:close", style="success")))
+        + B.footer(f"{E('crown')} you can also rotate only the API keys, from the API keys screen")
+    )
+
+
+def api_usage_card(
+    stats: dict,
+    keys: list[dict],
+    base: str,
+    *,
+    sudo: bool = False,
+    metrics: dict | None = None,
+) -> str:
+    totals = B.fields(
+        [
+            ("key", "active keys",
+             f"<b>{int(stats.get('keys') or 0)}</b> / {int(stats.get('keys_total') or 0)}"),
+            ("download", "requests", f"<b>{int(stats.get('requests') or 0)}</b>"),
+            ("cloud", "bytes served", f"<b>{human_size(int(stats.get('bytes') or 0))}</b>"),
+            ("clock", "rate limit", f"<b>{int(stats.get('rate_limit') or 0)}</b> req/min"),
+            ("globe", "mode", "open" if stats.get("open") else "keyed"),
+            ("cloud", "storage", f"<b>{esc(str(stats.get('storage') or 'json'))}</b>"),
+        ]
+    )
+    if metrics:
+        totals += B.fields(
+            [
+                ("bolt", "this process",
+                 f"<b>{int(metrics.get('requests') or 0)}</b> hits "
+                 f"{BULLET} <b>{int(metrics.get('rate_limited') or 0)}</b> throttled"),
+                ("clock", "latency",
+                 f"p50 <b>{metrics.get('latency_ms', {}).get('p50', 0)}ms</b> "
+                 f"{BULLET} p95 <b>{metrics.get('latency_ms', {}).get('p95', 0)}ms</b> "
+                 f"{BULLET} p99 <b>{metrics.get('latency_ms', {}).get('p99', 0)}ms</b>"),
+            ]
+        )
+    by_key = ""
+    if keys and sudo:
+        by_key = B.table(
+            ["Label", "Scopes", "Uses", "Bytes", "Last used"],
+            [
+                (
+                    f"<b>{esc(str(item.get('label') or 'key'))[:16]}</b>",
+                    _scope_chips(item.get("scopes")),
+                    str(int(item.get("uses") or 0)),
+                    human_size(int(item.get("bytes") or 0)),
+                    _ago(item.get("last_used_at")),
+                )
+                for item in keys[:12]
+            ],
+        )
+    return (
+        B.banner("api usage", glyph="stats")
+        + totals
+        + by_key
+        + B.row(
+            B.btn(f"{E('code')} Docs", url=f"{(base or '').rstrip('/')}/v1/docs", style="primary"),
+            B.btn(f"{E('spark')} Metrics", url=f"{(base or '').rstrip('/')}/v1/metrics", style="link"),
+        )
+        + B.footer(f"{E('spark')} every request is metered per key {BULLET} {BRAND}")
+    )
+
+
+def mask_ish(item: dict) -> str:
+    key = str(item.get("key") or item.get("prefix") or "")
+    return f"{key[:8]}…{key[-4:]}" if len(key) > 12 else key
+
+
+def about_card() -> str:
+    """What VYRON is, in one screen — no marketing, no credits list."""
+    body = B.fields(
+        [
+            ("code", "stack", "Kurigram + PyTgCalls + yt-dlp"),
+            ("bolt", "interface", "rich cards · premium emoji · Mini App"),
+            ("cloud", "deploy", "Docker · Render · Koyeb · any VPS"),
+            ("download", "media", "voice chat · MP3 320 · MP4 720p · synced lyrics"),
+            ("code", "music api", "<code>/v1</code> + <code>/vyron</code> on this same URL"),
+            (
+                "users",
+                "sources",
+                "YouTube · YT Music · JioSaavn · Audius · SoundCloud — if YouTube "
+                "blocks the server, the same song plays from a catalogue",
+            ),
+        ]
+    )
+    return (
+        B.banner("about", glyph="brand")
+        + B.context(
+            f"<b>{esc(BRAND_DISPLAY)}</b> streams music into a Telegram voice chat, "
+            "finds what you mean even when you half-remember the title, and hands you "
+            "the file when you would rather keep it."
+        )
+        + body
+        + B.actions(
+            B.row(
+                B.btn(f"{E('code')} Source", url=settings.git_repo, style="link"),
+                B.btn(f"{E('chat')} Support", url=settings.support_chat, style="link"),
+            ),
+            B.row(
+                B.btn(f"{E('back')} Back to commands", data="v:help:main", style="primary"),
+                B.btn(f"{E('close')} Close", data="v:close", style="danger"),
+            ),
+        )
+        + B.footer(f"v{_version()} · Kurigram · PyTgCalls · yt-dlp · richgram")
+    )
+
+# ── small status cards ──────────────────────────────────────────────────────
+# ── saved playlists ─────────────────────────────────────────────────────────
+def playlists_card(items: list[dict]) -> str:
+    """Soft list of personal playlists."""
+    if not items:
+        return (
+            B.soft_header("queue", "Playlists", "You have no playlists yet")
+            + B.note("Create one with <code>/pcreate name</code>.")
+            + B.actions(
+                B.row(
+                    B.btn(f"{E('play')} How to play", data="v:help:playback", style="primary"),
+                    B.btn(f"{E('close')} Close", data="v:close", style="danger"),
+                )
+            )
+            + B.soft_footer(BRAND)
+        )
+    rows = []
+    for i, pl in enumerate(items[:12], start=1):
+        name = esc(truncate(str(pl.get("name") or pl.get("title") or f"Playlist {i}"), 32))
+        n = int(pl.get("count") or pl.get("tracks") or len(pl.get("items") or []) or 0)
+        rows.append((f"<b>{i}</b>", name, f"{n} tracks"))
+    return (
+        B.soft_header("queue", "Playlists", f"{len(items)} saved")
+        + B.table(["#", "Name", "Tracks"], rows, border=1)
+        + B.actions(
+            B.row(
+                B.btn(f"{E('play')} Play", data="v:help:playback", style="success"),
+                B.btn(f"{E('close')} Close", data="v:close", style="danger"),
+            )
+        )
+        + B.soft_footer(BRAND, "/pplay · /padd")
+    )
+
+
+
+def playlist_card(playlist: dict) -> str:
+    """Single playlist detail — soft."""
+    name = esc(truncate(str(playlist.get("name") or playlist.get("title") or "Playlist"), 40))
+    items = playlist.get("items") or playlist.get("tracks") or []
+    n = len(items) if isinstance(items, list) else int(playlist.get("count") or 0)
+    return (
+        B.soft_header("queue", name, f"{n} tracks")
+        + B.note("Use <code>/pplay</code> to start · <code>/padd</code> to add the current song.")
+        + B.actions(
+            B.row(
+                B.btn(f"{E('play')} Play", data="v:help:playback", style="success"),
+                B.btn(f"{E('close')} Close", data="v:close", style="danger"),
+            )
+        )
+        + B.soft_footer(BRAND)
+    )
+
+
+
+def change_card(
+    title: str,
+    *,
+    glyph: str = "check",
+    label: str = "",
+    value: str = "",
+    note: str = "",
+    extra: Iterable[tuple[str, str, str]] = (),
+    actions: str = "",
+) -> str:
+    """A setting that just changed: one fact, one line of context, one way out.
+
+    `/volume 40`, `/loop one`, `/shuffle`, a prompt saved, an effect toggled —
+    they all used to be a single bold line glued to the chat. They are the same
+    *shape* every time, so they are the same card every time:
+
+        ━━ 🎚️ ᴠᴏʟᴜᴍᴇ ━━
+        ◈ 🔊 ʟᴇᴠᴇʟ: 40%
+        <blockquote>the assistant speaks at this level…</blockquote>
+        [ Now playing ] [ Close ]
+    """
+    rows: list[tuple[str, str, str]] = []
+    if label:
+        rows.append((glyph, label, value))
+    rows.extend(extra)
+    body = B.fields(rows) if rows else ""
+    return (
+        B.banner(title, glyph=glyph)
+        + body
+        + (B.context(note) if note else "")
+        + B.actions(
+            actions
+            or B.row(
+                B.btn(f"{E('now')} Now playing", data="v:np", style="primary"),
+                B.btn(f"{E('settings')} Settings", data="v:settings"),
+                B.btn(f"{E('close')} Close", data="v:close"),
+            )
+        )
+        + B.footer(f"{E('spark')} {BRAND} {BULLET} v{_version()}")
+    )
+
+
+def working_card(
+    text: str,
+    *,
+    headline: str = "working on it",
+    glyph: str = "spark",
+) -> str:
+    """In-progress card — soft, calm, no panic."""
+    return (
+        B.soft_header(glyph, headline.title() if headline else "Working", text)
+        + B.soft_footer(BRAND, "please wait")
+    )
+
+
+def _status_card(glyph: str, headline: str, text: str, *, style: str = "primary") -> str:
+    return (
+        B.soft_header(glyph, headline.title() if headline else "Status", text)
+        + B.soft_footer(BRAND)
+    )
+
+
+def ok_card(text: str, *, headline: str = "done") -> str:
+    return (
+        B.soft_header("check", headline.title() if headline else "Done", text)
+        + B.soft_footer(BRAND)
+    )
+
+
+def warn_card(text: str, *, headline: str = "heads up") -> str:
+    return (
+        B.soft_header("warn", headline.title() if headline else "Heads up", text)
+        + B.soft_footer(BRAND)
+    )
+
+
+def error_card(text: str, *, headline: str = "that did not work") -> str:
+    return (
+        B.soft_header("stop", headline.title() if headline else "Error", text)
+        + B.soft_footer(BRAND)
+    )
+
+
+def info_card(text: str, *, headline: str = "fyi", glyph: str = "info") -> str:
+    return (
+        B.soft_header(glyph, headline.title() if headline else "Info", text)
+        + B.soft_footer(BRAND)
+    )
+
+
+def locked_card(text: str, *, headline: str = "not allowed") -> str:
+    return (
+        B.soft_header("lock", headline.title() if headline else "Not allowed", text)
+        + B.soft_footer(BRAND)
+    )
+
+
+
+
+def empty_queue_card() -> str:
+    return (
+        B.soft_header("queue", "Queue Empty", "Nothing waiting")
+        + B.note("Send <code>/play song name</code> or a link to add something.")
+        + B.actions(
+            B.row(
+                B.btn(f"{E('play')} How to play", data="v:help:playback", style="success"),
+                B.btn(f"{E('close')} Close", data="v:close", style="danger"),
+            )
+        )
+        + B.soft_footer(BRAND)
+    )
+
+
+def no_vc_card() -> str:
+    return (
+        B.soft_header("warn", "No Voice Chat", "Start a VC first")
+        + B.note("Open a voice chat in this group, then send <code>/play</code> again.")
+        + B.soft_footer(BRAND)
+    )
+
+
+def assistant_offline_card() -> str:
+    return (
+        B.soft_header("warn", "Assistant Offline", "Voice engine not ready")
+        + B.note(
+            "Playback needs <code>STRING_SESSION</code> and a moment after boot. "
+            "<code>/song</code> still works for files."
+        )
+        + B.soft_footer(BRAND)
+    )
+
+
+def rate_limit_card(seconds: int | float = 5) -> str:
+    sec = max(1, int(seconds))
+    return (
+        B.soft_header("clock", "Slow Down", f"Try again in <b>{sec}s</b>")
+        + B.note("A short cooldown keeps the chat usable for everyone.")
+        + B.soft_footer(BRAND)
+    )
+
+
+def speed_card(rate: float, *, changed: bool = False) -> str:
+    return (
+        B.soft_header("bolt", "Speed set" if changed else "Speed", f"<b>{rate:.2f}×</b>")
+        + B.pretty_table([
+            ("Rate", f"<b>{rate:.2f}×</b>"),
+            ("Range", "0.25 – 4.0 · <code>/speed 1</code> resets"),
+        ])
+        + B.soft_footer(BRAND)
+    )
+
+
+def bass_card(db: float, *, changed: bool = False) -> str:
+    return (
+        B.soft_header("spark", "Bass set" if changed else "Bass", f"<b>{db:.0f} dB</b>")
+        + B.pretty_table([
+            ("Boost", f"<b>{db:.0f} dB</b>"),
+            ("Range", "0 – 20 · <code>/bass 0</code> clears"),
+        ])
+        + B.soft_footer(BRAND)
+    )
+
+
+def doctor_card(checks: list[tuple[str, str, str]]) -> str:
+    """Health board — green/yellow/red style chips from (label, status, detail)."""
+    rows = []
+    for label, status, detail in checks:
+        st = (status or "").lower()
+        if st in {"ok", "green", "pass", "live"}:
+            chip = B.status_chip("OK", "live")
+        elif st in {"warn", "yellow", "limited"}:
+            chip = B.status_chip("WARN", "paused")
+        else:
+            chip = B.status_chip("FAIL", "paused")
+        rows.append((esc(label), f"{chip}  {esc(detail)}"))
+    return (
+        B.soft_header("shield", "Doctor", "Deployment health")
+        + B.pretty_table(rows)
+        + B.actions(
+            B.row(
+                B.btn(f"{E('refresh')} Refresh", data="v:doctor", style="primary"),
+                B.btn(f"{E('close')} Close", data="v:close", style="danger"),
+            )
+        )
+        + B.soft_footer(BRAND, "/doctor")
+    )
+
+
+def ping_card(
+    latency_ms: float,
+    uptime: float,
+    *,
+    system: dict | None = None,
+) -> str:
+    """Premium ping card — latency quality + host vitals (Shizu-level richness)."""
+    if latency_ms < 100:
+        tone, label = "live", "Excellent"
+    elif latency_ms < 250:
+        tone, label = "live", "Good"
+    elif latency_ms < 500:
+        tone, label = "paused", "Fair"
+    else:
+        tone, label = "paused", "Slow"
+
+    rows = [
+        ("Latency", f"<b>{latency_ms:.0f} ms</b>"),
+        ("Quality", B.status_chip(label, tone)),
+        ("Uptime", f"<b>{human_clock(uptime)}</b>"),
+    ]
+    system = system or {}
+    if system.get("cpu_percent") is not None:
+        rows.append(("CPU", f"<b>{system['cpu_percent']}%</b>"))
+    if system.get("ram_percent") is not None:
+        used = system.get("ram_used_gb")
+        total = system.get("ram_total_gb")
+        ram = f"<b>{system['ram_percent']}%</b>"
+        if used is not None and total is not None:
+            ram += f" · {used}/{total} GB"
+        rows.append(("RAM", ram))
+    if system.get("disk_percent") is not None:
+        rows.append(("Disk", f"<b>{system['disk_percent']}%</b>"))
+    if system.get("python"):
+        rows.append(("Python", f"<code>{system.get('python')}</code>"))
+
+    return (
+        B.soft_header("live", "Ping", "Bot response time & host vitals")
+        + B.pretty_table(rows)
+        + B.actions(
+            B.row(
+                B.btn(f"{E('refresh')} Refresh", data="v:ping", style="primary"),
+                B.btn(f"{E('close')} Close", data="v:close", style="danger"),
+            )
+        )
+        + B.soft_footer(BRAND, "alive")
+    )
+
+
+
+def _app_root(url: str) -> str:
+    """Normalise a WEBAPP_URL into the Mini App entry point (keeps query)."""
+    raw = (url or "").strip()
+    if not raw:
+        return ""
+    from urllib.parse import urlsplit, urlunsplit
+
+    parts = urlsplit(raw)
+    path = parts.path.rstrip("/")
+    if not path.endswith("/app"):
+        path = f"{path}/app" if path else "/app"
+    return urlunsplit((parts.scheme, parts.netloc, f"{path}/", parts.query, parts.fragment))
+
+
+def app_entry_url(url: str | None = None, *, owner_token: str = "") -> str:
+    """Public helper: Mini App URL (optionally with an owner token)."""
+    entry = _app_root(url or settings.webapp_url)
+    return _with_owner_token(entry, owner_token) if owner_token else entry
+
+
+def _with_owner_token(url: str, token: str) -> str:
+    if not url or not token:
+        return url
+    joiner = "&" if "?" in url else "?"
+    return f"{url}{joiner}ot={token}"
+
+
+def webapp_card(url: str, chat_title: str = "", owner_token: str = "") -> str:
+    """Shown in DM: the keyboard around this card carries the web_app button."""
+    return (
+        B.banner("player", glyph="play")
+        + B.note(
+            "<b>Opens inside Telegram.</b>\n"
+            "No browser tab, no login — the same chat, the same queue."
+        )
+        + B.bullets(
+            [
+                "<b>Play here</b> or <b>cast</b> the same track into the voice chat",
+                "Queue, lyrics, shuffle and repeat on one screen",
+                "Works on mobile and desktop Telegram",
+            ]
+        )
+        + B.footer("tap the button below · or long-press the menu button")
+    )
+
+
+def webapp_group_card(bot_username: str) -> str:
+    """Groups cannot host a Mini App button, so point at the DM instead."""
+    return (
+        B.heading(f"{E('play')} player", 2)
+        + B.note(
+            "<b>Telegram only opens the player in a private chat.</b>\n"
+            f"Open <a href=\"https://t.me/{esc(bot_username)}\">@{esc(bot_username)}</a>, "
+            "tap <b>Player</b>, and it opens inside Telegram."
+        )
+        + B.footer("the voice chat here keeps playing while you browse")
+    )
+
+
+# ── owner journal ───────────────────────────────────────────────────────────
+_LOG_GLYPH = {
+    "debug": "·",
+    "info": "›",
+    "ok": "✓",
+    "warn": "!",
+    "error": "×",
+}
+
+
+def logs_card(
+    events: list[dict],
+    stats: dict,
+    *,
+    level: str = "all",
+    scope: str = "",
+) -> str:
+    """The owner journal as a card: newest last, plain enough to scan fast."""
+    import time as _time
+
+    from vyron.ui.theme import E as _E
+
+    uptime = human_time(float(stats.get("uptime") or 0))
+    head = B.fields(
+        [
+            ("clock", "uptime", f"<b>{uptime}</b>"),
+            ("note", "buffered",
+             f"<b>{int(stats.get('buffered') or 0)}</b> / {int(stats.get('seq') or 0)}"),
+            ("warn", "warnings", f"<b>{int(stats.get('warnings') or 0)}</b>"),
+            ("close", "errors", f"<b>{int(stats.get('errors') or 0)}</b>"),
+        ]
+    )
+
+    lines: list[str] = []
+    for event in events[-14:]:
+        stamp = _time.strftime("%H:%M:%S", _time.localtime(float(event.get("ts") or 0)))
+        glyph = _LOG_GLYPH.get(str(event.get("level")), "·")
+        scope_name = esc(str(event.get("scope") or "app"))
+        message = esc(truncate(str(event.get("message") or ""), 110))
+        line = f"<code>{stamp}</code> {glyph} <b>{scope_name}</b> {message}"
+        if event.get("meta", {}).get("type"):
+            line += f" <i>({esc(str(event['meta']['type']))})</i>"
+        lines.append(line)
+
+    body = B.bullets(lines) if lines else "<i>Nothing recorded yet — the journal fills as the bot works.</i>"
+    filters = B.row(
+        B.btn("All", data="v:logs:all", style="primary" if level == "all" else None),
+        B.btn("Info", data="v:logs:info", style="primary" if level == "info" else None),
+        B.btn("Warn", data="v:logs:warn", style="primary" if level == "warn" else None),
+        B.btn("Errors", data="v:logs:error", style="primary" if level == "error" else None),
+        B.btn(f"{_E('check')} Refresh", data=f"v:logs:{level}", style="success"),
+    )
+    title = "journal" + (f" · {scope}" if scope else "") + ("" if level == "all" else f" · {level}")
+    return (
+        B.banner(title, glyph="code")
+        + head
+        + B.divider()
+        + body
+        + filters
+        + B.row(
+            B.btn(f"{_E('download')} Export .jsonl", data="v:logs:export", style="link"),
+            B.btn(f"{_E('close')} Clear", data="v:logs:clear", style="danger"),
+        )
+        + B.footer(
+            f"{_E('info')} Newest last {BULLET} warnings and errors include the traceback type "
+            f"{BULLET} also at /app → Owner → Logs"
+        )
+    )
+
+
+# ── group management ────────────────────────────────────────────────────────
+_TONES = {
+    "ok": ("check", "success"),
+    "warn": ("warn", "danger"),
+    "error": ("cross", "danger"),
+    "info": ("info", "primary"),
+}
+
+
+def notice_card(
+    title: str,
+    detail: str = "",
+    *,
+    tone: str = "ok",
+    icon: str | None = None,
+    extra: Iterable[tuple[str, str]] = (),
+    footer: str = "",
+    actions: str = "",
+) -> str:
+    """One-line confirmation with context — the shape every group action uses."""
+    glyph_name, style = _TONES.get(tone, _TONES["ok"])
+    markup = B.banner(title, glyph=(icon or glyph_name))
+    if detail:
+        markup += B.context(detail)
+    pairs = [("info", key, value) for key, value in extra]
+    if pairs:
+        markup += B.fields(pairs)
+    if actions:
+        markup += B.actions(actions)
+    if footer:
+        markup += B.footer(footer)
+    return markup
+
+
+def rules_card(title: str, rules: str, *, admins: int = 0, can_edit: bool = False) -> str:
+    """``/rules`` — the chat's own rulebook, readable by everyone."""
+    body = (
+        B.banner(f"rules {DASH} {esc(truncate(title, 34))}", glyph="note")
+        + B.note(esc(rules) if rules else (
+            "<b>No rules yet.</b>\nAn admin can set them with "
+            "<code>/setrules 1. Be kind 2. No spam</code>."
+        ))
+    )
+    if can_edit:
+        body += B.row(
+            B.btn(f"{E('note')} read the rules", data="v:grp:rules", style="link"),
+            B.btn(f"{E('check')} Got it", data="v:close", style="success"),
+        )
+    else:
+        body += B.row(B.btn(f"{E('check')} Got it", data="v:close", style="success"))
+    return body + B.footer(
+        f"{E('shield')} {admins} admins enforce these {BULLET} /report to flag a message"
+    )
+
+
+def chat_info_card(info: dict) -> str:
+    """``/chatinfo`` — everything about this group on one screen."""
+    rows = [
+        ("chat", "title", f"<b>{esc(truncate(str(info.get('title') or 'this chat'), 40))}</b>"),
+        ("code", "id", f"<code>{info.get('id')}</code>"),
+        ("link", "username", f"@{esc(info['username'])}" if info.get("username") else "<i>private</i>"),
+        ("user", "members", f"<b>{compact_number(int(info.get('members') or 0))}</b>"
+                            + (f" {BULLET} {compact_number(int(info.get('online') or 0))} online"
+                               if info.get("online") else "")),
+        ("crown", "admins", f"<b>{int(info.get('admins') or 0)}</b>"),
+        ("clock", "slow mode", f"<b>{slow_label(int(info.get('slowmode') or 0))}</b>"),
+        ("bolt", "created", f"<b>{esc(str(info.get('created') or '—'))}</b>"),
+        ("shield", "protected", "on" if info.get("protected") else "off"),
+        ("chat", "forum", "on" if info.get("forum") else "off"),
+        ("cloud", "data centre", f"DC{info.get('dc')}" if info.get("dc") else "—"),
+    ]
+    if info.get("linked"):
+        rows.append(("link", "linked channel", esc(str(info["linked"]))))
+    if info.get("pinned"):
+        rows.append(("star", "pinned", esc(truncate(str(info["pinned"]), 44))))
+    body = B.banner("chat info", glyph="info") + B.fields(rows)
+    if info.get("description"):
+        body += B.context(f"<b>About</b>\n{esc(truncate(str(info['description']), 220))}")
+    if info.get("invite"):
+        body += B.actions(
+            B.row(
+                B.btn(f"{E('link')} Open invite", url=str(info["invite"]), style="primary"),
+                B.btn(f"{E('close')} Close", data="v:close", style="danger"),
+            )
+        )
+    else:
+        body += B.actions(B.row(B.btn(f"{E('close')} Close", data="v:close", style="danger")))
+    return body + B.footer(f"{E('shield')} /gadmin for every management command")
+
+
+def slow_label(seconds: int) -> str:
+    if seconds <= 0:
+        return "off"
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m"
+    return f"{seconds // 3600}h"
+
+
+def group_admin_card(
+    *,
+    rules: str = "",
+    slowmode: int = 0,
+    captcha: bool = False,
+    approved: int = 0,
+    locked: int = 0,
+    warn_limit: int = 3,
+    bot_admin: bool = True,
+) -> str:
+    """``/gadmin`` — the map of every group tool this bot ships."""
+    health = (
+        f"{E('check')} admin rights ok" if bot_admin else f"{E('warn')} promote me to admin"
+    )
+    state = B.fields(
+        [
+            ("note", "rules", "<b>set</b>" if rules else "<i>not set</i>"),
+            ("clock", "slow mode", f"<b>{slow_label(slowmode)}</b>"),
+            ("shield", "locks on", f"<b>{locked}</b>"),
+            ("user", "approved", f"<b>{approved}</b>"),
+            ("warn", "warn limit", f"<b>{warn_limit}</b>"),
+            ("shield", "captcha", "<b>on</b>" if captcha else "<i>off</i>"),
+            ("bolt", "bot rights", health),
+        ]
+    )
+    sections = B.details(
+        f"{E('shield')} <b>Moderation</b>",
+        B.bullets(
+            [
+                "<code>/ban</code> · <code>/unban</code> · <code>/kick</code> — reply or pass an id",
+                "<code>/mute</code> · <code>/unmute</code> · <code>/tmute 10m</code>",
+                "<code>/warn</code> · <code>/warns</code> · <code>/resetwarns</code> · <code>/setwarnlimit 3</code>",
+                "<code>/purge</code> · <code>/del</code> · <code>/cleanup</code>",
+            ]
+        ),
+        open=True,
+    )
+    sections += B.details(
+        f"{E('tools')} <b>Group settings</b>",
+        B.bullets(
+            [
+                "<code>/settitle</code> · <code>/setdesc</code> · <code>/setchatphoto</code> — chat identity",
+                "<code>/slowmode 30</code> · <code>/slowmode off</code>",
+                "<code>/setrules …</code> · <code>/rules</code> · <code>/clearqueuerules</code>",
+                "<code>/invitelink</code> · <code>/revokeinvite</code>",
+                "<code>/pin</code> · <code>/unpin</code> · <code>/unpinall</code> · <code>/pinned</code>",
+            ]
+        ),
+    )
+    sections += B.details(
+        f"{E('wave')} <b>Protection</b>",
+        B.bullets(
+            [
+                "<code>/locks</code> — media, links, forwards, stickers, bots, commands, NSFW",
+                "<code>/antiflood 7</code> — rate limit with automatic mute",
+                "<code>/approve</code> — exempt a trusted user from locks and flood",
+                "<code>/zombies</code> — find (and kick) deleted accounts",
+                "<code>/report</code> — ping the admins about a message",
+                "<code>/captcha</code> — one-tap human check for new members",
+            ]
+        ),
+    )
+    sections += B.details(
+        f"{E('play')} <b>Playback control</b>",
+        B.bullets(
+            [
+                "<code>/settings</code> — volume, loop, autoplay, 24/7",
+                "<code>/effecton bass</code> — audio effects for the call",
+                "<code>/voteskip</code> — let members skip with votes",
+                "<code>/247</code> · <code>/always</code> — keep the stream alive",
+            ]
+        ),
+    )
+    return (
+        B.banner("group manager", glyph="crown")
+        + B.note("Every tool below works on a reply or a user id.")
+        + state
+        + B.divider()
+        + sections
+        + B.row(
+            B.btn(f"{E('shield')} Locks", data="v:grp:locks", style="primary"),
+            B.btn(f"{E('wave')} Anti-flood", data="v:grp:flood", style="success"),
+        )
+        + B.row(
+            B.btn(f"{E('note')} Rules", data="v:grp:rules"),
+            B.btn(f"{E('user')} Approved", data="v:grp:approved"),
+            B.btn(f"{E('close')} Close", data="v:close", style="danger"),
+        )
+        + B.footer(f"{E('info')} admins only {BULLET} owners bypass every check")
+    )
+
+
+def zombies_card(found: list[tuple[str, str]], *, scanned: int, kicked: int = 0, capped: bool = False) -> str:
+    """``/zombies`` — deleted accounts still sitting in the member list."""
+    rows = "".join(
+        f"<tr><td>{esc(name)}</td><td><code>{uid}</code></td></tr>" for name, uid in found[:20]
+    )
+    table = f"<table><tr><th>account</th><th>id</th></tr>{rows}</table>" if rows else ""
+    headline = (
+        f"{E('check')} All clean — no deleted accounts in {scanned} members"
+        if not found
+        else f"{E('bolt')} {len(found)} deleted account{'s' if len(found) != 1 else ''} of {scanned} scanned"
+    )
+    body = B.banner("zombies", glyph="bolt") + B.note(headline)
+    if table:
+        body += table
+    if kicked:
+        body += B.note(f"{E('shield')} kicked <b>{kicked}</b> of them")
+    if found:
+        body += B.row(B.btn(f"{E('check')} Keep them", data="v:close", style="success"))
+        body += B.footer(
+            f"{E('info')} run <code>/zombies kick</code> to remove them in one pass"
+        )
+    if capped:
+        body += B.footer(f"{E('info')} scanned the first {scanned} members — Telegram caps the listing")
+    return body
+
+
+def approved_card(entries: list[tuple[str, str]], *, limit: int = 30) -> str:
+    """``/approved`` — users exempt from locks and anti-flood."""
+    if not entries:
+        return (
+            B.banner("approved users", glyph="user")
+            + B.note("Nobody yet. <code>/approve</code> on a reply adds someone.")
+            + B.row(B.btn(f"{E('close')} Close", data="v:close", style="danger"))
+        )
+    rows = "".join(
+        f"<tr><td>{esc(name)}</td><td><code>{uid}</code></td></tr>" for name, uid in entries[:limit]
+    )
+    return (
+        B.banner("approved users", glyph="user")
+        + B.note(f"{len(entries)} exempt from locks and anti-flood")
+        + f"<table><tr><th>user</th><th>id</th></tr>{rows}</table>"
+        + B.row(B.btn(f"{E('close')} Close", data="v:close", style="danger"))
+        + B.footer(f"{E('info')} /unapprove on a reply or id removes one")
+    )
+
+
+def captcha_card(mention: str, *, seconds: int = 120, user_id: int = 0) -> str:
+    """New-member gate: one tap proves there is a human behind the account."""
+    return (
+        B.banner("verify to speak", glyph="shield")
+        + B.note(
+            f"Welcome {mention}! Tap the button below within "
+            f"<b>{slow_label(seconds)}</b> to unlock the chat."
+        )
+        + B.row(
+            B.btn(
+                f"{E('check')} I am human",
+                data=f"v:captcha:{user_id or 'self'}",
+                style="success",
+            )
+        )
+        + B.footer(
+            f"{E('info')} still muted? the button stays live {BULLET} ask an admin if it fails"
+        )
+    )
+
+
+def confirm_card(
+    title: str,
+    detail: str,
+    *,
+    confirm: str,
+    cancel: str = "v:close",
+    danger: bool = False,
+    confirm_label: str = "Yes, do it",
+) -> str:
+    """A two-step confirmation — destructive actions never fire on one tap."""
+    return (
+        B.banner(title, glyph=("warn" if danger else "info"))
+        + B.context(detail)
+        + B.actions(
+            B.row(
+                B.btn(
+                    f"{E('check')} {confirm_label}",
+                    data=confirm,
+                    style="danger" if danger else "success",
+                ),
+                B.btn(f"{E('back')} Cancel", data=cancel),
+            )
+        )
+        + B.footer(f"{E('shield')} nothing happens until you confirm")
+    )

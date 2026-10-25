@@ -1,0 +1,33 @@
+{
+  "name": "മലയാളം",
+  "strings": {
+    "lang.title": "ഭാഷ",
+    "lang.note": "VYRON-ന്റെ മറുപടികൾ ഈ ചാറ്റിന്റെ ഭാഷയിൽ വരും. ഒരു ഭാഷ തിരഞ്ഞെടുക്കുക.",
+    "lang.current": "നിലവിലുള്ളത്",
+    "lang.saved": "ഭാഷ സേവ് ചെയ്തു.",
+    "lang.unknown": "ഈ ഭാഷ ലഭ്യമല്ല.",
+    "lang.admin_only": "ഇവിടെ അഡ്മിനുകൾക്ക് മാത്രമേ ഭാഷ മാറ്റാനാകൂ.",
+    "lang.switched": "{name} തിരഞ്ഞെടുത്തു.",
+    "lang.page": "പേജ് {page}/{pages}",
+    "np.streaming": "പ്ലേ ചെയ്യുന്നു",
+    "np.paused": "നിർത്തിവച്ചു",
+    "np.live": "ലൈവ്",
+    "np.up_next": "അടുത്തത്",
+    "np.queued": "{count} ക്യൂവിൽ",
+    "np.now_playing": "ഇപ്പോൾ പ്ലേ ചെയ്യുന്നത്",
+    "np.by": "ഗായകൻ",
+    "ctl.paused": "നിർത്തി",
+    "ctl.resumed": "തുടർന്നു",
+    "ctl.nothing_playing": "ഒന്നും പ്ലേ ചെയ്യുന്നില്ല",
+    "ctl.nothing_paused": "ഒന്നും നിർത്തിയിട്ടില്ല",
+    "ctl.skipped": "അടുത്തതിലേക്ക് പോയി",
+    "ctl.queue_empty": "ക്യൂ ശൂന്യമാണ്",
+    "ctl.stopped": "നിർത്തി വോയ്സ് ചാറ്റ് വിട്ടു",
+    "ctl.volume": "ശബ്ദം: {volume}%",
+    "ctl.loop": "ലൂപ്പ്: {mode}",
+    "ctl.shuffled": "{count} ട്രാക്കുകൾ ഷഫിൾ ചെയ്തു",
+    "ctl.autoplay_on": "ഓട്ടോപ്ലേ ഓൺ",
+    "ctl.autoplay_off": "ഓട്ടോപ്ലേ ഓഫ്",
+    "ctl.seek": "{time} ലേക്ക് പോയി"
+  }
+}

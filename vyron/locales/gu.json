@@ -1,0 +1,33 @@
+{
+  "name": "ગુજરાતી",
+  "strings": {
+    "lang.title": "ભાષા",
+    "lang.note": "VYRON ના જવાબ આ ચેટની ભાષામાં આવશે. ભાષા પસંદ કરો — તરત લાગુ થશે.",
+    "lang.current": "વર્તમાન",
+    "lang.saved": "ભાષા સાચવી લેવાઈ.",
+    "lang.unknown": "એ ભાષા ઉપલબ્ધ નથી.",
+    "lang.admin_only": "અહીં ફક્ત એડમિન ભાષા બદલી શકે છે.",
+    "lang.switched": "{name} પસંદ કરી.",
+    "lang.page": "પૃષ્ઠ {page}/{pages}",
+    "np.streaming": "ચાલુ છે",
+    "np.paused": "થોભેલું",
+    "np.live": "લાઇવ",
+    "np.up_next": "આગળનું",
+    "np.queued": "{count} કતારમાં",
+    "np.now_playing": "હમણાં ચાલુ છે",
+    "np.by": "ગાયક",
+    "ctl.paused": "થોભાવ્યું",
+    "ctl.resumed": "ફરી ચાલુ",
+    "ctl.nothing_playing": "કંઈ ચાલુ નથી",
+    "ctl.nothing_paused": "કંઈ થોભેલું નથી",
+    "ctl.skipped": "આગળ વધ્યું",
+    "ctl.queue_empty": "કતાર ખાલી છે",
+    "ctl.stopped": "થોભાવ્યું અને વોઇસ ચેટ છોડી",
+    "ctl.volume": "અવાજ: {volume}%",
+    "ctl.loop": "લૂપ: {mode}",
+    "ctl.shuffled": "{count} ટ્રેક શફલ કર્યા",
+    "ctl.autoplay_on": "ઓટોપ્લે ચાલુ",
+    "ctl.autoplay_off": "ઓટોપ્લે બંધ",
+    "ctl.seek": "{time} પર પહોંચ્યું"
+  }
+}

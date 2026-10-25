@@ -1,0 +1,506 @@
+"""UI-layer tests: rich ↔ HTML conversion, emoji fallbacks, card rendering."""
+from __future__ import annotations
+
+import asyncio
+
+import pytest
+
+pytest.importorskip("pyrogram")
+
+from vyron.core.queue import ChatState, Track
+from vyron.ui import cards, rich
+from vyron.ui.rich import to_plain_text
+from vyron.ui.theme import E, GLYPHS, emoji_enabled, raw_glyph
+
+
+def test_rich_tag_detection():
+    assert rich.has_rich_tags("<h2>title</h2>")
+    assert rich.has_rich_tags("<table><tr><td>a</td></tr></table>")
+    assert rich.has_rich_tags('<tg-button url="https://x.dev">go</tg-button>')
+    assert not rich.has_rich_tags("<b>plain</b> <code>x</code>")
+
+
+def test_normalize_newlines_and_hrefs():
+    out = rich.normalize("line one\nline two")
+    assert "<br/>" in out
+    quoted = rich.normalize('<a href=tg://user?id=1>me</a>')
+    assert 'href="tg://user?id=1"' in quoted
+
+
+def test_to_html_strips_rich_only_tags():
+    markup = (
+        "<h2>Title</h2><p>Body</p>"
+        "<table><tr><td>a</td><td>b</td></tr></table>"
+        '<tg-button url="https://example.com">Open</tg-button>'
+        "<footer>foot</footer>"
+    )
+    html = rich.to_html(markup)
+    for forbidden in ("<h2", "<table", "<tr", "<td", "<tg-button", "<footer", "<p>"):
+        assert forbidden not in html
+    assert "<b>Title</b>" in html
+    assert 'href="https://example.com"' in html
+
+
+def test_to_plain_text_is_tag_free():
+    text = rich.to_plain_text("<h2>Hi</h2><p>there <b>you</b></p>")
+    assert "<" not in text and ">" not in text
+    assert "Hi" in text and "you" in text
+
+
+def test_esc():
+    assert rich.esc("<b>&") == "&lt;b&gt;&amp;"
+    assert rich.esc(None) == ""
+
+
+def test_emoji_fallbacks_without_pack():
+    # conftest disables the premium pack
+    assert emoji_enabled() is False
+    assert E("play") == GLYPHS["play"]
+    assert raw_glyph("unknown-name").strip() != ""
+
+
+def test_now_playing_card_is_editable_html():
+    state = ChatState(
+        chat_id=1,
+        current=Track(id="abc", title="Title <b>", duration=200, uploader="Artist"),
+        playing=True,
+        offset=50,
+    )
+    markup = cards.now_playing_card(state)
+    assert not rich.has_rich_tags(markup)   # editable lane
+    assert "50" in markup or "0:50" in markup
+    assert "&lt;b&gt;" in markup            # untrusted text escaped
+
+
+def test_the_live_block_is_a_bar_over_a_clock():
+    """Bar on its own line, then status · elapsed · percent · total, then who
+    asked and how loud — the shape people already read in a music bot."""
+    from vyron.ui.progress import BAR_FULL, KNOB
+    from vyron.ui.cards import progress_block
+
+    track = Track(
+        id="abc", title="Believer", duration=200, uploader="Imagine Dragons",
+        requested_name="Rinu", requested_by=7,
+    )
+    state = ChatState(chat_id=1, current=track, playing=True, offset=50, volume=100)
+    lines = progress_block(state, track).splitlines()
+
+    assert len(lines) == 3
+    assert lines[0].startswith("<code>") and KNOB in lines[0] and BAR_FULL in lines[0]
+    assert "streaming" in lines[1]
+    assert "0:50" in lines[1] and "25%" in lines[1] and "3:20" in lines[1]
+    assert "100%" in lines[2]
+    # who asked is in the card header, not repeated under the bar
+    assert "Rinu" not in "\n".join(lines)
+
+
+def test_the_live_block_says_paused_and_live():
+    from vyron.ui.cards import progress_block
+
+    live = Track(id="l", title="Radio", duration=0, uploader="")
+    state = ChatState(chat_id=1, current=live, playing=True, offset=61, paused=True)
+    lines = progress_block(state, live).splitlines()
+
+    assert len(lines) == 3          # bar, clock, volume
+    clock = to_plain_text(lines[1])
+    assert "paused" in clock and "1:01" in clock and "live" in clock
+
+
+def test_the_now_playing_card_is_the_shape_the_user_asked_for():
+    """The card they pasted, line for line — with the credits tidied off:
+
+        ✨ Now playing
+
+        Chris Grey - LET THE WORLD BURN
+
+        ⏱ Duration: 2:44
+
+        👥 Requested by: user
+    """
+    from vyron.ui.rich import to_plain_text
+
+    track = Track(
+        id="abc",
+        title="LET THE WORLD BURN (Official Lyric Video)",
+        uploader="Chris Grey",
+        duration=164,
+        requested_name="Rinu",
+        requested_by=7,
+    )
+    state = ChatState(chat_id=1, current=track, playing=True, offset=0, volume=100)
+    paragraphs = to_plain_text(cards.now_playing_card(state)).split("\n\n")
+
+    assert paragraphs[0] == f"{E('spark')} Now playing"
+    assert paragraphs[1] == "Chris Grey - LET THE WORLD BURN", "credits are not a name"
+    assert paragraphs[2] == f"{E('clock')} Duration: 2:44"
+    assert paragraphs[3] == f"{E('users')} Requested by: Rinu"
+    # the live block follows the header, it does not replace it
+    assert "streaming" in paragraphs[4]
+
+
+def test_the_requested_by_line_survives_an_anonymous_track():
+    """No credit is still a line — a card that changes shape looks broken."""
+    from vyron.ui.rich import to_plain_text
+
+    track = Track(id="x", title="Rain", uploader="", duration=200)
+    state = ChatState(chat_id=1, current=track, playing=True)
+    paragraphs = to_plain_text(cards.now_playing_card(state)).split("\n\n")
+    assert paragraphs[3] == f"{E('users')} Requested by: user"
+
+
+def test_queue_card_pages():
+    state = ChatState(chat_id=1)
+    state.queue = [Track(id=str(i), title=f"T{i}", duration=60) for i in range(20)]
+    markup, pages = cards.queue_card(state, page=0, per_page=8)
+    assert pages == 3
+    assert rich.has_rich_tags(markup)
+    markup2, pages2 = cards.queue_card(state, page=2, per_page=8)
+    assert pages2 == 3 and markup2 != markup
+
+
+def test_empty_queue_card():
+    markup, pages = cards.queue_card(ChatState(chat_id=1))
+    assert pages == 1 and "empty" in markup.lower()
+
+
+def test_stats_and_settings_cards():
+    stats = cards.stats_card(
+        uptime=3661, chats=3, active=1, tracks=42, downloads=7,
+        cache_bytes=5 * 1024 * 1024, backend="mongo", version="1.0.0",
+    )
+    assert "42" in stats and "mongo" in stats
+    settings_markup = cards.settings_card({"volume": 60, "loop": "all", "autoplay": False}, "Chat")
+    assert "60%" in settings_markup and "All" in settings_markup
+
+
+# ── /start picture + credential cards ──────────────────────────────────────
+class _PhotoBot:
+    """Minimal client that records photo sends and can be told to fail."""
+
+    def __init__(self, fail: bool = False):
+        self.calls: list[dict] = []
+        self.fail = fail
+
+    async def send_photo(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.fail:
+            raise RuntimeError("upload failed")
+
+        class _Sent:
+            id = 1
+
+            class photo:  # noqa: N801 - mimics pyrogram's attribute
+                file_id = "AgAC-start"
+
+        return _Sent()
+
+    async def send_message(self, **kwargs):
+        self.calls.append({"text": kwargs.get("text")})
+        return None
+
+
+def test_send_photo_flattens_the_caption_and_keeps_the_keyboard():
+    import asyncio
+
+    bot = _PhotoBot()
+    markup = "<h2>Title</h2><p>Body</p>"
+    sent = asyncio.run(
+        rich.send_photo(bot, 1, "assets/start.jpg", markup, reply_markup="KB")
+    )
+    assert sent is not None
+    call = bot.calls[0]
+    assert call["photo"] == "assets/start.jpg"
+    assert "<h2" not in call["caption"] and "Title" in call["caption"]
+    assert call["reply_markup"] == "KB"
+
+
+def test_send_photo_falls_back_to_a_text_card():
+    import asyncio
+
+    bot = _PhotoBot(fail=True)
+    asyncio.run(rich.send_photo(bot, 1, "missing.jpg", "<b>hi</b>"))
+    assert bot.calls[-1]["text"] == "<b>hi</b>"
+
+
+def test_start_card_carries_the_display_name():
+    from vyron.ui.theme import BRAND_DISPLAY
+
+    text = rich.to_plain_text(cards.start_card("Rahul", {"chats": 1, "tracks": 2}))
+    assert BRAND_DISPLAY in text
+
+
+def test_token_card_explains_revocation():
+    text = rich.to_plain_text(
+        cards.token_card("vown_abc.sig", base="https://v.test", owner_id=7, epoch=1)
+    )
+    assert "vown_abc.sig" in text
+    assert "revoke all" in text.lower() and "generation" in text.lower()
+    markup = cards.token_card("vown_abc.sig", base="https://v.test", owner_id=7)
+    assert 'data="v:token:revoke"' in markup
+    assert 'data="v:token:rotate"' in markup
+
+
+def test_api_keys_card_offers_a_revoke_button_per_key():
+    keys = [
+        {"id": "k1", "label": "phone", "masked": "vyrn_aa…", "active": True, "uses": 3},
+        {"id": "k2", "label": "old", "masked": "vyrn_bb…", "active": False, "uses": 1},
+    ]
+    markup = cards.api_keys_card(keys, base="https://v.test")
+    assert 'data="v:key:revoke:k1"' in markup
+    assert 'data="v:key:revoke:k2"' not in markup  # already dead
+
+
+def test_confirm_card_is_a_two_step_action():
+    markup = cards.confirm_card("Really?", "detail", confirm="v:x:yes", danger=True)
+    assert 'data="v:x:yes"' in markup
+    assert "Cancel" in rich.to_plain_text(markup)
+
+
+def test_start_card_swaps_the_manual_for_the_track():
+    live = {"title": "Believer", "artist": "Imagine Dragons", "duration": 204, "queue": 3}
+    text = rich.to_plain_text(cards.start_card("Rahul", {}, live=live))
+    assert "Believer" in text and "3" in text
+    assert "Set it up in three steps" not in text  # no manual for a live chat
+    assert "Set it up in three steps" in rich.to_plain_text(cards.start_card("Rahul", {}))
+
+
+def test_to_caption_drops_button_rows():
+    markup = (
+        '<h2>Title</h2><tg-button-row><tg-button data="v:app">Player</tg-button>'
+        "</tg-button-row><p>Body</p>"
+    )
+    caption = rich.to_caption(markup)
+    assert "Player" not in caption and "Body" in caption
+
+
+def test_the_started_card_offers_video_only_when_it_makes_sense():
+    from vyron.core.queue import Track
+
+    youtube = cards.started_card(Track(id="x", title="Believer", source="youtube"))
+    assert 'data="v:video"' in youtube
+
+    saavn = cards.started_card(Track(id="y", title="Believer", source="jiosaavn"))
+    assert 'data="v:video"' not in saavn
+
+
+# ── the search → play workflow ──────────────────────────────────────────────
+def test_a_clear_query_is_recognised_as_the_song():
+    from vyron.core.queue import Track
+    from vyron.core.search import is_confident_match, match_confidence
+
+    track = Track(id="1", title="Kesariya (Official Video)", uploader="Arijit Singh", duration=268)
+    assert is_confident_match("kesariya", track)
+    assert is_confident_match("kesariya arijit", track)
+    assert is_confident_match("kesariya song", track)  # filler words do not hurt
+
+    # a different thing is not the song, however many words it shares
+    slowed = Track(id="2", title="Kesariya slowed + reverb", uploader="edits", duration=300)
+    assert match_confidence("kesariya", slowed) < 0.75
+    assert not is_confident_match("kesariya", slowed)
+
+    # never auto-play a Short, and never a result that shares no word
+    short = Track(id="3", title="Kesariya", uploader="x", duration=20)
+    assert not is_confident_match("kesariya", short)
+    other = Track(id="4", title="Tum Hi Ho", uploader="Arijit Singh", duration=260)
+    assert not is_confident_match("kesariya", other)
+
+
+def test_the_picker_puts_the_winning_result_first_and_numbers_the_rest():
+    from vyron.core.queue import Track
+
+    tracks = [
+        Track(id="1", title="Believer", uploader="Imagine Dragons", duration=204),
+        Track(id="2", title="Believer (Live)", uploader="Imagine Dragons", duration=240),
+        Track(id="3", title="Believer cover", uploader="someone", duration=200),
+    ]
+    card = cards.search_card("believer", tracks)
+
+    # the winner is shown once, marked, above the list — not repeated as row 1
+    assert card.count("Believer</mark>") == 1
+    assert "<b>2.</b>" in card and "<b>3.</b>" in card
+    assert "<b>1.</b>" not in card
+    # the buttons carry the same numbers as the list
+    assert 'data="v:pick:0"' in card and 'data="v:pick:2"' in card
+    # and the three ways to take a result: now, next, or at the end
+    assert 'data="v:pick:n0"' in card and 'data="v:pick:q0"' in card
+
+
+def test_the_started_card_can_carry_a_way_back_to_the_results():
+    from vyron.core.queue import Track
+    from vyron.ui import blocks as B
+
+    track = Track(id="1", title="Believer", source="youtube", duration=204)
+    card = cards.started_card(
+        track,
+        note="the closest match",
+        extra_actions=B.row(B.btn("other results", data="v:pick:list")),
+    )
+    assert "the closest match" in card
+    assert 'data="v:pick:list"' in card
+
+
+def test_a_stream_url_is_never_a_link_in_the_card():
+    """A tap on the song name must open a page, not a CDN file.
+
+    Catalogue tracks used to be linked to `track.url`, which for Audius is
+    `api.audius.co/v1/tracks/…/stream` — the card printed a URL and the tap
+    opened a blob.
+    """
+    from vyron.ui.rich import to_plain_text
+
+    stream = Track(
+        id="1dP3kyX",
+        title="Chris Grey – LET THE WORLD BURN",
+        uploader="Alone_BoYtm",
+        source="audius",
+        url="https://api.audius.co/v1/tracks/1dP3kyX/stream?app_name=VYRON",
+        duration=163,
+        requested_name="Beast Gohan",
+    )
+    state = ChatState(chat_id=1, current=stream, playing=True, offset=0, volume=100)
+    markup = cards.now_playing_card(state)
+    assert "<a href" not in markup
+    assert "api.audius.co" not in markup
+    assert "Chris Grey - LET THE WORLD BURN" in to_plain_text(markup)
+
+
+def test_a_youtube_track_still_links_to_its_page():
+    from vyron.ui.rich import to_plain_text
+
+    track = Track(id="dQw4w9WgXcQ", title="Wrong", uploader="Chris Grey", duration=187)
+    state = ChatState(chat_id=1, current=track, playing=True, offset=0, volume=100)
+    markup = cards.now_playing_card(state)
+    assert 'href="https://youtu.be/dQw4w9WgXcQ"' in markup
+    assert "Chris Grey - Wrong" in to_plain_text(markup)
+
+
+# ── the player panel: the same card, as a rich message ─────────────────────
+def _panel_state():
+    track = Track(
+        id="a",
+        title="Chris Grey – LET THE WORLD BURN",
+        uploader="Chris Grey",
+        duration=164,
+        requested_name="Beast Gohan",
+        requested_by=7,
+    )
+    state = ChatState(chat_id=-100, current=track, playing=True, offset=60, volume=70)
+    state.queue.append(Track(id="b", title="Wrong", uploader="Chris Grey", duration=187))
+    return state
+
+
+def test_the_player_panel_is_a_table_and_real_buttons():
+    """`/np` with no picture: a table of facts, a live bar, coloured controls.
+
+    A caption cannot hold a table or a button, so the text view gets the layout
+    a rich message can actually draw.
+    """
+    from vyron.ui import rich
+
+    rich.set_rich_enabled(True)
+    try:
+        markup = cards.player_panel(_panel_state())
+        assert "<table" in markup and "<tr>" in markup
+        assert markup.count("<tg-button ") >= 6, "the controls travel in the message"
+        assert 'style="primary"' in markup and 'style="danger"' in markup
+        assert "<details" in markup, "up next collapses instead of pushing the card"
+        assert "LET THE WORLD BURN" in markup and "Beast Gohan" in markup
+        # …and it still degrades into something readable
+        plain = rich.to_html(markup)
+        assert "<tg-button" not in plain and "LET THE WORLD BURN" in plain
+    finally:
+        rich.set_rich_enabled(None)
+
+
+def test_the_player_panel_uses_fields_when_a_table_cannot_render():
+    from vyron.ui import rich
+
+    rich.set_rich_enabled(False)
+    try:
+        markup = cards.player_panel(_panel_state())
+        assert "<table" not in markup
+        assert markup.count("◈") >= 5, "one fact per line, the classic shape"
+        assert "ᴀꜱᴋᴇᴅ ʙʏ" in markup
+    finally:
+        rich.set_rich_enabled(None)
+
+
+def test_a_fallback_table_does_not_end_its_line_in_a_dot():
+    """`to_html` flattens cells into "a  ·  b  ·  " — the last dot is wrong."""
+    from vyron.ui import rich
+
+    html = rich.to_html("<table border='0'><tr><td>one</td><td>two</td></tr></table>")
+    assert "one" in html and "two" in html
+    assert not html.rstrip().endswith("·")
+    assert all(not line.rstrip().endswith("·") for line in html.splitlines())
+
+
+def test_the_now_playing_keyboard_stays_six_buttons():
+    """A card buried under twelve buttons is a card nobody reads.
+
+    The phone screenshot had four rows of them. Videl ships five, Shizu six;
+    everything else here is a command (/seek /volume /shuffle /fav /lyrics).
+    """
+    from vyron.ui import keyboards
+
+    state = _panel_state()
+    markup = keyboards.now_playing(state)
+    buttons = [button for row in markup.inline_keyboard for button in row]
+    assert len(buttons) == 6, [button.text for button in buttons]
+    labels = " ".join(button.text.lower() for button in buttons)
+    for expected in ("pause", "skip", "stop", "loop", "queue", "close"):
+        assert expected in labels
+
+
+def test_the_rich_panel_shows_the_same_six_controls():
+    from vyron.ui import rich
+
+    rich.set_rich_enabled(True)
+    try:
+        markup = cards.player_panel(_panel_state())
+        assert markup.count("<tg-button ") == 6
+        assert markup.count("<tg-button-row>") == 2
+    finally:
+        rich.set_rich_enabled(None)
+
+
+def test_the_progress_bar_is_drawn_with_box_rules():
+    """"█"/"▬" render as a solid highlight and a hairline on iOS."""
+    from vyron.ui.progress import progress_bar
+
+    bar = progress_bar(80, 160, length=15)
+    assert bar.startswith("━") and "●" in bar and "─" in bar
+    assert "█" not in bar and "▬" not in bar
+    assert len(bar) == 15
+
+
+# ── button taps ────────────────────────────────────────────────────────────
+class _Query:
+    def __init__(self, error: Exception | None = None):
+        self.error = error
+        self.answered: list[tuple[str, bool]] = []
+
+    async def answer(self, text: str = "", show_alert: bool = False):
+        if self.error is not None:
+            raise self.error
+        self.answered.append((text, show_alert))
+
+
+def test_a_button_tap_is_answered():
+    from vyron.ui import rich
+
+    query = _Query()
+    assert asyncio.run(rich.answer(query, "done", show_alert=True)) is True
+    assert query.answered == [("done", True)]
+
+
+def test_a_stale_tap_is_not_an_error():
+    """Telegram keeps a tap answerable for ~30 s; a busy group misses that."""
+
+    class Stale(Exception):
+        pass
+
+    from vyron.ui import rich
+
+    query = _Query(Stale("[400 QUERY_ID_INVALID] - The query ID is invalid"))
+    assert asyncio.run(rich.answer(query, "hi")) is False  # no exception escapes

@@ -1,0 +1,103 @@
+"""The journal middleware: what is worth remembering, and what is noise."""
+from __future__ import annotations
+
+import asyncio
+import dataclasses
+
+import pytest
+
+pytest.importorskip("aiohttp")
+
+import aiohttp
+from aiohttp import web
+from aiohttp.test_utils import TestClient, TestServer
+
+from vyron.core.journal import journal
+from vyron.web.middleware import record_errors
+
+
+@pytest.fixture()
+def quiet_journal(monkeypatch):
+    """Keep the shared journal's real ring buffer out of these assertions."""
+    recorded: list[tuple[str, str]] = []
+
+    def fake(level, scope, message, *args, **kwargs):
+        recorded.append((level, message))
+
+    monkeypatch.setattr(journal, "warn", lambda scope, message, *a, **k: fake("warn", scope, message))
+    monkeypatch.setattr(journal, "error", lambda scope, message, *a, **k: fake("error", scope, message))
+    return recorded
+
+
+def test_slow_only_means_actually_slow(quiet_journal, monkeypatch):
+    """A live log tail is long-lived by design; a stuck API call is not."""
+    monkeypatch.setattr("vyron.web.middleware._SLOW_MS", 0)
+
+    async def slow(request):
+        await asyncio.sleep(0.05)
+        return web.Response(text="ok")
+
+    async def broken(request):
+        raise RuntimeError("kaboom")
+
+    app = web.Application(middlewares=[record_errors])
+    app.router.add_get("/api/logs/stream", slow)
+    app.router.add_get("/api/logs", slow)
+    app.router.add_get("/api/thing", broken)
+
+    async def scenario():
+        async with TestClient(TestServer(app)) as client:
+            assert (await client.get("/api/logs/stream")).status == 200
+            assert quiet_journal == []                       # not "slow"
+            assert (await client.get("/api/logs")).status == 200
+            assert quiet_journal and "slow request" in quiet_journal[0][1]
+
+            crash = await client.get("/api/thing")
+            assert crash.status == 500
+            assert any(level == "error" for level, _ in quiet_journal)
+            assert any("crashed" in message for _, message in quiet_journal)
+            # The line has to name the failure: Render's stream shows messages
+            # only, so "GET /api/state crashed" on its own sent people digging.
+            assert any("RuntimeError: kaboom" in message for _, message in quiet_journal)
+
+    asyncio.run(scenario())
+
+
+def test_boot_wait_is_configurable_and_never_negative():
+    from vyron.config import settings
+
+    assert dataclasses.replace(settings, boot_wait=3).boot_wait == 3
+    assert settings.boot_wait >= 0
+
+
+def test_a_client_that_hangs_up_is_not_a_crash(quiet_journal):
+    """iOS closing the audio stream used to be journalled as a webapp error.
+
+    Every seek and every locked phone produced a red line in `/logs`, so the
+    entries that really mattered were buried. A disconnect is the *normal* end
+    of a stream request.
+    """
+    from vyron.web.middleware import CLIENT_GONE
+
+    async def hangs_up(request):
+        raise CLIENT_GONE[0]("Cannot write to closing transport")
+
+    async def also_hangs_up(request):
+        raise ConnectionResetError("peer reset")
+
+    app = web.Application(middlewares=[record_errors])
+    app.router.add_get("/api/stream/abc", hangs_up)
+    app.router.add_get("/api/audio/abc", also_hangs_up)
+
+    async def scenario():
+        async with TestClient(TestServer(app)) as client:
+            response = await client.get("/api/audio/abc")
+            assert response.status == 499
+            # A streaming route has already sent its status line, so the only
+            # correct thing to do is close: answering 499 there wrote a second
+            # status line into the chunked body.
+            with pytest.raises(aiohttp.ServerDisconnectedError):
+                await client.get("/api/stream/abc")
+        assert quiet_journal == [], "a disconnect must stay out of the journal"
+
+    asyncio.run(scenario())

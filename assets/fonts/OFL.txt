@@ -1,0 +1,13 @@
+The fonts in this directory are licensed under the SIL Open Font License 1.1.
+
+  Inter                     © The Inter Project Authors
+  Noto Sans Devanagari      © The Noto Project Authors (Google Inc.)
+  Noto Sans Malayalam       © The Noto Project Authors (Google Inc.)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+the Font Software, to use, study, copy, merge, embed, modify, and redistribute
+it, provided that the copyright notice and this licence are included, the fonts
+are not sold by themselves, and any derivative that uses the reserved font
+names is renamed.
+
+The full licence text is available at https://openfontlicense.org

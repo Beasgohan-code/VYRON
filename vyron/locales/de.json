@@ -1,0 +1,33 @@
+{
+  "name": "Deutsch",
+  "strings": {
+    "lang.title": "Sprache",
+    "lang.note": "VYRON antwortet in der Sprache dieses Chats. Wähle eine Sprache — sie gilt sofort.",
+    "lang.current": "aktuell",
+    "lang.saved": "Sprache gespeichert.",
+    "lang.unknown": "Diese Sprache ist nicht verfügbar.",
+    "lang.admin_only": "Nur Admins können hier die Sprache ändern.",
+    "lang.switched": "Auf {name} umgestellt.",
+    "lang.page": "Seite {page}/{pages}",
+    "np.streaming": "läuft",
+    "np.paused": "pausiert",
+    "np.live": "live",
+    "np.up_next": "als Nächstes",
+    "np.queued": "{count} in der Warteschlange",
+    "np.now_playing": "läuft gerade",
+    "np.by": "von",
+    "ctl.paused": "Pausiert",
+    "ctl.resumed": "Fortgesetzt",
+    "ctl.nothing_playing": "Es läuft nichts",
+    "ctl.nothing_paused": "Nichts ist pausiert",
+    "ctl.skipped": "Übersprungen",
+    "ctl.queue_empty": "Die Warteschlange ist leer",
+    "ctl.stopped": "Gestoppt und Sprachchat verlassen",
+    "ctl.volume": "Lautstärke: {volume}%",
+    "ctl.loop": "Wiederholung: {mode}",
+    "ctl.shuffled": "{count} Titel gemischt",
+    "ctl.autoplay_on": "Autoplay ist an",
+    "ctl.autoplay_off": "Autoplay ist aus",
+    "ctl.seek": "Zu {time} gesprungen"
+  }
+}

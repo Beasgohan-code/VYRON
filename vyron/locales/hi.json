@@ -1,0 +1,33 @@
+{
+  "name": "हिन्दी",
+  "strings": {
+    "lang.title": "भाषा",
+    "lang.note": "VYRON के जवाब इस चैट की भाषा में आएंगे। भाषा चुनें — तुरंत लागू होगी।",
+    "lang.current": "वर्तमान",
+    "lang.saved": "भाषा सहेजी गई।",
+    "lang.unknown": "यह भाषा उपलब्ध नहीं है।",
+    "lang.admin_only": "यहाँ केवल एडमिन भाषा बदल सकते हैं।",
+    "lang.switched": "भाषा {name} कर दी गई।",
+    "lang.page": "पृष्ठ {page}/{pages}",
+    "np.streaming": "चल रहा है",
+    "np.paused": "रुका हुआ",
+    "np.live": "लाइव",
+    "np.up_next": "अगला",
+    "np.queued": "{count} कतार में",
+    "np.now_playing": "अभी चल रहा है",
+    "np.by": "द्वारा",
+    "ctl.paused": "रोका गया",
+    "ctl.resumed": "फिर शुरू",
+    "ctl.nothing_playing": "कुछ नहीं चल रहा",
+    "ctl.nothing_paused": "कुछ रुका नहीं है",
+    "ctl.skipped": "आगे बढ़ाया",
+    "ctl.queue_empty": "कतार खाली है",
+    "ctl.stopped": "रोका गया और वॉइस चैट छोड़ दी",
+    "ctl.volume": "आवाज़: {volume}%",
+    "ctl.loop": "लूप: {mode}",
+    "ctl.shuffled": "{count} ट्रैक शफल किए",
+    "ctl.autoplay_on": "ऑटोप्ले चालू",
+    "ctl.autoplay_off": "ऑटोप्ले बंद",
+    "ctl.seek": "{time} पर पहुँचे"
+  }
+}

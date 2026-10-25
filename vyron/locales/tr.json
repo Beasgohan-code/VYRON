@@ -1,0 +1,33 @@
+{
+  "name": "Türkçe",
+  "strings": {
+    "lang.title": "dil",
+    "lang.note": "VYRON bu sohbetin dilinde yanıt verir. Bir dil seç — hemen geçerli olur.",
+    "lang.current": "geçerli",
+    "lang.saved": "Dil kaydedildi.",
+    "lang.unknown": "Bu dil mevcut değil.",
+    "lang.admin_only": "Burada dili yalnızca yöneticiler değiştirebilir.",
+    "lang.switched": "{name} diline geçildi.",
+    "lang.page": "sayfa {page}/{pages}",
+    "np.streaming": "çalıyor",
+    "np.paused": "duraklatıldı",
+    "np.live": "canlı",
+    "np.up_next": "sırada",
+    "np.queued": "{count} sırada",
+    "np.now_playing": "şimdi çalıyor",
+    "np.by": "sanatçı",
+    "ctl.paused": "Duraklatıldı",
+    "ctl.resumed": "Devam edildi",
+    "ctl.nothing_playing": "Çalan bir şey yok",
+    "ctl.nothing_paused": "Duraklatılmış bir şey yok",
+    "ctl.skipped": "Atlandı",
+    "ctl.queue_empty": "Sıra boş",
+    "ctl.stopped": "Durduruldu ve sesli sohbetten ayrıldı",
+    "ctl.volume": "Ses: {volume}%",
+    "ctl.loop": "Tekrar: {mode}",
+    "ctl.shuffled": "{count} parça karıştırıldı",
+    "ctl.autoplay_on": "Otomatik çalma açık",
+    "ctl.autoplay_off": "Otomatik çalma kapalı",
+    "ctl.seek": "{time} konumuna atlandı"
+  }
+}

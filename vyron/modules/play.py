@@ -1,0 +1,1099 @@
+# ---------------------------------------------------------------------------
+#  VYRON — play / download commands
+# ---------------------------------------------------------------------------
+from __future__ import annotations
+
+import asyncio
+import logging
+import re
+import time
+from pathlib import Path
+
+from pyrogram import Client
+from pyrogram.enums import ChatType
+from pyrogram.types import Message
+
+from vyron.core import chatcfg, metasources
+from vyron.core.pending import put as remember_search
+from vyron.core.player import StreamError
+from vyron.core.queue import Track
+from vyron.core.search import MediaError, is_confident_match, looks_like_url
+from vyron.runtime import runtime
+from vyron.ui import blocks as B
+from vyron.ui import cards, keyboards, rich
+from vyron.ui.progress import truncate
+from vyron.ui.theme import E
+from vyron.utils.helpers import (
+    command_args,
+    display_name,
+    is_chat_admin,
+    is_owner,
+    media_suffix,
+    track_from_message,
+)
+from vyron.utils.net import as_file, fetch_bytes
+from vyron.utils.commands import cmd
+
+logger = logging.getLogger(__name__)
+
+def USAGE() -> str:
+    """The usage card, built on demand so it follows the live glyph pack."""
+    return cards.usage_card()
+
+
+def _player():
+    return runtime.require_player()
+
+
+def _nothing_found(exc: Exception) -> str:
+    """A search that came back empty, said once.
+
+    The old card printed "No results" as a heading and then the exception —
+    which said "No results found for that query." — right underneath it. Two
+    lines of the same sentence, and neither one told the listener what to do.
+    """
+    reason = truncate(str(exc), 150) or "the sources did not answer"
+    return cards.error_card(
+        f"<blockquote>{rich.esc(reason)}</blockquote>"
+        "\n<footer>a shorter query · the artist name · or a link</footer>",
+        headline="nothing for that",
+    )
+
+
+async def may_request(client: Client, message: Message) -> bool:
+    """Honour the chat's play mode.
+
+    BadMusic calls this *playmode*: by default anyone may request a song, but a
+    group can switch to "admins only" — useful once a 200-person group finds
+    the bot. Private chats are never restricted, and the owner always is not.
+    """
+    chat = message.chat
+    if chat is None or chat.type == ChatType.PRIVATE:
+        return True
+    if not await chatcfg.get(chat.id, "admins_only", False):
+        return True
+    user = message.from_user
+    uid = user.id if user else 0
+    if is_owner(uid) or await is_chat_admin(client, chat.id, uid):
+        return True
+    await rich.send(
+        client,
+        chat.id,
+        cards.warn_card(
+            "<b>Admins only here</b>\n"
+            "<blockquote>An admin can open this up in <code>/settings</code> → "
+            "<i>who can play</i>.</blockquote>"
+        ),
+        reply_to=message.id,
+    )
+    return False
+
+
+def _too_long(track: Track) -> bool:
+    limit = runtime.settings.max_track_minutes
+    return bool(limit and track.duration and track.duration > limit * 60)
+
+
+def _too_long_text(track: Track) -> str:
+    return cards.warn_card(
+        f"<b>Skipping too-long track</b>\n<blockquote>{rich.esc(truncate(track.title, 52))} "
+        f"is longer than the {runtime.settings.max_track_minutes} min limit.</blockquote>"
+    )
+
+
+#: Live "still working" tickers, keyed by the card they belong to.
+#: A search that takes four seconds should say so *on the card*, not look
+#: identical to one that hung — and the ticker has to die the moment the real
+#: answer is written, or a late tick would overwrite the results.
+_TICKERS: dict[int, "asyncio.Task[None]"] = {}
+
+
+def _stop_ticker(message_id: int | None) -> None:
+    task = _TICKERS.pop(int(message_id or 0), None)
+    if task is not None and not task.done():
+        task.cancel()
+
+
+#: How long a working card may sit after its last stage before the ticker ends
+#: it. The status card exists to remove doubt; doubt is exactly what an
+#: abandoned "nearly there" leaves behind.
+LAST_RESORT_SECONDS = 8.0
+
+
+async def _tick(
+    client: Client,
+    chat_id: int,
+    message_id: int,
+    *,
+    title: str,
+    glyph: str,
+    query: str,
+    label: str,
+    steps: list[tuple[float, str]],
+) -> None:
+    started = time.monotonic()
+    for after, step in steps:
+        delay = after - (time.monotonic() - started)
+        try:
+            await asyncio.sleep(max(0.0, delay))
+        except asyncio.CancelledError:
+            return
+        try:
+            await rich.edit(
+                client,
+                chat_id,
+                message_id,
+                cards.working_card(title, "", glyph=glyph, query=query, step=step, label=label),
+            )
+        except asyncio.CancelledError:
+            return
+        except Exception:      # an edit that races the final answer is not an error
+            return
+
+    # Every stage above is a *hope*: the handler that owns this card is still
+    # working. If the card is still here this much later, that handler died and
+    # nothing will ever edit it again — so the ticker becomes the one to end it.
+    # A card that says "nearly there" forever is worse than a plain failure:
+    # it looks like the bot is about to play something and then never does.
+    try:
+        await asyncio.sleep(LAST_RESORT_SECONDS)
+    except asyncio.CancelledError:
+        return
+    try:
+        await rich.edit(
+            client,
+            chat_id,
+            message_id,
+            cards.error_card(
+                "<blockquote>The sources did not answer for this one — that is on "
+                "this server, not on you. Send the command again.</blockquote>",
+                headline="this one timed out",
+            ),
+        )
+    except asyncio.CancelledError:
+        return
+    except Exception:      # the message was deleted or the bot was removed
+        return
+
+
+async def _thinking(
+    client: Client,
+    message: Message,
+    title: str = "searching",
+    *,
+    query: str = "",
+    step: str = "",
+    glyph: str = "search",
+    label: str = "looking for",
+    stages: list[tuple[float, str]] | None = None,
+    tidy: bool = True,
+):
+    """Post the working card, then keep it honest while the work happens.
+
+    The card is the editable (classic HTML) lane, so the picker that replaces it
+    can reuse the same message instead of leaving a dead one behind.
+    """
+    msg = await rich.send(
+        client,
+        message.chat.id,
+        cards.working_card(title, "", glyph=glyph, query=query, step=step, label=label),
+        reply_to=message.id,
+        editable=True,
+    )
+    if msg is not None and stages:
+        _TICKERS[msg.id] = asyncio.create_task(
+            _tick(
+                client, message.chat.id, msg.id,
+                title=title, glyph=glyph, query=query, label=label, steps=stages,
+            ),
+            name="play:ticker",
+        )
+    if tidy:
+        # The command has been answered; it does not need to stay above the
+        # answer. Done here, after the card replying to it exists, so no send is
+        # ever addressed to a message that is already gone.
+        await _tidy(client, message)
+    return msg
+
+
+async def _edit(client: Client, chat_id: int, message_id: int | None, markup: str, keyboard=None) -> None:
+    if message_id:
+        _stop_ticker(message_id)
+        await rich.edit(client, chat_id, message_id, markup, markup_keyboard=keyboard)
+
+
+async def _tidy(client: Client, message: Message) -> None:
+    """Delete the command itself once it has been understood.
+
+    ShizuMusic's habit, and the reason a group's chat stays readable: `/play
+    never gonna give you up` does not need to sit above the answer for the next
+    two hours. Groups only — a DM has no clutter to save — and never fatal,
+    because deleting a message needs the bot to be an admin.
+    """
+    chat = getattr(message, "chat", None)
+    if chat is None or getattr(chat, "type", None) == ChatType.PRIVATE:
+        return
+    try:
+        await message.delete()
+    except Exception as exc:  # no rights, too old, already gone
+        logger.debug("could not delete the command in %s: %s", message.chat.id, exc)
+
+
+def _blocked(query: str) -> str:
+    """The banned word in *query*, or ``""``. Whole words only."""
+    words = tuple(getattr(runtime.settings, "blocked_word_list", ()) or ())
+    if not words or not query:
+        return ""
+    tokens = set(re.findall(r"[a-z0-9']+", query.lower()))
+    for word in words:
+        if word in tokens:
+            return word
+    return ""
+
+
+async def _settle(
+    client: Client, chat_id: int, status_id: int | None, markup: str | None = None
+) -> None:
+    """Hand the screen over to the now-playing message.
+
+    Playback announces itself with a *picture* — the poster. The working card
+    that got there is a text message, so it used to be edited into a second
+    "started" card that sat underneath the poster: the artwork people asked
+    for, with a duplicate of itself below it. Once the picture is on screen the
+    working card has done its job and goes; if there is no picture (poster
+    disabled, no cover, no rights to delete) the card is edited as before.
+    """
+    if not status_id:
+        return
+    state = runtime.player.queues.get(chat_id) if runtime.player else None
+    announced = getattr(state, "np_message_id", None)
+    if announced and int(announced) != int(status_id):
+        _stop_ticker(status_id)
+        try:
+            await client.delete_messages(chat_id, status_id)
+            rich.forget(chat_id, status_id)
+            return
+        except Exception as exc:  # no rights, too old — show it in place
+            logger.debug("could not drop the working card in %s: %s", chat_id, exc)
+    if markup:
+        await _edit(client, chat_id, status_id, markup)
+
+
+class _Painter:
+    """Keep one card alive while a file is being fetched.
+
+    Download callbacks arrive from several places — the yt-dlp progress hook
+    runs in a worker *thread*, the accelerator reports from the event loop —
+    and Telegram will flood-ban a bot that edits faster than about once a
+    second. So the callback only stores the newest card (an attribute write,
+    safe from any thread) and this loop paints it, at most ``interval`` apart,
+    onto the same message. That is the difference between "downloading…" that
+    never changes and a card that visibly moves.
+    """
+
+    def __init__(self, client: Client, chat_id: int, message_id: int | None, *, interval: float = 1.0):
+        self.client = client
+        self.chat_id = chat_id
+        self.message_id = message_id
+        self.interval = interval
+        self.latest: str | None = None
+        self.shown: str | None = None
+        self.task: asyncio.Task | None = None
+
+    def start(self) -> "_Painter":
+        if self.message_id and self.task is None:
+            self.task = asyncio.create_task(self._run(), name="play:painter")
+        return self
+
+    def show(self, markup: str | None) -> None:
+        if markup:
+            self.latest = markup
+
+    async def _run(self) -> None:
+        while True:
+            try:
+                await asyncio.sleep(self.interval)
+                markup, self.latest = self.latest, None
+                if not markup or markup == self.shown:
+                    continue
+                self.shown = markup
+                _stop_ticker(self.message_id)
+                await rich.edit(self.client, self.chat_id, self.message_id, markup)
+            except asyncio.CancelledError:
+                return
+            except Exception:  # an edit that lost the race is not an error
+                continue
+
+    async def stop(self) -> None:
+        task, self.task = self.task, None
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+
+def _honest_kind(requested_video: bool, chat_id: int) -> str:
+    """Say it out loud when a video request ends up playing as audio.
+
+    A walled YouTube has no video to give, and the player falls back to the
+    same song from a catalogue. Silence there looks like a bug, so the card
+    says what happened instead.
+    """
+    if not requested_video or runtime.player is None:
+        return ""
+    state = runtime.player.queues.get(chat_id)
+    if state is not None and not state.is_video:
+        return (
+            "No video from this server right now — playing the same song as audio."
+        )
+    return ""
+
+
+def _should_autoplay(query: str, tracks: list[Track], *, video: bool = False) -> bool:
+    """Play the top hit without asking — but only when that is obviously right.
+
+    The two failure modes of a play bot are "it made me tap for every song" and
+    "it played the wrong song". A confidence gate keeps both away: something to
+    play, a player to play it with, and a top result that *is* the query rather
+    than a plausible neighbour of it.
+    """
+    if not tracks or runtime.player is None:
+        return False
+    if len(tracks) == 1:
+        return True
+    return is_confident_match(query, tracks[0])
+
+
+#: A join that has already been started for a chat. The search takes a second
+#: or two; the assistant's arrival is network-bound and unrelated, so it is the
+#: one piece of `/play` that can happen entirely *inside* that second.
+_PREJOIN: dict[int, asyncio.Task] = {}
+
+
+def _prejoin(chat_id: int) -> None:
+    """Start the assistant's join now so playback does not wait for it."""
+    player = runtime.player
+    if player is None:
+        return
+    task = _PREJOIN.get(chat_id)
+    if task is not None and not task.done():
+        return
+    _PREJOIN[chat_id] = asyncio.create_task(
+        player.ensure_assistant(chat_id), name="play:prejoin"
+    )
+
+
+async def _await_prejoin(chat_id: int, *, timeout: float = 12.0) -> None:
+    """Consume the started join — by now it has usually already finished."""
+    task = _PREJOIN.pop(chat_id, None)
+    if task is None:
+        return
+    if task.done():
+        return
+    try:
+        await asyncio.wait_for(task, timeout)
+    except Exception:  # a failed join is the player's problem to report
+        pass
+
+
+def _queue_position(chat_id: int, track: Track) -> int:
+    """Where *track* sits in the chat's queue, 1-based (0 when unknown)."""
+    if runtime.player is None:
+        return 0
+    state = runtime.player.queues.get(chat_id)
+    for index, queued in enumerate(getattr(state, "queue", []) or [], start=1):
+        if queued.id == track.id:
+            return index
+    return 0
+
+
+def _autoplay_note(query: str, outcome: str) -> str:
+    where = "queued behind what is playing" if outcome == "queued" else "starting now"
+    return (
+        f"<b>{rich.esc(truncate(query, 40))}</b> — the closest match, {where}. "
+        "Other results are one tap away."
+    )
+
+
+def register(client: Client) -> None:
+    # ── /play ──────────────────────────────────────────────────────────────
+    # One command, three inputs (text, link, replied file) and no format
+    # questions: the track carries `is_video` and the player streams whatever
+    # it is. `/playforce` jumps the track to the front (keeps the rest of the queue).
+    @client.on_message(cmd(["play", "vplay", "playforce", "forceplay"]))
+    async def _play_cmd(_: Client, message: Message) -> None:
+        if not await may_request(client, message):
+            return
+        if runtime.player is None:
+            # Silence here was the worst possible answer: the command looked
+            # accepted and nothing at all happened. Say what is missing.
+            await rich.send(
+                client,
+                message.chat.id,
+                cards.assistant_offline_card(),
+                reply_to=message.id,
+            )
+            return
+        # `/vplay` is `/play` with the picture forced on. Auto-detection can
+        # never choose video for a music video — it has an audio stream too,
+        # and "is there sound" is the question that decides the kind — so the
+        # only way to ask for the video is to say so.
+        cmd_name = (message.command[0] if message.command else "").lower()
+        wanted_video = cmd_name == "vplay"
+        force_now = cmd_name in {"playforce", "forceplay"}
+        video = wanted_video
+        chat_id = message.chat.id
+        _prejoin(chat_id)
+        query = command_args(message)
+        reply = message.reply_to_message
+        requester = (
+            message.from_user.id if message.from_user else 0,
+            display_name(message.from_user),
+        )
+
+        # 1) reply to a Telegram media file → stream the file itself
+        if reply and not query:
+            media_track = track_from_message(message)
+            if media_track:
+                if not runtime.streaming_ready:
+                    await rich.send(
+                        client,
+                        chat_id,
+                        cards.error_card(
+                            "<b>Voice engine is off</b>\n"
+                            "<blockquote>Add <code>STRING_SESSION</code> to stream into a "
+                            "voice chat, or send <code>/song &lt;query&gt;</code> for an MP3.</blockquote>"
+                        ),
+                        reply_to=message.id,
+                    )
+                    return
+                status = await _thinking(
+                    client, message, "getting the file", glyph="download",
+                    step="from the message you replied to",
+                )
+                try:
+                    media = reply.audio or reply.voice or reply.video or reply.document
+                    target = Path(runtime.settings.downloads_dir) / f"tg-{media_track.id}{media_suffix(media)}"
+                    path = await client.download_media(reply, file_name=str(target))
+                    if not path:
+                        raise MediaError("The file could not be downloaded.")
+                    media_track.url = str(path)
+                    media_track.source = "telegram"
+                    media_track.requested_by, media_track.requested_name = requester
+                    # A replied video plays as video, a voice note as audio —
+                    # the kind came from `track_from_message`, not a command.
+                    await runtime.player.play_track(
+                        chat_id,
+                        media_track,
+                        video=wanted_video or media_track.is_video,
+                    )
+                    await _settle(
+                        client, chat_id, status.id if status else None,
+                        cards.started_card(media_track),
+                    )
+                except Exception as exc:
+                    await _edit(
+                        client,
+                        chat_id,
+                        status.id if status else None,
+                        cards.error_card(f"<b>Could not play that file</b>\n<blockquote>{truncate(str(exc), 160)}</blockquote>"),
+                    )
+                return
+
+        if not query:
+            await rich.send(client, chat_id, USAGE(), reply_to=message.id)
+            return
+
+        hit = _blocked(query)
+        if hit:
+            from vyron.core.journal import journal
+
+            journal.warn("play", f"refused a request containing {hit!r}", chat=chat_id)
+            await rich.send(
+                client,
+                chat_id,
+                cards.warn_card(
+                    "<b>That word is filtered here</b>\n"
+                    "<blockquote>The request was not run. The list lives in "
+                    "<code>BLOCKED_WORDS</code> on the server.</blockquote>"
+                ),
+                reply_to=message.id,
+            )
+            await _tidy(client, message)
+            return
+
+        # 2a) catalogue album/playlist (Spotify, Deezer, Apple Music) → queue it
+        if looks_like_url(query) and metasources.is_catalogue_link(query):
+            status = await _thinking(
+                client, message, "reading the link", glyph="link", query=truncate(query, 52),
+                step="checking what it points at", label="link",
+            )
+            collection = None
+            try:
+                collection = await runtime.youtube.resolve_collection(
+                    query, limit=25, requester=requester
+                )
+            except Exception as exc:  # pragma: no cover - network paths
+                logger.info("catalogue collection failed: %s", exc)
+            if collection:
+                title, tracks = collection
+                player = _player()
+                state = player.queues.get(chat_id)
+                started = not state.playing and state.current is None
+                queued = 0
+                for track in tracks:
+                    track.requested_by, track.requested_name = requester
+                    position = await player.enqueue(
+                        chat_id, track, play_now=force_now or (started and queued == 0)
+                    )
+                    if position > 0:
+                        queued += 1
+                queued_markup = (
+                    f"{E('queue')} <b>{rich.esc(truncate(title, 44))}</b>\n"
+                    f"<blockquote>{E('note')} {queued} tracks queued</blockquote>"
+                )
+                if started and queued:
+                    await _settle(
+                        client, chat_id, status.id if status else None,
+                        cards.started_card(tracks[0]),
+                    )
+                else:
+                    await _edit(client, chat_id, status.id if status else None, queued_markup)
+                return
+
+        # 2b) direct link → resolve and start immediately
+        if looks_like_url(query):
+            status = await _thinking(
+                client, message, "reading the link", glyph="link", query=truncate(query, 52),
+                step="resolving the track", label="link",
+                stages=[(2.0, "resolving — YouTube may be slow here"), (5.0, "still on it")],
+            )
+            try:
+                track = await runtime.youtube.resolve(query, requester=requester)
+                if _too_long(track):
+                    await _edit(client, chat_id, status.id if status else None, _too_long_text(track))
+                    return
+                outcome = await begin(
+                    client,
+                    chat_id,
+                    track,
+                    video=wanted_video or track.is_video,
+                    status_id=status.id if status else None,
+                    reply_to=message.id,
+                )
+                if outcome == "streamed":
+                    await _settle(
+                        client, chat_id, status.id if status else None,
+                        cards.started_card(
+                            track,
+                            # `/vplay` asked for the picture, so a silent
+                            # downgrade to audio would look like a bug.
+                            note=_honest_kind(wanted_video or bool(track.is_video), chat_id),
+                        ),
+                    )
+                elif outcome != "error":
+                    await _edit(
+                        client,
+                        chat_id,
+                        status.id if status else None,
+                        cards.queued_card(track, 0),
+                    )
+            except MediaError as exc:
+                await _edit(
+                    client,
+                    chat_id,
+                    status.id if status else None,
+                    cards.error_card(f"<b>Nothing playable there</b>\n<blockquote>{truncate(str(exc), 160)}</blockquote>"),
+                )
+            except Exception as exc:
+                logger.warning("play link failed: %s", exc)
+            return
+
+        # 3) text query → search picker
+        status = await _thinking(
+            client, message, "searching", glyph="search", query=truncate(query, 52),
+            step="asking the catalogues",
+            stages=[
+                (1.5, "matching the results"),
+                (3.5, "still searching — this catalogue is slow"),
+                (7.0, "nearly there"),
+            ],
+        )
+        try:
+            tracks = await runtime.youtube.search(query, requester=requester)
+        except MediaError as exc:
+            await _edit(client, chat_id, status.id if status else None,
+                        _nothing_found(exc))
+            return
+        except Exception as exc:      # a bug in one source is not a dead card
+            logger.warning("search for %r crashed: %s", query, exc, exc_info=True)
+            await _edit(client, chat_id, status.id if status else None,
+                        _nothing_found(exc))
+            return
+        if status:
+            remember_search(
+                chat_id,
+                status.id,
+                message.from_user.id if message.from_user else 0,
+                query,
+                tracks,
+                mode="play",
+                video=video,
+            )
+
+        # One command, music. When the top result is unmistakably the song that
+        # was asked for, playing it beats asking "which of these five?" — the
+        # picker is one tap away ("other results") if the guess was wrong.
+        if tracks and status and _should_autoplay(query, tracks, video=video):
+            outcome = await begin(
+                client,
+                chat_id,
+                tracks[0],
+                video=video or tracks[0].is_video,
+                status_id=status.id,
+                reply_to=message.id,
+            )
+            if outcome != "error":
+                others = B.row(
+                    B.btn(
+                        f"{E('search')} other results",
+                        data="v:pick:list",
+                        style="primary",
+                    )
+                )
+                if outcome == "streamed":
+                    honest = _honest_kind(video or tracks[0].is_video, chat_id)
+                    await _settle(
+                        client, chat_id, status.id,
+                        cards.started_card(
+                            tracks[0],
+                            note=_autoplay_note(query, outcome) + (f" {honest}" if honest else ""),
+                            extra_actions=others,
+                        ),
+                    )
+                else:
+                    await _edit(
+                        client,
+                        chat_id,
+                        status.id,
+                        cards.queued_card(
+                            tracks[0], _queue_position(chat_id, tracks[0]), extra_actions=others
+                        ),
+                    )
+                return
+
+        await _edit(
+            client,
+            chat_id,
+            status.id if status else None,
+            cards.search_card(query, tracks),
+            keyboards.search_results(tracks),
+        )
+
+    # ── /song (the file, one command) ──────────────────────────────────────
+    @client.on_message(cmd(["song", "vsong"]))
+    async def _download_cmd(_: Client, message: Message) -> None:
+        if not await may_request(client, message):
+            return
+        # `/vsong` sends the video file instead of the MP3 — same search, same
+        # cache, one flag apart.
+        wanted_video = (message.command[0] if message.command else "").lower() == "vsong"
+        query = command_args(message)
+        chat_id = message.chat.id
+        if not query:
+            await rich.send(client, chat_id, USAGE(), reply_to=message.id)
+            return
+        hit = _blocked(query)
+        if hit:
+            await rich.send(
+                client,
+                chat_id,
+                cards.warn_card(
+                    "<b>That word is filtered here</b>\n"
+                    "<blockquote>The request was not run. The list lives in "
+                    "<code>BLOCKED_WORDS</code> on the server.</blockquote>"
+                ),
+                reply_to=message.id,
+            )
+            await _tidy(client, message)
+            return
+
+        status = await _thinking(
+            client, message, "searching", glyph="search", query=truncate(query, 52),
+            step="asking the catalogues",
+            stages=[(1.5, "matching the results"), (4.0, "still searching")],
+            tidy=False,   # `/song` replies to the command with the file itself
+        )
+        requester = (
+            message.from_user.id if message.from_user else 0,
+            display_name(message.from_user),
+        )
+        try:
+            if looks_like_url(query):
+                tracks = [await runtime.youtube.resolve(query, requester=requester)]
+            else:
+                tracks = await runtime.youtube.search(query, requester=requester)
+        except MediaError as exc:
+            await _edit(client, chat_id, status.id if status else None,
+                        _nothing_found(exc))
+            return
+        except Exception as exc:      # a bug in one source is not a dead card
+            logger.warning("song search for %r crashed: %s", query, exc, exc_info=True)
+            await _edit(client, chat_id, status.id if status else None,
+                        _nothing_found(exc))
+            return
+
+        if status:
+            remember_search(
+                chat_id,
+                status.id,
+                message.from_user.id if message.from_user else 0,
+                query,
+                tracks,
+                mode="download",
+                video=wanted_video or (tracks[0].is_video if len(tracks) == 1 else False),
+            )
+
+        if len(tracks) == 1:
+            await deliver(
+                client,
+                chat_id,
+                tracks[0],
+                want_video=wanted_video,
+                status_id=status.id if status else None,
+                reply_to=message.id,
+            )
+        else:
+            await _edit(
+                client,
+                chat_id,
+                status.id if status else None,
+                cards.search_card(query, tracks, mode="download"),
+                keyboards.results_page(tracks),
+            )
+        await _tidy(client, message)
+
+    # ── /search ────────────────────────────────────────────────────────────
+    @client.on_message(cmd(["search"]))
+    async def _search_cmd(_: Client, message: Message) -> None:
+        query = command_args(message)
+        if not query:
+            await rich.send(client, message.chat.id, USAGE(), reply_to=message.id)
+            return
+        status = await _thinking(
+            client, message, "searching", glyph="search", query=truncate(query, 52),
+            step="asking the catalogues",
+            stages=[(1.5, "matching the results"), (4.0, "still searching")],
+        )
+        requester = (
+            message.from_user.id if message.from_user else 0,
+            display_name(message.from_user),
+        )
+        try:
+            tracks = await runtime.youtube.search(query, requester=requester, limit=5)
+        except MediaError as exc:
+            await _edit(client, message.chat.id, status.id if status else None,
+                        _nothing_found(exc))
+            return
+        if status:
+            remember_search(
+                message.chat.id,
+                status.id,
+                message.from_user.id if message.from_user else 0,
+                query,
+                tracks,
+            )
+        await _edit(
+            client,
+            message.chat.id,
+            status.id if status else None,
+            cards.search_card(query, tracks),
+            keyboards.search_results(tracks),
+        )
+
+    # ── /playlist ──────────────────────────────────────────────────────────
+    @client.on_message(cmd(["playlist"]))
+    async def _playlist_cmd(_: Client, message: Message) -> None:
+        query = command_args(message)
+        if not query or not looks_like_url(query):
+            await rich.send(
+                client,
+                message.chat.id,
+                cards.warn_card(
+                    "Send a YouTube playlist or mix link: <code>/playlist https://…</code>\n"
+                    "<blockquote>Looking for your own saved lists? <code>/playlists</code></blockquote>"
+                ),
+                reply_to=message.id,
+            )
+            return
+        status = await _thinking(
+            client, message, "loading the playlist", glyph="queue", query=truncate(query, 52),
+            step="reading the track list", label="playlist",
+        )
+        try:
+            title, tracks = await runtime.youtube.playlist(query, limit=50)
+        except MediaError as exc:
+            await _edit(client, message.chat.id, status.id if status else None,
+                        cards.error_card(f"<b>Playlist failed</b>\n<blockquote>{truncate(str(exc), 160)}</blockquote>"))
+            return
+
+        requester = (
+            message.from_user.id if message.from_user else 0,
+            display_name(message.from_user),
+        )
+        player = _player()
+        state = player.queues.get(message.chat.id)
+        started = not state.playing and state.current is None
+        queued = 0
+        for track in tracks:
+            track.requested_by, track.requested_name = requester
+            position = await player.enqueue(
+                message.chat.id, track, play_now=force_now or (started and queued == 0)
+            )
+            if position > 0:
+                queued += 1
+        markup = (
+            f"{E('queue')} <b>{truncate(title, 50)}</b>\n"
+            f"<blockquote>{E('note')} {queued} tracks queued "
+            f"{'— playback started' if started else ''}</blockquote>"
+        )
+        await _edit(client, message.chat.id, status.id if status else None, markup)
+
+
+def _stream_failure_text(exc: Exception) -> str:
+    """Turn a resolver failure into something a listener can act on.
+
+    The raw reason is a chain of engines ("yt-dlp: … · mirror: … · substitute:
+    …"), which is the right thing to put in the journal and the wrong thing to
+    put in a chat. These are the three situations that actually happen here.
+    """
+    reason = str(exc)
+    low = reason.lower()
+
+    if "standby" in low:
+        return (
+            "<b>Another copy has the voice chat</b>\n"
+            "<blockquote>This deployment is running more than one instance, and the "
+            "other one owns the call. The spare now takes playback over by itself once "
+            "the other goes quiet — a minute at most. Scaling the service to one "
+            "instance makes it immediate.</blockquote>"
+        )
+    if "voice chat" in low or "group call" in low:
+        return (
+            f"<b>Could not start the call</b>\n<blockquote>{truncate(reason, 170)}</blockquote>"
+        )
+    if "no results" in low or "nothing playable" in low:
+        return (
+            "<b>Nothing playable for that</b>\n"
+            "<blockquote>YouTube refuses this server and the catalogues had no copy of "
+            "that song. Try the artist name, or send the file with <code>/song</code>."
+            "</blockquote>"
+        )
+    return (
+        "<b>Could not reach the audio</b>\n"
+        f"<blockquote>{truncate(reason, 150)}</blockquote>"
+        "\n<footer>why: <code>/sources</code> · the file instead: <code>/song</code></footer>"
+    )
+
+
+async def begin(
+    client: Client,
+    chat_id: int,
+    track: Track,
+    *,
+    video: bool | None = None,
+    status_id: int | None = None,
+    reply_to: int | None = None,
+) -> str:
+    """Play *track* into the voice chat.
+
+    Streaming is the product: a missing voice engine or a dead link is reported
+    as such instead of quietly turning /play into a file upload. ``/song`` is
+    the explicit way to get a file.
+
+    Returns ``"streamed"``, ``"queued"`` or ``"error"`` (the error card is
+    already on screen when this returns).
+    """
+    if runtime.calls is None:
+        await _edit(
+            client,
+            chat_id,
+            status_id,
+            cards.error_card(
+                "<b>Voice engine is off</b>\n"
+                "<blockquote>Playback needs the assistant account. Add "
+                "<code>STRING_SESSION</code> (generate one with "
+                "<code>python -m vyron.tools.session</code>) and restart. "
+                "Use <code>/song</code> if you want a file.</blockquote>"
+            ),
+        )
+        return "error"
+    # Auto-detect: a video source streams video, everything else audio.
+    if video is None:
+        video = bool(track.is_video)
+    # The join was started while the search was running; by the time we get
+    # here it has almost always finished, so it costs nothing.
+    await _await_prejoin(chat_id)
+    try:
+        position = await _player().enqueue(chat_id, track, video=video, play_now=True)
+    except StreamError as exc:
+        logger.info("stream unavailable: %s", exc)
+        await _edit(
+            client,
+            chat_id,
+            status_id,
+            cards.error_card(_stream_failure_text(exc)),
+        )
+        return "error"
+    return "streamed" if position == 1 else "queued"
+
+
+async def deliver(
+    client: Client,
+    chat_id: int,
+    track: Track,
+    want_video: bool | None = None,
+    *,
+    status_id: int | None = None,
+    reply_to: int | None = None,
+    hint: str | None = None,
+) -> None:
+    """Download a track and send it as a real Telegram file.
+
+    The container is detected, not asked for: audio first (that is what
+    ``/song`` means), and when the source has no audio-only stream at all — a
+    video-only link, a replied video — the video file is sent instead. An
+    explicit ``want_video`` still wins, because the inline buttons offer the
+    choice.
+    """
+    if want_video is None:
+        want_video = False
+    kind = "video" if want_video else "audio"
+
+    # A file we already have is not a download: say so and go straight to the
+    # upload, which is what makes asking twice feel instant.
+    cached = runtime.downloader.cached(track, video=want_video) if runtime.downloader else None
+    markup = cards.download_card(
+        track, kind, step="already downloaded — sending it" if cached else ""
+    )
+    if hint:
+        markup = B.note(hint) + markup
+    await _edit(client, chat_id, status_id, markup)
+
+    left = 0.0
+    painter = _Painter(client, chat_id, status_id).start()
+
+    def on_progress(fraction: float, text: str) -> None:
+        nonlocal left
+        # Two engines may report at once (mirror + catalogue copy); the bar
+        # only ever grows, so it never jumps backwards mid-download.
+        left = max(left, min(1.0, float(fraction or 0.0)))
+        painter.show(cards.download_card(track, kind, step=text, fraction=left))
+
+    # The cover comes down the wire while the audio does, instead of adding up
+    # to eight seconds of thumbnail time to the upload.
+    thumb_task = asyncio.create_task(fetch_bytes(track.thumbnail), name="play:thumb")
+    path = cached
+    try:
+        if path is None and not want_video:
+            try:
+                path = await runtime.downloader.audio(track, on_progress=on_progress)
+            except Exception as exc:
+                # A *video* link with no audio-only stream is the one case where
+                # the video is the honest answer. Anything else would just cost
+                # another minute for the same failure.
+                if not track.is_video:
+                    await painter.stop()
+                    await _edit(
+                        client,
+                        chat_id,
+                        status_id,
+                        cards.error_card(
+                            f"<b>Download failed</b>\n"
+                            f"<blockquote>{truncate(str(exc), 170)}</blockquote>"
+                        ),
+                    )
+                    thumb_task.cancel()
+                    return
+                logger.info("audio download failed for %s, trying video: %s", track.id, exc)
+                painter.show(cards.download_card(track, "video", step="fetching the video instead"))
+        if path is None:
+            try:
+                path = await runtime.downloader.video(track, on_progress=on_progress)
+                want_video = True
+                kind = "video"
+            except Exception as exc:
+                await painter.stop()
+                await _edit(
+                    client,
+                    chat_id,
+                    status_id,
+                    cards.error_card(
+                        f"<b>Download failed</b>\n<blockquote>{truncate(str(exc), 170)}</blockquote>"
+                    ),
+                )
+                thumb_task.cancel()
+                return
+    finally:
+        await painter.stop()
+
+    thumb = None
+    try:
+        thumb = as_file(await thumb_task, f"{track.id or 'cover'}.jpg")
+    except Exception:  # the picture is a nicety, the file is the answer
+        thumb = None
+    caption = (
+        f"{E('song')} <b>{rich.esc(truncate(track.title, 60))}</b>\n"
+        f"{E('microphone')} {rich.esc(truncate(track.uploader, 40) or 'unknown')}"
+    )
+    # Telegram's own upload is the last visible wait; name it.
+    await _edit(
+        client,
+        chat_id,
+        status_id,
+        cards.download_card(track, kind, step="uploading to Telegram", fraction=1.0),
+    )
+    try:
+        if want_video:
+            await client.send_video(
+                chat_id,
+                str(path),
+                caption=caption,
+                duration=track.duration or None,
+                thumb=thumb,
+                supports_streaming=True,
+                reply_to_message_id=reply_to,
+            )
+        else:
+            await client.send_audio(
+                chat_id,
+                str(path),
+                caption=caption,
+                title=track.title[:64],
+                performer=(track.uploader or "VYRON")[:64],
+                duration=track.duration or None,
+                thumb=thumb,
+                reply_to_message_id=reply_to,
+            )
+        if runtime.storage:
+            await runtime.storage.bump("downloads")
+        if status_id:
+            try:
+                await client.delete_messages(chat_id, status_id)
+            except Exception:
+                pass
+    except Exception as exc:
+        logger.warning("send file failed: %s", exc)
+        await _edit(
+            client,
+            chat_id,
+            status_id,
+            cards.error_card(
+                f"<b>Upload failed</b>\n<blockquote>{truncate(str(exc), 170)}</blockquote>"
+            ),
+        )
+
+
+__all__ = ["begin", "deliver", "may_request", "register"]

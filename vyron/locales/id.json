@@ -1,0 +1,33 @@
+{
+  "name": "Bahasa Indonesia",
+  "strings": {
+    "lang.title": "bahasa",
+    "lang.note": "Balasan VYRON mengikuti bahasa chat ini. Pilih bahasa — langsung berlaku.",
+    "lang.current": "saat ini",
+    "lang.saved": "Bahasa disimpan.",
+    "lang.unknown": "Bahasa itu tidak tersedia.",
+    "lang.admin_only": "Hanya admin yang bisa mengganti bahasa di sini.",
+    "lang.switched": "Beralih ke {name}.",
+    "lang.page": "halaman {page}/{pages}",
+    "np.streaming": "diputar",
+    "np.paused": "dijeda",
+    "np.live": "langsung",
+    "np.up_next": "berikutnya",
+    "np.queued": "{count} dalam antrean",
+    "np.now_playing": "sedang diputar",
+    "np.by": "oleh",
+    "ctl.paused": "Dijeda",
+    "ctl.resumed": "Dilanjutkan",
+    "ctl.nothing_playing": "Tidak ada yang diputar",
+    "ctl.nothing_paused": "Tidak ada yang dijeda",
+    "ctl.skipped": "Dilewati",
+    "ctl.queue_empty": "Antrean kosong",
+    "ctl.stopped": "Dihentikan dan keluar dari voice chat",
+    "ctl.volume": "Volume: {volume}%",
+    "ctl.loop": "Ulang: {mode}",
+    "ctl.shuffled": "{count} trek diacak",
+    "ctl.autoplay_on": "Putar otomatis aktif",
+    "ctl.autoplay_off": "Putar otomatis nonaktif",
+    "ctl.seek": "Melompat ke {time}"
+  }
+}
