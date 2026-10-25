@@ -378,10 +378,13 @@ def register(client: Client) -> None:
             if sent is not None:
                 return
 
+        # No picture: the rich player panel — a table of facts, the live bar
+        # and coloured controls inside the message (the classic lane strips the
+        # buttons and keeps the keyboard passed here, so nothing is lost).
         await rich.send(
             message._client,
             message.chat.id,
-            cards.now_playing_card(state),
+            cards.player_panel(state),
             markup_keyboard=keyboard,
             reply_to=message.id,
         )

@@ -370,3 +370,64 @@ def test_a_youtube_track_still_links_to_its_page():
     markup = cards.now_playing_card(state)
     assert 'href="https://youtu.be/dQw4w9WgXcQ"' in markup
     assert "Chris Grey - Wrong" in to_plain_text(markup)
+
+
+# ── the player panel: the same card, as a rich message ─────────────────────
+def _panel_state():
+    track = Track(
+        id="a",
+        title="Chris Grey – LET THE WORLD BURN",
+        uploader="Chris Grey",
+        duration=164,
+        requested_name="Beast Gohan",
+        requested_by=7,
+    )
+    state = ChatState(chat_id=-100, current=track, playing=True, offset=60, volume=70)
+    state.queue.append(Track(id="b", title="Wrong", uploader="Chris Grey", duration=187))
+    return state
+
+
+def test_the_player_panel_is_a_table_and_real_buttons():
+    """`/np` with no picture: a table of facts, a live bar, coloured controls.
+
+    A caption cannot hold a table or a button, so the text view gets the layout
+    a rich message can actually draw.
+    """
+    from vyron.ui import rich
+
+    rich.set_rich_enabled(True)
+    try:
+        markup = cards.player_panel(_panel_state())
+        assert "<table" in markup and "<tr>" in markup
+        assert markup.count("<tg-button ") >= 6, "the controls travel in the message"
+        assert 'style="primary"' in markup and 'style="danger"' in markup
+        assert "<details" in markup, "up next collapses instead of pushing the card"
+        assert "LET THE WORLD BURN" in markup and "Beast Gohan" in markup
+        # …and it still degrades into something readable
+        plain = rich.to_html(markup)
+        assert "<tg-button" not in plain and "LET THE WORLD BURN" in plain
+    finally:
+        rich.set_rich_enabled(None)
+
+
+def test_the_player_panel_uses_fields_when_a_table_cannot_render():
+    from vyron.ui import rich
+
+    rich.set_rich_enabled(False)
+    try:
+        markup = cards.player_panel(_panel_state())
+        assert "<table" not in markup
+        assert markup.count("◈") >= 5, "one fact per line, the classic shape"
+        assert "ᴀꜱᴋᴇᴅ ʙʏ" in markup
+    finally:
+        rich.set_rich_enabled(None)
+
+
+def test_a_fallback_table_does_not_end_its_line_in_a_dot():
+    """`to_html` flattens cells into "a  ·  b  ·  " — the last dot is wrong."""
+    from vyron.ui import rich
+
+    html = rich.to_html("<table border='0'><tr><td>one</td><td>two</td></tr></table>")
+    assert "one" in html and "two" in html
+    assert not html.rstrip().endswith("·")
+    assert all(not line.rstrip().endswith("·") for line in html.splitlines())

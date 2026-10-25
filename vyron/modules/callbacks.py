@@ -514,7 +514,7 @@ def register(client: Client) -> None:
             markup = (
                 cards.now_playing_caption(state)
                 if cq.message and rich.is_photo(chat.id, cq.message.id)
-                else cards.now_playing_card(state)
+                else cards.player_panel(state)
             )
             await _show(client, cq, markup, keyboards.now_playing(state))
             await cq.answer()

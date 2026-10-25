@@ -207,6 +207,12 @@ def safe_markup(markup: str) -> str:
     if not markup:
         return ""
     text = _SOFT_TAGS.sub("…", markup)
+    # Remote images are the likeliest rich construct to be refused: Telegram
+    # wants uploaded media behind `tg://photo?id=`, not an arbitrary URL, so a
+    # card carrying a cover URL can be rejected as a whole. Losing the picture
+    # is a much better outcome than losing the heading, the table and the
+    # buttons with it.
+    text = re.sub(r"<img\b[^>]*/?>", "", text, flags=re.I)
     text = re.sub(r"(<blockquote)\s+expandable", r"\1", text, flags=re.I)
     text = re.sub(r'(<table\b[^>]*?)\s+border="0"', r'\1 border="1"', text, flags=re.I)
     text = re.sub(r"<aside>(.*?)</aside>", r"<blockquote>\1</blockquote>", text, flags=re.I | re.S)
@@ -289,6 +295,9 @@ def to_html(markup: str) -> str:
     )
     text = _BR_RE.sub("\n", text)
     text = re.sub(r"[ \t]{3,}", "  ", text)
+    # A table row becomes "a  ·  b  ·  c  ·  " — the separator left behind on
+    # the last cell is what made every fallback card end a line in a dot.
+    text = re.sub(r"[ \t]*·[ \t]*(?=\n|$)", "", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 

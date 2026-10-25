@@ -577,6 +577,128 @@ def now_playing_card(state: ChatState, track: Track | None = None) -> str:
     return "\n\n".join(_np_header(track)) + "\n\n" + "\n".join(rest)
 
 
+def player_panel(state: ChatState, track: Track | None = None) -> str:
+    """The player, as one rich message: a fact table, a live bar, real buttons.
+
+    The auto-posted now-playing message is a *picture* with a caption; this is
+    the version for everywhere a picture is not what is wanted — `/np`, the
+    Now playing button, and any chat that has the poster turned off. A caption
+    can hold neither a table nor coloured buttons, so the same information is
+    laid out as a rich card instead:
+
+        <h2>🎧 ᴘʟᴀʏɪɴɢ  <i>2:44</i></h2>  <hr/>
+        <blockquote>Chris Grey - LET THE WORLD BURN</blockquote>
+        <table>  field | value            (song, artist, length, asked by, source)
+        <code>██◉▬▬▬▬▬▬▬▬▬▬▬</code>
+        📡 streaming · 1:03 · 38% · 2:44
+        <details> ⏭ up next · 3 </details>
+        <tg-button-row> pause · skip · queue · stop </tg-button-row>
+
+    The buttons only exist in the rich lane; the classic lane strips them, so
+    the caller keeps attaching its reply keyboard exactly as before.
+    """
+    track = track or state.current
+    if not track:
+        return (
+            B.banner("nothing playing", glyph="moon")
+            + B.context("Send <code>/play</code> with a song name, a link, or a reply to a file.")
+        )
+
+    from vyron.utils.naming import display_parts
+
+    artist, name = display_parts(track.title, track.uploader)
+    total = int(track.duration or 0)
+    asked = esc(truncate(track.requested_name, 28)) if track.requested_name else "—"
+    source = str(getattr(track, "source", "") or "stream")
+    paused = bool(getattr(state, "paused", False))
+
+    # Same five facts, two shapes: a two-column table where a table renders,
+    # and the aligned field block where it does not — a table flattened into
+    # "title · LET THE WORLD BURN · artist · …" is unreadable.
+    if B.rich_lane():
+        table = B.table(
+            None,
+            [
+                ("<b>title</b>", f"<b>{esc(truncate(name, 54))}</b>"),
+                ("<b>artist</b>", esc(truncate(artist or "unknown", 36))),
+                ("<b>length</b>", fmt_duration(total) if total else "live"),
+                ("<b>asked by</b>", asked),
+                ("<b>source</b>", esc(truncate(source, 18))),
+            ],
+            border=0,
+        )
+    else:
+        table = B.fields(
+            [
+                ("note", "title", f"<b>{esc(truncate(name, 54))}</b>"),
+                ("user", "artist", esc(truncate(artist or "unknown", 36))),
+                ("clock", "length", fmt_duration(total) if total else "live"),
+                ("users", "asked by", asked),
+                ("globe", "source", esc(truncate(source, 18))),
+            ]
+        )
+    cover = getattr(track, "thumbnail", None)
+
+    up_next = ""
+    if state.queue:
+        listed = "".join(
+            f"<li>{esc(truncate(item.title, 40))} <i>{fmt_duration(item.duration)}</i></li>"
+            for item in state.queue[:8]
+        )
+        up_next = B.details(
+            f"{E('next')} <b>up next</b> · {len(state.queue)}", f"<ul>{listed}</ul>", open=False
+        )
+
+    # The same control set as the reply keyboard, laid out in the message with
+    # colour for what it does: primary = move, success = forward, danger =
+    # stop. A rich message carries its own buttons, so no keyboard is attached
+    # underneath it (two button sets under one card is what `rich.send` avoids).
+    volume = int(getattr(state, "volume", 0) or 0)
+    controls = (
+        B.row(
+            B.btn(
+                f"{E('resume')} Resume" if paused else f"{E('pause')} Pause",
+                data="v:resume" if paused else "v:pause",
+                style="primary",
+            ),
+            B.btn(f"{E('skip')} Skip", data="v:skip", style="success"),
+            B.btn(f"{E('stop')} Stop", data="v:stop", style="danger"),
+        )
+        + B.row(
+            B.btn("⏪ 15s", data="v:seek:-15"),
+            B.btn(f"{E('volume')} {volume}%", data="v:vol:show"),
+            B.btn("⏩ 15s", data="v:seek:15"),
+        )
+        + B.row(
+            B.btn(f"{E('loop')} {state.loop.label}", data="v:loop"),
+            B.btn(f"{E('shuffle')} Shuffle", data="v:shuffle"),
+            B.btn(f"{E('queue')} Queue", data="v:queue:0"),
+        )
+        + B.row(
+            B.btn(f"{E('favorite')} Save", data="v:fav"),
+            B.btn(f"{E('lyrics')} Lyrics", data="v:lyrics"),
+            B.btn(f"{E('close')} Close", data="v:close", style="danger"),
+        )
+    )
+
+    head = (
+        B.banner(
+            "playing" if not paused else "paused",
+            glyph="headphones",
+            meta=f"<i>{fmt_duration(total)}</i>" if total else "",
+        )
+        + (B.image(cover) + "\n" if cover else "")
+        + B.context(f"<b>{_np_heading(track)}</b>")
+        + f"\n{table}\n"
+        + progress_block(state, track)
+        + "\n"
+        + up_next
+        + B.actions(controls)
+        + B.footer(f"{E('spark')} {BRAND} {BULLET} /song sends the file here")
+    )
+    return head
+
+
 def now_playing_caption(state: ChatState, catalog=None) -> str:
     """The same card as a poster caption.
 

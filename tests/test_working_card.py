@@ -181,3 +181,18 @@ def test_the_rich_lane_can_explain_itself():
     assert isinstance(line, str) and line
     if not rich.RICH_AVAILABLE:
         assert "unavailable" in line
+
+
+def test_a_cover_url_is_dropped_before_the_rich_card_is_lost():
+    """Remote <img> is the likeliest thing for a rich send to refuse.
+
+    Telegram wants uploaded media behind `tg://photo?id=`, not an arbitrary
+    URL — so a card carrying a cover URL can be rejected as a whole, which is
+    how a rich card silently became the classic one.
+    """
+    from vyron.ui import rich
+
+    card = '<h2>🎧 ᴘʟᴀʏɪɴɢ</h2><img src="https://i.ytimg.com/vi/a/hq.jpg" /><b>title</b>'
+    safe = rich.safe_markup(card)
+    assert "<img" not in safe
+    assert "<h2>" in safe and "<b>title</b>" in safe

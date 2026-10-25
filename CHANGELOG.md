@@ -51,6 +51,26 @@ listener's name goes.
   menu entry. Nobody chose a per-group backdrop; the poster is the song's own
   art now. `/cthumbnail` for a channel is unchanged.
 
+**A player panel, drawn the way only a rich message can be drawn.** The bots
+this one is measured against put a fact table and coloured controls *inside*
+the message; VYRON's `/np` sent a caption-shaped card. When there is no picture
+to caption — `/np`, the **Now playing** button, a chat with the poster off —
+the bot now sends a real panel: `<h2>` masthead, a two-column fact table
+(title · artist · length · asked by · source), the live bar, a collapsible
+**up next** section and four rows of coloured controls (primary = move,
+success = forward, danger = stop). The classic lane gets the same five facts as
+the aligned field block, the buttons stripped, and the reply keyboard it always
+had.
+
+Also fixed for both lanes:
+
+* a table flattened by `to_html` no longer ends every line in a stray "·";
+* `<img>` is dropped on the rich-lane retry. A remote cover URL is the single
+  likeliest thing for Telegram to refuse, and losing the picture beats losing
+  the heading, the table and the buttons with it;
+* `/np` and the Now playing button show the song the way it is actually named
+  (`Chris Grey - LET THE WORLD BURN`, not a repost handle).
+
 Also in this build: mastheads are real headings in the rich lane and a quoted
 line (not a wall of `━`) in the classic one, a refused rich card is retried
 without its optional tags instead of falling back to plain HTML, `/doctor` says
