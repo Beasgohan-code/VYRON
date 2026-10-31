@@ -87,10 +87,12 @@ def _sink(event: Event) -> None:
     if not _bot:
         return
     try:
-        loop = asyncio.get_running_loop()
+        asyncio.get_running_loop()
     except RuntimeError:
         return  # recorded off-loop (thread pool) — the journal still has it
-    loop.create_task(_deliver(event))
+    from vyron.utils.helpers import spawn
+
+    spawn(_deliver(event), name="logsink:deliver")
 
 
 async def _deliver(event: Event) -> None:

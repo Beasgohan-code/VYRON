@@ -18,18 +18,28 @@ import contextlib
 import logging
 import os
 
-# Must be set before vyron.config is imported anywhere.
-os.environ.setdefault("WEBAPP_ALLOW_ANON", "true")
-os.environ.setdefault("BOT_TOKEN", "0:preview")
-os.environ.setdefault("API_ID", "1")
-os.environ.setdefault("API_HASH", "preview")
-os.environ.setdefault("OWNER_ID", "1")
-os.environ.setdefault("MUSIC_API_OPEN", "true")  # docs + health are clickable in preview
-
 from aiohttp import web
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)-7s %(message)s")
 logger = logging.getLogger("preview")
+
+
+def _preview_env() -> None:
+    """Fake credentials for a browser-only preview — set when it *runs*.
+
+    This used to happen at import time, which meant anything that imported the
+    module (a tool listing every module, a test, an unrelated entrypoint) left
+    ``MUSIC_API_OPEN=true`` and ``WEBAPP_ALLOW_ANON=true`` set for the whole
+    process — the API opened to keyless requests because a preview tool was
+    imported. Importing a module must not change the deployment's security
+    posture; starting it may.
+    """
+    os.environ.setdefault("WEBAPP_ALLOW_ANON", "true")
+    os.environ.setdefault("BOT_TOKEN", "0:preview")
+    os.environ.setdefault("API_ID", "1")
+    os.environ.setdefault("API_HASH", "preview")
+    os.environ.setdefault("OWNER_ID", "1")
+    os.environ.setdefault("MUSIC_API_OPEN", "true")  # docs + health are clickable
 
 
 async def _warm_services(*, use_db: bool) -> None:
@@ -61,6 +71,7 @@ async def _warm_services(*, use_db: bool) -> None:
 
 
 async def main() -> None:
+    _preview_env()
     parser = argparse.ArgumentParser(description="VYRON web app preview")
     parser.add_argument("--port", type=int, default=8080)
     # 0.0.0.0 on purpose: the preview has to be reachable from the container.

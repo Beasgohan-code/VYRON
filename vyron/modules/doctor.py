@@ -48,6 +48,10 @@ def _checks() -> list[tuple[str, str, str]]:
     return out
 
 
+#: Public alias — the card's Refresh button rebuilds the same list.
+checks = _checks
+
+
 def register(client: Client) -> None:
     @client.on_message(cmd(["doctor", "health"]))
     async def _doctor(_: Client, message: Message) -> None:
@@ -59,4 +63,4 @@ def register(client: Client) -> None:
         )
 
 
-__all__ = ["register"]
+__all__ = ["register", "checks"]
