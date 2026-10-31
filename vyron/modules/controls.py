@@ -44,8 +44,22 @@ def _volume_card(volume: int, *, changed: bool = False) -> str:
             ("Value", f"<b>{volume}%</b>"),
             ("Range", "1–200 · <code>/volume +20</code> nudges"),
         ])
+        # Two steps, not a Mute: the player clamps at 1% (0 is not a volume
+        # tgcalls can hold), so a "Mute" button would have been a label that
+        # never did what it said.
+        + B.actions(
+            B.row(
+                B.btn(f"{E('back')} Quieter", data="v:vol:-10"),
+                B.btn(f"{E('next')} Louder", data="v:vol:+10", style="primary"),
+            ),
+            B.row(B.btn(f"{E('close')} Close", data="v:close", style="danger")),
+        )
         + B.soft_footer("VYRON", "live")
     )
+
+
+#: Public alias — the router's volume button opens the same card.
+volume_card = _volume_card
 
 
 

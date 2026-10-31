@@ -145,8 +145,8 @@ GLYPHS: dict[str, str] = {
     "unlike": "🤍",
     "vinyl": "💿",
     "sparkle": "✨",
-    "wave": "🌊",
     "prev": "⏮️",
+    "replay": "🔁",
 }
 
 # ── Premium-emoji pack loader ───────────────────────────────────────────────

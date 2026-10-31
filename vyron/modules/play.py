@@ -196,7 +196,9 @@ async def _thinking(
     msg = await rich.send(
         client,
         message.chat.id,
-        cards.working_card(title, "", glyph=glyph, query=query, step=step, label=label),
+        cards.working_card(
+            title, "", glyph=glyph, query=query, step=step, label=label, live=bool(stages)
+        ),
         reply_to=message.id,
         editable=True,
     )
@@ -421,8 +423,9 @@ def register(client: Client) -> None:
     # ── /play ──────────────────────────────────────────────────────────────
     # One command, three inputs (text, link, replied file) and no format
     # questions: the track carries `is_video` and the player streams whatever
-    # it is. `/playforce` jumps the track to the front (keeps the rest of the queue).
-    @client.on_message(cmd(["play", "vplay", "playforce", "forceplay"]))
+    # it is. The *force* variants are deliberately not registered: a group that
+    # wants to cut in changes its own settings, not a command.
+    @client.on_message(cmd(["play", "vplay"]))
     async def _play_cmd(_: Client, message: Message) -> None:
         if not await may_request(client, message):
             return
@@ -442,7 +445,6 @@ def register(client: Client) -> None:
         # only way to ask for the video is to say so.
         cmd_name = (message.command[0] if message.command else "").lower()
         wanted_video = cmd_name == "vplay"
-        force_now = cmd_name in {"playforce", "forceplay"}
         video = wanted_video
         chat_id = message.chat.id
         _prejoin(chat_id)
@@ -546,13 +548,12 @@ def register(client: Client) -> None:
                 for track in tracks:
                     track.requested_by, track.requested_name = requester
                     position = await player.enqueue(
-                        chat_id, track, play_now=force_now or (started and queued == 0)
+                        chat_id, track, play_now=started and queued == 0
                     )
                     if position > 0:
                         queued += 1
-                queued_markup = (
-                    f"{E('queue')} <b>{rich.esc(truncate(title, 44))}</b>\n"
-                    f"<blockquote>{E('note')} {queued} tracks queued</blockquote>"
+                queued_markup = cards.collection_queued_card(
+                    title, queued, started=bool(started and queued)
                 )
                 if started and queued:
                     await _settle(
@@ -849,16 +850,16 @@ def register(client: Client) -> None:
         queued = 0
         for track in tracks:
             track.requested_by, track.requested_name = requester
+            # `/playlist` starts only when the chat was idle and this is the
+            # first track of the list. (`force_now` used to be read here from
+            # the /play handler's scope — a NameError the moment a playlist was
+            # used at all.)
             position = await player.enqueue(
-                message.chat.id, track, play_now=force_now or (started and queued == 0)
+                message.chat.id, track, play_now=started and queued == 0
             )
             if position > 0:
                 queued += 1
-        markup = (
-            f"{E('queue')} <b>{truncate(title, 50)}</b>\n"
-            f"<blockquote>{E('note')} {queued} tracks queued "
-            f"{'— playback started' if started else ''}</blockquote>"
-        )
+        markup = cards.collection_queued_card(title, queued, started=bool(started and queued))
         await _edit(client, message.chat.id, status.id if status else None, markup)
 
 

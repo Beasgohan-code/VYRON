@@ -367,9 +367,15 @@ def empty_state(glyph: str, title: str, hint: str) -> str:
 
 # ── Premium polish helpers (beautiful cards) ───────────────────────────────
 def soft_header(icon: str, title: str, subtitle: str | None = None) -> str:
-    """Beautiful soft header used on every major card."""
+    """Beautiful soft header used on every major card.
+
+    The title is lower-cased before it is small-capped, so a caller may pass
+    ``"Now Streaming"`` or ``"now streaming"`` and get the same heading. The
+    mixed-case spelling used to render as ``Nᴏᴡ Sᴛʀᴇᴀᴍɪɴɢ`` next to cards
+    that read ``ꜱᴇᴀʀᴄʜɪɴɢ``/``ɴᴏᴡ ᴘʟᴀʏɪɴɢ`` — one heading style per app.
+    """
     from vyron.ui.theme import small_caps, E
-    head = f"<h2>{E(icon)}  {small_caps(title)}</h2>\n"
+    head = f"<h2>{E(icon)}  {small_caps(str(title).lower())}</h2>\n"
     if subtitle:
         head += f"<blockquote>{subtitle}</blockquote>\n"
     return head

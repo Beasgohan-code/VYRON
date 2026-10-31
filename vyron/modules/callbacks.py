@@ -24,6 +24,8 @@ _CONTROL_ACTIONS = {
     "clearqueue", "vol", "set", "pick", "get", "dl", "lock", "fx", "video",
     # `radio` persists a chat setting, so it follows the same rule as set.
     "radio",
+    # opening the volume panel from the settings card is a control action too
+    "volume",
 }
 
 
@@ -760,6 +762,49 @@ def register(client: Client) -> None:
                 keyboards.settings_panel(cfg),
             )
             await rich.answer(cq, "Saved")
+            return
+
+        # ── the panels the cards' own buttons open ─────────────────────────
+        # These four actions were emitted by cards and handled by nobody: the
+        # tap was acknowledged and nothing happened, which reads as a broken
+        # button. Each one now re-runs what its command would have.
+        if action == "volume":
+            from vyron.modules.controls import volume_card
+
+            await _show(client, cq, volume_card(state.volume if state else 100))
+            await rich.answer(cq, f"Volume: {state.volume}%" if state else "Volume")
+            return
+
+        if action == "doctor":
+            from vyron.modules.doctor import checks
+
+            await _show(client, cq, cards.doctor_card(checks()))
+            await rich.answer(cq, "Checked again")
+            return
+
+        if action == "ping":
+            import time
+
+            from vyron.utils import sysinfo
+
+            started = time.perf_counter()
+            snap = sysinfo.snapshot()
+            latency = (time.perf_counter() - started) * 1000
+            await _show(client, cq, cards.ping_card(latency, runtime.uptime, system=snap))
+            await rich.answer(cq, f"{latency:.0f} ms")
+            return
+
+        if action == "like":
+            # The now-playing heart: same shelf as /fav, one tap from the card.
+            if not state or not state.current:
+                await rich.answer(cq, "Nothing is playing.", show_alert=True)
+                return
+            if runtime.storage is None:
+                await rich.answer(cq, "Storage is not ready yet.", show_alert=True)
+                return
+            actor = cq.from_user.id if cq.from_user else 0
+            added = await runtime.storage.add_favorite(actor, state.current.to_dict())
+            await rich.answer(cq, "Saved to favourites" if added else "Already saved")
             return
 
         # ── favourites / lyrics ────────────────────────────────────────────

@@ -7,6 +7,66 @@ Two version numbers move independently:
 
 ## Bot
 
+### 1.10.26 — 2026-10-31
+
+**`cards.py` was a `SyntaxError`, so no card had ever been sent.** A stray `,,`
+in the help table made the module unparseable: every handler that posts a Rich
+card raised `ImportError` the moment it was called, which is most of the bot.
+The suite died at *collection* on the same character, so there was no red test
+pointing at a handler — and nothing in it had ever executed a card builder to
+notice. Six nested same-quote f-strings in the same file were also Python
+3.12-only syntax, so even with the comma fixed the module would not load on
+3.11 while the deploy targets 3.12.
+
+**`/play` crashed before it searched.** The working card is called with a query,
+a stage and a label; the builder only accepted a headline, so every `/play`
+raised `TypeError` at the first `working_card(...)`. It now takes both shapes:
+the old title-and-sentence one five commands still use, and `/play`'s live one —
+including the promise "this card updates itself", which is only printed when a
+ticker is actually going to edit it.
+
+**The group `/start` card and the API-key panel referenced functions that never
+existed.** `GROUP_NEEDS` was unpacked but never defined (so `/start` in a group
+died), and the key cards called `_scope_chips`, `_expiry_state` and `_ago` —
+none of which were ever written. They exist now, and a revoked or expired key
+no longer gets a Revoke button that could not change anything.
+
+**A finished queue posted a card that was never written.** `player.stop()` calls
+`cards.queue_finished_card(...)`, which did not exist: the assistant left the
+voice chat and the last thing in the chat was a poster claiming it was still
+streaming. The card says the session ended, that the assistant has left, and
+offers **Play again** / **Radio**.
+
+**Four buttons did nothing.** `/doctor` and `/ping` grew a Refresh button, the
+now-playing card a heart, and the settings card a Volume button — the router
+acknowledged each tap and fell through. All four do their job now, and a test
+walks every `v:` action a card can emit against the actions the router handles,
+so the next dead button fails the build instead of the user.
+
+**Background tasks could be collected before they ran.** `asyncio` keeps only a
+weak reference to a task, and three `create_task(...)` calls dropped theirs —
+including the boot cookie refresh and every log delivery. `utils.helpers.spawn`
+holds the reference and logs a failure instead of losing it.
+
+**Importing the preview tool opened the API.** `vyron/tools/preview.py` set
+`MUSIC_API_OPEN=true` and `WEBAPP_ALLOW_ANON=true` at *import* time, so any
+process that mentioned the module ran keyless and anonymous. The defaults are
+now applied when the preview actually starts.
+
+**Smaller, but user-visible:** lyrics always said "no lyrics found" (the card
+read `lyrics.text`; the result carries `plain`/`synced`); the download card
+printed yt-dlp's own progress text into the markup unescaped, so a filename with
+`<` broke the card; a download at 0% drew a bar that read as a stall; headings
+were mixed-case (`Nᴏᴡ Sᴛʀᴇᴀᴍɪɴɢ`) beside every all-small-caps card; the picker
+numbered its winner *and* repeated it as row 1; `queue_card` reported "page 0/0";
+the settings card had no poster switch, no volume and printed the language code
+instead of its name; the player panel printed a `<table>` into the classic lane,
+which Telegram cannot parse; `/playforce` and `/forceplay` came back although
+they were deliberately removed, and `/playlist` answered with hand-built markup
+instead of a card.
+
+988 tests, plain and shuffled (`--randomly-seed=1,2,3`).
+
 ### 1.10.25 — 2026-10-25
 
 **A test that could only run in one module layout.** `tests/test_vplay.py`

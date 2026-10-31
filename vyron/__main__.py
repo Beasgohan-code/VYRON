@@ -21,6 +21,7 @@ from vyron.core.journal import attach, journal
 from vyron.runtime import runtime
 from vyron.ui import cards, rich
 from vyron.utils import health
+from vyron.utils.helpers import spawn
 
 logger = logging.getLogger("vyron")
 
@@ -410,7 +411,7 @@ async def _async_main() -> int:
     # COOKIES_URL host must never delay the bots coming online.
     from vyron.core import cookies as cookie_store
 
-    asyncio.create_task(cookie_store.refresh(settings), name="cookies:boot")
+    spawn(cookie_store.refresh(settings), name="cookies:boot")
 
     # A standby is not a spectator for ever: when the old process stops
     # answering, this one takes the call back and resumes 24/7 playback.

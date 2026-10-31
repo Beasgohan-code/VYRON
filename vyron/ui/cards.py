@@ -202,7 +202,7 @@ def start_card(
         ),
         B.row(
             B.btn(f"{E('tools')} All commands", data="v:help:main"),
-            B.btn(f"{E('users')} Add to group", url=f"https://t.me/{settings.bot_username}?startgroup=true"),
+            B.btn(f"{E('users')} Add to a group", url=f"https://t.me/{settings.bot_username}?startgroup=true"),
         ),
     )
 
@@ -249,7 +249,7 @@ def group_start_card(
         state_word = "paused" if live.get("paused") else "playing"
         queued = int(live.get("queue") or 0)
         body = (
-            B.soft_header("live", "Already Playing", "Music is active in this group")
+            B.soft_header("live", "Already Playing", "Music is already playing here")
             + B.context(
                 f"{B.pill(state_word, 'live')} <b>{track}</b>\n"
                 f"{B.pill(f'{queued} queued', 'ok') if queued else B.pill('nothing queued', 'warn')}"
@@ -383,7 +383,6 @@ _HELP: dict[str, tuple[str, list[tuple[str, str]]]] = {
         [
             ("/start", "open the home card"),
             ("/play <song|link>", "stream audio in the voice chat"),
-        ("/playforce", "play now — keep the queue"),,
             ("/vplay <song|link>", "stream the video instead"),
             ("/song <song|link>", "send the MP3 here"),
             ("/vsong <song|link>", "send the video file here"),
@@ -705,15 +704,26 @@ def player_panel(state: ChatState, track: Track | None = None) -> str:
     )
     header = B.soft_header("headphones", status_text, subtitle)
 
-    # Colourful status table
-    table = B.pretty_table([
-        ("Status", B.status_chip("PAUSED" if paused else "LIVE", "paused" if paused else "live")),
-        ("Progress", f"{fmt_duration(elapsed)}  /  {fmt_duration(total)}"),
-        ("Volume", f"{volume}%"),
-        ("Loop", loop_label),
-        ("Requested", asked),
-        ("Source", esc(truncate(source, 18))),
-    ])
+    # The facts of the track. The rich lane can draw a table; the classic lane
+    # cannot — Telegram's HTML parser has no <table>, so there it becomes one
+    # "◈ label: value" line per fact, which is the same shape as every other
+    # card in that lane. Printing a table anyway used to hand the parser a pile
+    # of unknown tags and a card that read "Status  ·  LIVE  ·  Progress  ·  …".
+    from vyron.ui import rich as _rich
+
+    facts = [
+        ("status", "status", B.status_chip("PAUSED" if paused else "LIVE", "paused" if paused else "live")),
+        ("clock", "progress", f"{fmt_duration(elapsed)}  /  {fmt_duration(total)}"),
+        ("volume", "volume", f"{volume}%"),
+        ("loop", "loop", esc(loop_label)),
+        ("users", "asked by", asked),
+        ("globe", "source", esc(truncate(source, 18))),
+    ]
+    table = (
+        B.fields(facts)
+        if not _rich.rich_enabled()
+        else B.pretty_table([(label, value) for _glyph, label, value in facts])
+    )
 
     progress = progress_block(state, track)
 
@@ -878,10 +888,41 @@ def started_card(track: Track, *, note: str = "", extra_actions: str = "") -> st
 
 
 
+def collection_queued_card(title: str, count: int, *, started: bool = False) -> str:
+    """A whole album or playlist, queued in one go.
+
+    `/play <album link>` used to answer with two lines of hand-built markup —
+    the one reply in the app that was not a card, and the only one that could
+    drift from what the queue actually held.
+    """
+    count = int(count or 0)
+    return (
+        B.soft_header("queue", "collection queued", esc(truncate(title or "this collection", 48)))
+        + B.fields(
+            [
+                ("queue", "tracks", f"<b>{count}</b> added"),
+                (
+                    "live",
+                    "playback",
+                    "started" if started else "starts when the queue is free",
+                ),
+            ]
+        )
+        + B.actions(
+            B.row(
+                B.btn(f"{E('queue')} Queue", data="v:queue", style="primary"),
+                B.btn(f"{E('close')} Close", data="v:close", style="danger"),
+            )
+        )
+        + B.soft_footer(BRAND, "album · playlist")
+    )
+
+
 def queue_card(state: ChatState, page: int = 0, per_page: int = 8) -> tuple[str, int]:
     """Premium queue card — clean, elegant, easy to scan."""
     if not getattr(state, "queue", None) and not getattr(state, "current", None):
-        return empty_queue_card(), 0
+        # page 1 of 1: a caller that says "page 0/0" is a caller that looks broken.
+        return empty_queue_card(), 1
 
     tracks = state.queue
     pages = max(1, (len(tracks) + per_page - 1) // per_page)
@@ -898,8 +939,11 @@ def queue_card(state: ChatState, page: int = 0, per_page: int = 8) -> tuple[str,
     now = ""
     if state.current:
         paused = getattr(state, "paused", False)
+        chip = B.status_chip(
+            "PAUSED" if paused else "LIVE", "paused" if paused else "live"
+        )
         now = B.note(
-            f"{B.status_chip("PAUSED" if paused else "LIVE", "paused" if paused else "live")}   "
+            f"{chip}   "
             f"<b>{esc(truncate(state.current.title, 40))}</b>  ·  "
             f"{fmt_duration(state.elapsed())} / {fmt_duration(state.current.duration)}"
         )
@@ -918,7 +962,7 @@ def queue_card(state: ChatState, page: int = 0, per_page: int = 8) -> tuple[str,
             border=1,
         )
     else:
-        body = B.note(f"{E("moon")}  Queue is empty. Add songs with <code>/play</code>.")
+        body = B.note(f"{E('moon')}  Queue is empty. Add songs with <code>/play</code>.")
 
     # Navigation
     nav = []
@@ -930,9 +974,9 @@ def queue_card(state: ChatState, page: int = 0, per_page: int = 8) -> tuple[str,
 
     actions = B.actions(
         B.row(
-            B.btn(f"{E("shuffle")} Shuffle", data="v:shuffle", style="success"),
-            B.btn(f"{E("now")} Now Playing", data="v:np"),
-            B.btn(f"{E("stop")} Clear", data="v:clearqueue", style="danger"),
+            B.btn(f"{E('shuffle')} Shuffle", data="v:shuffle", style="success"),
+            B.btn(f"{E('now')} Now Playing", data="v:np"),
+            B.btn(f"{E('stop')} Clear", data="v:clearqueue", style="danger"),
         ),
         B.row(*nav) if nav else "",
     )
@@ -940,8 +984,8 @@ def queue_card(state: ChatState, page: int = 0, per_page: int = 8) -> tuple[str,
     total_dur = fmt_duration(sum((t.duration or 0) for t in tracks))
     footer = B.soft_footer(
         total_dur,
-        f"{getattr(getattr(state, "loop", None), "label", "Off")} loop",
-        f"{getattr(state, "volume", 100)}%",
+        f"{getattr(getattr(state, 'loop', None), 'label', 'Off')} loop",
+        f"{getattr(state, 'volume', 100)}%",
         "autoplay on" if getattr(state, "autoplay", False) else "autoplay off",
     )
 
@@ -1023,8 +1067,10 @@ def search_card(
         f"<b>{esc(truncate(query, 36))}</b>  ·  {len(tracks)} results",
     )
 
+    # The winner is the answer, not row 1: marked, unnumbered, and repeated
+    # only as itself. Numbering it too made the list start at 2 for no reason.
     top_block = B.note(
-        f"{E('play')}  <b>{first + 1}. {esc(truncate(top.title, 46))}</b><br/>"
+        f"{E('play')}  <b><mark>{esc(truncate(top.title, 46))}</mark></b><br/>"
         f"<i>{_meta_line(top)}</i>"
     )
 
@@ -1093,20 +1139,35 @@ def download_card(
     fraction: float = 0.0,
 ) -> str:
     """Live download progress card."""
-    icon = E("song") if kind == "audio" else E("video")
     quality = "MP3 320" if kind == "audio" else "MP4 720p"
+    head = B.soft_header("download", f"download · {quality}", esc(truncate(track.title, 48)))
+    if not step and fraction <= 0:
+        # Nothing has moved yet: a 0% bar for a minute reads as a stall, so the
+        # card says what it is doing in words until the first byte lands.
+        return (
+            head
+            + B.note("fetching the best quality — one moment")
+            + B.soft_footer(BRAND, "do not close this chat")
+        )
     pct = max(0, min(100, int(fraction * 100)))
-    bar = "█" * (pct // 10) + "░" * (10 - pct // 10)
-    status = step or ("Downloading…" if fraction < 1 else "Ready")
+    filled = pct // 10
+    # Half-toned parallelograms, not "█": a progress bar drawn with solid blocks
+    # renders as one glowing smear on iOS and as a broken glyph in the classic
+    # lane. These read as a bar at any size.
+    bar = "▰" * filled + "▱" * (10 - filled)
+    # Progress text comes from yt-dlp, aria2 and the mirrors — never trust it
+    # into the markup: a stray "<" in a filename used to break the whole card.
+    status = esc(truncate(step, 80)) if step else ("downloading" if pct < 100 else "ready")
     return (
-        B.soft_header("download", f"Download · {quality}", esc(truncate(track.title, 44)))
-        + B.pretty_table([
-            ("Status", status),
-            ("Progress", f"<code>{bar}</code> {pct}%"),
-        ])
+        head
+        + B.fields(
+            [
+                ("download", "status", f"<b>{status}</b>"),
+                ("clock", "progress", f"<code>{bar}</code> <b>{pct}%</b>"),
+            ]
+        )
         + B.soft_footer(BRAND, "do not close this chat")
     )
-
 
 
 def favorites_card(items: list[dict]) -> str:
@@ -1184,37 +1245,61 @@ def _lang_name(code) -> str:
 
 
 def settings_card(cfg: dict, chat_title: str = "") -> str:
-    """Premium per-chat settings — one soft card for everything that matters."""
+    """Per-chat settings — the panel `/settings` and every toggle returns to.
+
+    Everything a chat can change is here, including the poster switch: it used
+    to live only in the classic keyboard, so the rich card showed a setting
+    nobody could reach from it.
+    """
     title = esc(truncate(chat_title or "this chat", 36))
     loop = str(cfg.get("loop") or cfg.get("loop_mode") or "off")
     autoplay = bool(cfg.get("autoplay", False))
-    volume = int(cfg.get("volume") or 100)
+    volume = int(cfg.get("volume") if cfg.get("volume") is not None else 100)
     always = bool(cfg.get("always_on") or cfg.get("247") or False)
     lang = str(cfg.get("language") or cfg.get("lang") or "en")
+    poster = bool(cfg.get("poster", True))
+    thumbnails = bool(cfg.get("thumbnail", False))
+    admins_only = bool(cfg.get("admins_only", False))
+    # The row said the code ("hi") — a chat that picked Hindi should read Hindi.
+    try:
+        from vyron.core import i18n
+
+        lang_label = i18n.name(lang)
+    except Exception:  # pragma: no cover - the catalogue always loads
+        lang_label = lang
+
+    def _state(flag: bool, yes: str = "on", no: str = "off") -> str:
+        return B.pill(yes, "ok") if flag else B.pill(no, "off")
+
     return (
-        B.soft_header("settings", "Settings", title)
-        + B.pretty_table([
-            ("Loop", f"<b>{esc(loop)}</b>"),
-            ("Autoplay", B.status_chip("ON" if autoplay else "OFF", "live" if autoplay else "paused")),
-            ("Volume", f"<b>{volume}%</b>"),
-            ("24/7", B.status_chip("ON" if always else "OFF", "live" if always else "paused")),
-            ("Language", f"<code>{esc(lang)}</code>"),
-        ])
+        B.soft_header("settings", "settings", title)
+        + B.fields(
+            [
+                ("loop", "loop", f"<b>{esc(loop.title())}</b>"),
+                ("play", "autoplay", _state(autoplay)),
+                ("volume", "volume", f"<b>{volume}%</b>"),
+                ("clock", "24/7", _state(always)),
+                ("globe", "language", f"<b>{esc(lang_label)}</b>"),
+                ("image", "poster", _state(poster)),
+                ("queue", "artwork", _state(thumbnails, "Custom", "Automatic")),
+                ("users", "requests", "admins only" if admins_only else "everyone"),
+            ]
+        )
         + B.actions(
             B.row(
-                B.btn(f"{E('loop')} Loop", data="v:loop"),
-                B.btn(f"{E('play')} Autoplay", data="v:autoplay"),
+                B.btn(f"{E('loop')} Loop", data="v:set:loop"),
+                B.btn(f"{E('play')} Autoplay", data="v:set:autoplay"),
                 B.btn(f"{E('volume')} Volume", data="v:volume"),
             ),
             B.row(
-                B.btn(f"{E('clock')} 24/7", data="v:247"),
+                B.btn(f"{E('clock')} 24/7", data="v:set:always"),
+                B.btn(f"{E('image')} Poster", data="v:set:poster"),
                 B.btn(f"{E('globe')} Language", data="v:lang"),
-                B.btn(f"{E('close')} Close", data="v:close", style="danger"),
             ),
+            B.row(B.btn(f"{E('close')} Close", data="v:close", style="danger")),
         )
         + B.soft_footer(BRAND, "per-chat")
     )
-
 
 
 def stats_card(
@@ -1319,28 +1404,67 @@ def stats_card(
 
 
 def lyrics_card(track: Track, lyrics: LyricsResult | None) -> str:
-    """Soft lyrics card — title + body or empty state."""
+    """Lyrics card — the synced lines when there are any, the plain text after.
+
+    It read ``lyrics.text`` / ``lyrics.lines``, which ``LyricsResult`` has never
+    had: every track got "No lyrics found" even when LRCLIB had just answered
+    with a full synced sheet.
+    """
     title = esc(truncate(getattr(track, "title", None) or "Unknown", 48))
-    if not lyrics or not (getattr(lyrics, "text", None) or getattr(lyrics, "lines", None)):
+    plain = str(getattr(lyrics, "plain", "") or "").strip()
+    synced = str(getattr(lyrics, "synced", "") or "").strip()
+    if not lyrics or not (plain or synced):
         return (
             B.soft_header("note", "Lyrics", title)
             + B.note("No lyrics found for this track.")
             + B.actions(B.row(B.btn(f"{E('close')} Close", data="v:close", style="danger")))
             + B.soft_footer(BRAND)
         )
-    body = getattr(lyrics, "text", None) or ""
-    if not body and getattr(lyrics, "lines", None):
-        body = "\n".join(
-            getattr(line, "text", str(line)) for line in (lyrics.lines or [])[:80]
-        )
-    body = esc(truncate(body, 3500))
-    return (
-        B.soft_header("note", "Lyrics", title)
-        + f"<blockquote>{body}</blockquote>"
-        + B.actions(B.row(B.btn(f"{E('close')} Close", data="v:close", style="danger")))
-        + B.soft_footer(BRAND, "synced when available")
-    )
 
+    byline = " · ".join(
+        part for part in (esc(truncate(str(getattr(lyrics, "artist", "") or ""), 32)),
+                          esc(truncate(str(getattr(lyrics, "album", "") or ""), 32))) if part
+    )
+    head = B.soft_header("note", "lyrics", title)
+    if byline:
+        head += B.note(f"<i>{byline}</i>")
+
+    synced_block = ""
+    if synced:
+        try:
+            from vyron.core.lyrics import parse_lrc
+        except Exception:  # pragma: no cover - the module is always importable
+            parse_lrc = None  # type: ignore[assignment]
+        parsed = parse_lrc(synced) if parse_lrc else []
+        # A preview, not the sheet: sixteen timestamped lines say "this is
+        # synced" without turning the card into a wall of text.
+        rows = [
+            (fmt_duration(line["time"]), esc(truncate(str(line["text"]), 60)))
+            for line in parsed[:16]
+        ]
+        synced_block = (
+            B.section_title("synced")
+            + B.table(["Time", "Line"], rows) if rows else ""
+        )
+
+    body = plain or synced
+    full = B.details(
+        f"{E('note')} Full lyrics",
+        f"<blockquote>{esc(truncate(body, 3200))}</blockquote>",
+        open=not synced_block,
+    )
+    return (
+        head
+        + synced_block
+        + full
+        + B.actions(
+            B.row(
+                B.btn(f"{E('note')} Lyrics", data="v:lyrics", style="primary"),
+                B.btn(f"{E('close')} Close", data="v:close", style="danger"),
+            )
+        )
+        + B.soft_footer(BRAND, "synced when the source has timings · LRCLIB")
+    )
 
 
 def music_api_card(
@@ -1534,8 +1658,12 @@ def api_key_card(
 
 
 def _key_action_rows(keys: list[dict], *, limit: int = 8) -> str:
-    """One revoke button per live key — deleting a credential should be a tap."""
-    live = [item for item in keys if item.get("active", True)][:limit]
+    """One revoke button per live key — deleting a credential should be a tap.
+
+    Only keys that can still authenticate get a button: offering to revoke an
+    expired or already-revoked key is a button that changes nothing.
+    """
+    live = [item for item in keys if _key_alive(item)][:limit]
     buttons = [
         B.btn(
             f"{E('cross')} {esc(truncate(str(item.get('label') or item.get('prefix') or 'key'), 14))}",
@@ -1547,6 +1675,89 @@ def _key_action_rows(keys: list[dict], *, limit: int = 8) -> str:
     if not buttons:
         return ""
     return B.grid(buttons, columns=2)
+
+
+#: What the bot actually needs in a group, in the order it needs it.
+#: ``(rights key, what an admin sees, why it matters)`` — the group card turns
+#: this into the checklist, so the card can never disagree with the probe.
+GROUP_NEEDS: tuple[tuple[str, str, str], ...] = (
+    ("voice", "manage voice chats", "so the assistant can join and speak"),
+    ("delete", "delete messages", "so a finished /play card can clean itself up"),
+    ("invite", "invite users", "so the assistant can be added without a link"),
+    ("pin", "pin messages", "so the now-playing poster can stay on top"),
+)
+
+
+def _scope_chips(scopes) -> str:
+    """`read · search · download` — a key's scopes, short enough for a table.
+
+    Monospace because they are literal identifiers the caller will match
+    against, not prose: the card is where a key's reach is discoverable.
+    """
+    items = [str(scope) for scope in (scopes or []) if str(scope).strip()]
+    if not items:
+        return "<code>read</code>"
+    return " · ".join(f"<code>{esc(scope)}</code>" for scope in items)
+
+
+def _key_alive(item: dict) -> bool:
+    """Can this key still authenticate? Active *and* not past its expiry."""
+    import time
+
+    if not item.get("active", True):
+        return False
+    expires = item.get("expires_at")
+    if not expires:
+        return True
+    try:
+        return float(expires) > time.time()
+    except (TypeError, ValueError):
+        return True
+
+
+def _expiry_state(item: dict) -> str:
+    """Where a key stands right now — revoked, expired, days left, or never.
+
+    `never` matters: a key minted without a lifespan is the one an owner will
+    forget about, and the card is the only place that says so out loud.
+    """
+    import time
+
+    if not item.get("active", True):
+        return f"{E('cross')} revoked"
+    expires = item.get("expires_at")
+    if not expires:
+        return "never"
+    try:
+        left = float(expires) - time.time()
+    except (TypeError, ValueError):
+        return "never"
+    if left <= 0:
+        return f"{E('cross')} expired"
+    days = int(left // 86400)
+    if days >= 1:
+        return f"{E('clock')} {days}d left"
+    hours = max(1, int(left // 3600))
+    return f"{E('clock')} {hours}h left"
+
+
+def _ago(stamp) -> str:
+    """`3m ago` · `2h ago` · `5d ago` · `never` — when a key was last used."""
+    import time
+
+    if not stamp:
+        return "never"
+    try:
+        gone = max(0.0, time.time() - float(stamp))
+    except (TypeError, ValueError):
+        return "never"
+    if gone < 60:
+        return "just now"
+    if gone < 3600:
+        return f"{int(gone // 60)}m ago"
+    if gone < 86400:
+        return f"{int(gone // 3600)}h ago"
+    return f"{int(gone // 86400)}d ago"
 
 
 def _revoked_grace() -> int:
@@ -1870,15 +2081,46 @@ def change_card(
 
 
 def working_card(
-    text: str,
+    title: str,
+    line: str = "",
     *,
-    headline: str = "working on it",
     glyph: str = "spark",
+    query: str = "",
+    step: str = "",
+    label: str = "looking for",
+    live: bool = False,
 ) -> str:
-    """In-progress card — soft, calm, no panic."""
+    """The card that fills the gap between a command and its answer.
+
+    Two shapes share it. The old one is a title and a sentence
+    (``working_card("doctor", "Running the checks — …")``); `/play` adds what it
+    is looking for and how far it has got, so a slow search says so on the card
+    instead of looking identical to a hang. ``live`` promises the card will be
+    edited underneath the reader, so only a card with a ticker may claim it.
+    """
+    # banner(), not soft_header(): a working card is a masthead plus a hairline
+    # in the rich lane, exactly like every other screen.
+    head = B.banner(title or "working on it", glyph=glyph)
+    if line:
+        # Not escaped: callers pass the markup themselves (and escape the
+        # titles they interpolate). It is one sentence, so it is not truncated
+        # either — a cut mid-<b> would break the card it is decorating.
+        head += B.note(line)
+    body = ""
+    if query or step:
+        rows: list[tuple[str, str, str]] = []
+        if query:
+            rows.append((glyph, label, f"<b>{esc(truncate(query, 60))}</b>"))
+        if step:
+            rows.append(("bolt", "stage", esc(truncate(step, 60))))
+        body = B.fields(rows)
+    elif not line:
+        # Nothing to say yet — say that, rather than show a bare masthead.
+        body = B.note("work in progress — nothing to report yet")
     return (
-        B.soft_header(glyph, headline.title() if headline else "Working", text)
-        + B.soft_footer(BRAND, "please wait")
+        head
+        + body
+        + B.soft_footer(f"{E('spark')} {BRAND}", "this card updates itself" if live else "please wait")
     )
 
 
@@ -1926,10 +2168,49 @@ def locked_card(text: str, *, headline: str = "not allowed") -> str:
 
 
 
+def queue_finished_card(
+    track: Track | None = None,
+    *,
+    played: int = 0,
+    left: bool = False,
+    radio: bool = False,
+) -> str:
+    """The card that ends a session — and offers what to do about it.
+
+    Without it, a finished queue left the last poster on screen saying
+    "streaming" forever: the assistant had already gone, and the only way back
+    was to remember a command. ``left`` is what the player actually did, so the
+    card cannot claim to have stayed when it did not.
+    """
+    title = esc(truncate(getattr(track, "title", "") or "", 46))
+    head = B.soft_header("stop", "session ended", "the queue ran out" if played <= 1 else f"{played} tracks played")
+    body = B.note(
+        f"<b>{title}</b> was the last one." if title else "There is nothing left in the queue."
+    )
+    if left:
+        body += B.note("The assistant left the voice chat — the group is quiet again.")
+    else:
+        body += B.note("The assistant is still in the voice chat, waiting for the next one.")
+    if radio:
+        body += B.note(f"{E('wave')} Radio was on — send <code>/play</code> and it keeps going by itself.")
+    return (
+        head
+        + body
+        + B.actions(
+            B.row(
+                B.btn(f"{E('replay')} Play again", data="v:replay", style="success"),
+                B.btn(f"{E('radio')} Radio", data="v:radio", style="primary"),
+            ),
+            B.row(B.btn(f"{E('close')} Close", data="v:close", style="danger")),
+        )
+        + B.soft_footer(BRAND, "queue empty")
+    )
+
+
 def empty_queue_card() -> str:
     return (
         B.soft_header("queue", "Queue Empty", "Nothing waiting")
-        + B.note("Send <code>/play song name</code> or a link to add something.")
+        + B.note("The queue is empty — send <code>/play song name</code> or a link to add something.")
         + B.actions(
             B.row(
                 B.btn(f"{E('play')} How to play", data="v:help:playback", style="success"),

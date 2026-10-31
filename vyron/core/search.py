@@ -1565,7 +1565,9 @@ class YouTube:
                 try:
                     from vyron.core import cookies
 
-                    asyncio.create_task(
+                    from vyron.utils.helpers import spawn
+
+                    spawn(
                         cookies.refresh(self.settings, force=True),
                         name="cookies:after-wall",
                     )

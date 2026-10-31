@@ -3,9 +3,11 @@
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 
+import asyncio
+import logging
 import re
 import time
-from typing import Iterable
+from typing import Awaitable, Iterable
 
 from pyrogram.enums import ChatMemberStatus, ChatType
 from pyrogram.errors import RPCError
@@ -14,6 +16,35 @@ from pyrogram.types import CallbackQuery, InlineKeyboardMarkup, Message, User
 from vyron.config import settings
 from vyron.core import acl
 from vyron.core.queue import Track
+
+logger = logging.getLogger(__name__)
+
+#: Fire-and-forget tasks, held for as long as they run. ``asyncio`` only keeps a
+#: weak reference to a task, so an un-referenced one can be collected *before it
+#: starts* — a cookie refresh or a log delivery silently never happening.
+_LIVE_TASKS: set[asyncio.Task] = set()
+
+
+def spawn(coro: Awaitable, *, name: str | None = None) -> asyncio.Task:
+    """``asyncio.create_task`` that cannot be collected mid-flight.
+
+    The returned task is kept alive until it finishes, and a failure is logged
+    instead of being reported as "Task exception was never retrieved".
+    """
+    task = asyncio.create_task(coro, name=name)
+    _LIVE_TASKS.add(task)
+
+    def _finished(done: asyncio.Task) -> None:
+        _LIVE_TASKS.discard(done)
+        if done.cancelled():
+            return
+        error = done.exception()
+        if error is not None:
+            logger.warning("background task %s failed: %s", done.get_name(), error)
+
+    task.add_done_callback(_finished)
+    return task
+
 
 _ADMIN_STATES = {
     ChatMemberStatus.ADMINISTRATOR,
@@ -334,6 +365,7 @@ __all__ = [
     "mention",
     "parse_seek",
     "reply_card",
+    "spawn",
     "track_from_message",
     "user_of",
 ]
