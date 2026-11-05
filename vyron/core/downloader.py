@@ -61,6 +61,58 @@ HEAD_START = 6.0
 #: AAC bitrate inside the generated MP4 — the video's sound, not its picture.
 VIDEO_AUDIO_KBPS = "256"
 
+# ── what "best audio" is allowed to mean ────────────────────────────────────
+#: Formats this app can actually *play back*: stereo, and not Dolby.
+#:
+#: Asking for the highest bitrate picks the E-AC-3 5.1 track YouTube attaches to
+#: some official music videos: 384k on paper, beat by nothing else in the list,
+#: and silence in every player we serve — tgcalls mixes it to nothing, a phone's
+#: `<audio>` refuses the codec, and Telegram's own player shows a waveform with
+#: no sound. That is the worst failure this module can produce: a full progress
+#: bar, a downloaded file, a card that says "playing", and no audio at all.
+#:
+#: ``ec-3``/``ac-3`` are the strings yt-dlp reports (not ``eac3``), and the
+#: channel cap catches surround shipped under any other name. The chain degrades
+#: rather than fails: a source that declares neither ``acodec`` nor
+#: ``audio_channels`` — every catalogue mirror — is dropped by the strict group
+#: and caught by the bare ``ba``, where the sort below still picks its 320k.
+DECODABLE = "[audio_channels<=2][acodec!^=ec-3][acodec!^=ac-3]"
+AUDIO_FORMAT = f"ba{DECODABLE}/ba[acodec!^=ec-3][acodec!^=ac-3]/ba/b"
+
+#: How the survivors are ranked. AAC leads and ``abr`` decides among AAC.
+#:
+#: The old selector asked for ``bestaudio[ext=m4a]``, which pinned every track
+#: to itag 140 (AAC-LC 128k) because an m4a always exists to match — the
+#: *format* became the ceiling instead of the account. Sorting ranks what is
+#: there, so the same line picks the best on offer and rises by itself the day
+#: the cookies belong to a Premium login (itag 141, AAC 256k).
+#:
+#: Reversing those two keys is what lets Opus through: on Premium, 141 (AAC
+#: 256k) and 774 (Opus 256k) sit within a fraction of a kbps of each other, so
+#: "loudest wins" picks whichever rounded up — and Opus in WebM needs iOS 17.4+,
+#: which is newer than the WKWebView this plays in. AAC first is deterministic.
+AUDIO_SORT = ["acodec:aac", "abr", "asr", "ext:m4a"]
+
+#: Failures a *later attempt* can clear on its own.
+#:
+#: "Sign in to confirm you're not a bot" reads like a cookie problem and is not:
+#: valid cookies hit it on the same video and the same argv, failing one run and
+#: succeeding the next. It is an IP-reputation throttle, so the client ladder is
+#: no help — waiting is. Same for 429s and the transient network blips.
+THROTTLE_HINTS = (
+    "sign in to confirm",
+    "not a bot",
+    "http error 429",
+    "too many requests",
+    "temporary failure in name resolution",
+    "connection reset",
+    "connection aborted",
+    "read timed out",
+    "unable to download webpage",
+)
+#: How long to sit still before asking a throttled IP again, and how many times.
+THROTTLE_BACKOFF = (2.0, 6.0)
+
 
 class DownloadError(RuntimeError):
     pass
@@ -427,6 +479,9 @@ class Downloader:
         last_error: Exception | None = None
 
         same_error = 0
+        #: How many times this download has sat out a throttle. Bounded, so an
+        #: IP youtube simply dislikes cannot turn one tap into a minute of wait.
+        waits = 0
         for name, extra in self._attempts():
             work.mkdir(parents=True, exist_ok=True)
             for leftover in work.glob("*"):
@@ -445,22 +500,36 @@ class Downloader:
             if video:
                 opts.update(
                     {
+                        # Picture still decides the format, but among equals the
+                        # better *soundtrack* wins: this branch merges to mp4,
+                        # and Opus inside an mp4 is the one pairing worse
+                        # supported than either of its halves. h264 before av1
+                        # for the same reason — a 2016 phone plays one of them.
                         "format": (
-                            f"bestvideo[height<={height}][ext=mp4]+bestaudio[ext=m4a]/"
-                            f"best[height<={height}][ext=mp4]/best[height<={height}]/best"
+                            f"bv*[height<={height}]+ba{DECODABLE}/"
+                            f"bv*[height<={height}]+ba/"
+                            f"b[height<={height}]/bv*+ba/b"
                         ),
+                        "format_sort": [
+                            f"res:{height}",
+                            "vcodec:h264",
+                            "acodec:aac",
+                            "abr",
+                            "ext:mp4:m4a",
+                        ],
                         "merge_output_format": "mp4",
                     }
                 )
             else:
                 opts.update(
                     {
-                        # AAC-in-m4a first: every player we serve (ntgcalls,
-                        # Telegram, the Mini App's <audio>) takes it, and it is
-                        # the format YouTube can hand over without a re-encode.
-                        "format": (
-                            "bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio/best"
-                        ),
+                        # Decode-safe and ranked, not pinned: see AUDIO_FORMAT
+                        # and AUDIO_SORT above. Every player we serve
+                        # (ntgcalls, Telegram, the Mini App's <audio>) takes
+                        # AAC-in-m4a, and it is the format YouTube hands over
+                        # without a re-encode.
+                        "format": AUDIO_FORMAT,
+                        "format_sort": AUDIO_SORT,
                         "postprocessors": (
                             [
                                 {
@@ -509,6 +578,28 @@ class Downloader:
                 logger.info("download via %s failed for %s: %s", name, track.id, exc)
                 self._note_wall(message)
                 if same_error >= 2:
+                    # Two identical sentences normally mean the *server* is the
+                    # problem, not the player client — another two attempts
+                    # only cost 32 more seconds before the same answer. The
+                    # exception is a throttle: that is precisely the failure a
+                    # different client cannot fix and a pause can, so wait once
+                    # (twice at most) and go round again.
+                    low = message.lower()
+                    if waits < len(THROTTLE_BACKOFF) and any(h in low for h in THROTTLE_HINTS):
+                        pause = THROTTLE_BACKOFF[waits]
+                        waits += 1
+                        logger.info(
+                            "download for %s was throttled — waiting %.0fs before trying again",
+                            track.id,
+                            pause,
+                        )
+                        if on_progress:
+                            on_progress(0.02, f"throttled by the source — retrying in {pause:.0f}s")
+                        # A worker thread: blocking it is what this function is
+                        # for, and the event loop serving the card stays free.
+                        time.sleep(pause)
+                        same_error = 0
+                        continue
                     logger.info(
                         "download for %s is deterministic, stopping the client ladder", track.id
                     )

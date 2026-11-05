@@ -7,6 +7,63 @@ Two version numbers move independently:
 
 ## Bot
 
+### 1.10.27 — 2026-11-05
+
+**The Mini App follows a voice chat live.** Until now the app described a room
+by asking for one document every five seconds. That is the wrong instrument for
+a player: a poll can only say where the room *was* when the request left, so the
+playhead arrived already a round trip stale and had to snap forward on every
+answer.
+
+`/ws/room?chat_id=…` is a socket per room (`vyron/web/live.py`). It carries
+three kinds of message, each with one job: `state` when something actually
+changed (track, queue, volume, loop, effects, who is listening), `sync` once a
+second while a track plays — a timestamped position, nothing more — and `event`
+when something happened, derived from the state diff so a bot command, a button
+and an app tap produce the same line. The client keeps the offset between its
+clock and the server's from the fastest `ping`/`pong` pair it has seen, advances
+the playhead itself in between, and corrects instead of jumping. One ticker per
+room is shared by every socket in it and stops shortly after the last one
+leaves.
+
+**A tap is a request, never an instruction.** The socket never trusts a client's
+idea of the room: a control runs against the player, and the room's own ticker
+re-broadcasts the result to everybody — including the person who tapped. A
+listener who is not the owner, an admin of that chat, or holding a token minted
+for it is told `denied` instead of being silently ignored.
+
+**Rooms are a player now, not a list.** Tapping a room in the app opens a screen
+built the way a phone expects: a bar that says where you are, artwork that is
+square for audio and 16:9 for video, a scrubbable playhead drawn from the live
+clock, transport (pause, skip, loop, volume, radio, effects), a deck that tabs
+between **Up next** and **who is listening**, and a quiet activity line. The
+header is measured with a `ResizeObserver` rather than assumed, so the stage is
+exactly the space left over on any phone; on a wide screen the deck moves beside
+the artwork. Seek is optimistic for the length of one round trip and then defers
+to the room. There is also an optional **listen here** mode that plays the same
+stream in the app and nudges itself back to the room's clock when it drifts more
+than a second and a half.
+
+**Downloads choose tracks that actually play.** The format selector now excludes
+E-AC-3/AC-3 surround audio (`DECODABLE`), which downloads cleanly and plays as
+*silence* in Telegram calls, `<audio>` and most webviews; audio is sorted AAC
+first, then bitrate, so an Opus/WebM stream cannot win a tie it only plays on
+iOS 17.4+. Video picks H.264/AAC inside the requested height with a sort list
+that prefers MP4. Both keep a decodable fallback chain, so a catalogue that
+declares no `acodec` degrades instead of failing.
+
+**"Sign in to confirm you're not a bot" is waited out, not retried.** That
+message is an IP throttle, not a broken extraction, so the ladder now backs off
+(2 s, then 6 s, at most twice) and says so on the progress line, instead of
+burning every client and failing.
+
+**A rebuild of the Mini App no longer deletes its own artwork.** `npm run build`
+empties `webapp/dist`, and the brand images only existed in the built output:
+every rebuild silently removed the avatar, the icons the manifest points at and
+the start/room art. They live in `frontend/public/brand` now, and the HTML uses
+`%BASE_URL%` so the URLs stay under `/app/static/` instead of being patched by
+hand.
+
 ### 1.10.26 — 2026-10-31
 
 **`cards.py` was a `SyntaxError`, so no card had ever been sent.** A stray `,,`
