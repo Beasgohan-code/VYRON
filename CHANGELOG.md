@@ -7,7 +7,7 @@ Two version numbers move independently:
 
 ## Bot
 
-### 1.10.27 — 2026-11-05
+### 1.10.28 — 2026-11-05
 
 **The Mini App follows a voice chat live.** Until now the app described a room
 by asking for one document every five seconds. That is the wrong instrument for
@@ -31,6 +31,20 @@ idea of the room: a control runs against the player, and the room's own ticker
 re-broadcasts the result to everybody — including the person who tapped. A
 listener who is not the owner, an admin of that chat, or holding a token minted
 for it is told `denied` instead of being silently ignored.
+
+**Lyrics are the room's, not the phone's.** A third deck tab shows the words,
+and the line that lights up is the one at the *room's* second — the same word
+highlighted on every screen in the call, because it is driven by the socket's
+clock rather than a local `<audio>` element. It follows the song only while
+nobody is reading (a manual scroll buys four seconds of peace), blank LRC lines
+draw as short bars instead of a wall of empty rows, tapping a line seeks the
+room for those allowed to, and a track with no words says so rather than
+spinning forever — which is exactly the bug the first test caught.
+
+**You land in the room you are already in.** Opening Rooms used to mean finding
+the row again in a grid; if this phone is attached to a chat, or the URL carries
+`#room=-100…` from a link pasted in the group, that room opens directly. It
+happens once per visit: closing it means the user meant it.
 
 **Rooms are a player now, not a list.** Tapping a room in the app opens a screen
 built the way a phone expects: a bar that says where you are, artwork that is

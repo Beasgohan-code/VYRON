@@ -3,6 +3,7 @@ import {
   AudioLines,
   CircleSlash,
   Loader2,
+  Mic2,
   Pause,
   Play,
   Radio,
@@ -20,6 +21,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Cover } from "../components/Cover";
+import { RoomLyrics } from "../components/RoomLyrics";
 import { Seek } from "../components/Seek";
 import { streamUrl } from "../lib/audio";
 import { useApp } from "../lib/store";
@@ -101,7 +103,7 @@ function RoomBody({
   toast: (message: string, tone?: "info" | "error" | "success") => void;
 }) {
   const [activity, setActivity] = useState<LiveEvent[]>([]);
-  const [deck, setDeck] = useState<"queue" | "people">("queue");
+  const [deck, setDeck] = useState<"queue" | "lyrics" | "people">("queue");
   const [pendingSeek, setPendingSeek] = useState<number | null>(null);
   const [listenAlong, setListenAlong] = useState(() => {
     try {
@@ -372,6 +374,15 @@ function RoomBody({
                 <button
                   type="button"
                   role="tab"
+                  aria-selected={deck === "lyrics"}
+                  className={deck === "lyrics" ? "on" : ""}
+                  onClick={() => setDeck("lyrics")}
+                >
+                  <Mic2 size={12} /> Lyrics
+                </button>
+                <button
+                  type="button"
+                  role="tab"
                   aria-selected={deck === "people"}
                   className={deck === "people" ? "on" : ""}
                   onClick={() => setDeck("people")}
@@ -393,6 +404,18 @@ function RoomBody({
                     appear here as soon as they are queued.
                   </p>
                 )
+              ) : deck === "lyrics" && track ? (
+                <RoomLyrics
+                  title={track.title}
+                  artist={track.uploader}
+                  duration={track.duration}
+                  position={position}
+                  playing={playing}
+                  onSeek={canControl ? (seconds) => {
+                    setPendingSeek(seconds);
+                    control("seek", Math.round(seconds));
+                  } : undefined}
+                />
               ) : (
                 <div className="lr-people">
                   <div className="lr-count">

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, ChevronRight, Radio, RefreshCw, Users } from "lucide-react";
 import { useApp } from "../lib/store";
 import { Cover } from "../components/Cover";
@@ -11,6 +11,32 @@ export function Rooms() {
   const [busy, setBusy] = useState<number | null>(null);
   /* Opening a room is how you get from "these exist" to "you are in one". */
   const [open, setOpen] = useState<RoomSummary | null>(null);
+  /* Auto-entry happens once per visit: if somebody closes the room they came
+     from, they meant it, and re-opening it under their thumb is a fight. */
+  const entered = useRef(false);
+
+  /**
+   * You are already somewhere — open *that* room.
+   *
+   * `/api/room` attaches the app to a chat the caller administers, and the
+   * state then says which chat this phone is driving. Landing on a grid and
+   * asking the user to find the row again is the step that made the old screen
+   * feel like a directory instead of a player. A `#room=-100…` hash (a link
+   * pasted into the group) does the same for a room they are only listening to.
+   */
+  useEffect(() => {
+    if (entered.current || open || rooms.length === 0) return;
+    const wanted = (() => {
+      const match = /room=(-?\d+)/.exec(window.location.hash);
+      if (match) return Number(match[1]);
+      return state?.chat?.id ?? null;
+    })();
+    if (wanted === null) return;
+    const room = rooms.find((entry) => entry.chat_id === wanted);
+    if (!room) return;
+    entered.current = true;
+    setOpen(room);
+  }, [open, rooms, state?.chat?.id]);
   const stage = useViewReveal<HTMLDivElement>("rooms", ".room-card");
   const live = rooms.filter((room) => room.playing && !room.paused).length;
 
