@@ -17,3 +17,9 @@ data_test/
 downloads/
 *.session
 journal.jsonl
+
+# Node / frontend — `webapp/dist` is committed on purpose (it is what the
+# server serves), but the build's own state is not.
+frontend/node_modules/
+frontend/tsconfig.tsbuildinfo
+frontend/*.tsbuildinfo

@@ -17,18 +17,18 @@
     <meta name="apple-mobile-web-app-title" content="VYRON" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <link rel="icon" type="image/png" href="/brand/avatar.png" />
-    <link rel="alternate icon" type="image/jpeg" href="/brand/avatar.jpg" />
-    <link rel="apple-touch-icon" href="/brand/avatar.png" />
+    <link rel="icon" type="image/png" href="%BASE_URL%brand/avatar.png" />
+    <link rel="alternate icon" type="image/jpeg" href="%BASE_URL%brand/avatar.jpg" />
+    <link rel="apple-touch-icon" href="%BASE_URL%brand/avatar.png" />
     <meta property="og:type" content="website" />
     <meta property="og:title" content="VYRON — music beyond limits" />
     <meta property="og:description" content="A Telegram voice-chat music bot with a Spotify-grade Mini App." />
-    <meta property="og:image" content="/brand/og.jpg" />
+    <meta property="og:image" content="%BASE_URL%brand/og.jpg" />
     <meta name="twitter:card" content="summary_large_image" />
 
     <!-- Fonts are self-hosted (see src/main.tsx): no third-party stylesheet
          between opening the app and hearing music. -->
-    <link rel="preload" as="image" href="/brand/boot.jpg" fetchpriority="high" />
+    <link rel="preload" as="image" href="%BASE_URL%brand/boot.jpg" fetchpriority="high" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
 
     <style>
@@ -48,7 +48,7 @@
       }
       .boot::before {
         content: ""; position: absolute; inset: -10%;
-        background: url("/brand/boot.jpg") center / cover no-repeat;
+        background: url("%BASE_URL%brand/boot.jpg") center / cover no-repeat;
         opacity: 0.55; transform: scale(1.04);
         animation: boot-drift 9s ease-in-out infinite alternate;
       }
@@ -102,7 +102,7 @@
     <div id="root">
       <div class="boot" aria-hidden="true">
         <div class="boot-inner">
-          <span class="boot-mark"><img src="/brand/avatar.jpg" alt="" /></span>
+          <span class="boot-mark"><img src="%BASE_URL%brand/avatar.jpg" alt="" /></span>
           <span class="boot-word">VYRON</span>
           <span class="boot-tag">music beyond limits</span>
           <span class="boot-bar"><span></span></span>

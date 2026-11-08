@@ -1684,9 +1684,12 @@ def register(app: web.Application) -> None:
     app.router.add_post("/api/logs", logs_action)
     app.router.add_post("/api/client-error", client_error)
     audio.register(app)
-    from vyron.web import artwork
+    from vyron.web import artwork, live
 
     artwork.register(app)
+    # The live channel: one socket per room, the clock pushed once a second so
+    # the app can draw a playhead instead of snapping one every poll.
+    live.register(app)
     logger.info("web app mounted from %s", WEB_DIR)
 
 
